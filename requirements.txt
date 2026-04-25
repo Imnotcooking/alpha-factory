@@ -1,0 +1,10 @@
+streamlit
+polars
+pandas
+yfinance
+torch
+stable-baselines3
+ib_insync
+nest_asyncio
+python-dotenv
+plotly

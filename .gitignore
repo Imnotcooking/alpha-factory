@@ -1,0 +1,25 @@
+# ==========================================
+# 🛑 THE ALPHA FACTORY GIT SHIELD
+# ==========================================
+
+# 1. Environment & Secrets (NEVER UPLOAD)
+.env
+venv/
+__pycache__/
+.DS_Store
+
+# 2. Databases (Never overwrite production with local testing data)
+*.db
+*.sqlite3
+portfolio_memory.db
+research_memory.db
+
+# 3. The Data Lake (Too heavy for Git, keep local)
+data/
+offline_quant_lab/data/
+*.parquet
+*.csv
+
+# 4. PyTorch Model Checkpoints (Only upload the final, compressed .zip or .pt)
+# Uncomment the line below if you want to ignore all models
+# models/*.pt
