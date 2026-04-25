@@ -22,4 +22,4 @@ offline_quant_lab/data/
 
 # 4. PyTorch Model Checkpoints (Only upload the final, compressed .zip or .pt)
 # Uncomment the line below if you want to ignore all models
-# models/*.pt
+# models/*.p
