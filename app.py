@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import plotly.graph_objects as go
+import sqlite3
+import os
 
 # ==========================================
 # PAGE CONFIGURATION
@@ -18,15 +20,57 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# MOCK DATA INJECTION (Connect to DB later)
+# LIVE DATA INJECTION (The Real-Time Hook)
 # ==========================================
-# Tomorrow, you will hook these variables directly to your portfolio_memory.db
-current_regime = "Volatility Shock (Archetype 2)"
-regime_color = "error" # Options: 'success', 'warning', 'error', 'info'
-total_nav = 10452.30
-daily_pnl = -12.40
-active_agent = "Mean-Reversion Desk"
-target_beta = 0.4
+DB_PATH = "portfolio_memory.db"
+
+def fetch_live_portfolio_state():
+    # 1. The Fail-Safe (Before the bell rings)
+    default_state = {
+        "current_regime": "Awaiting Market Open...",
+        "regime_color": "info",
+        "total_nav": 0.00,
+        "daily_pnl": 0.00,
+        "active_agent": "Standby",
+        "target_beta": 0.0
+    }
+    
+    if not os.path.exists(DB_PATH):
+        return default_state
+        
+    try:
+        # 2. Connect to the Live Trading Ledger
+        conn = sqlite3.connect(DB_PATH)
+        
+        # Pull the absolute latest row of data written by the Cron Job
+        query = """
+            SELECT current_regime, regime_color, total_nav, daily_pnl, active_agent, target_beta 
+            FROM daily_state 
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        """
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        # 3. Inject the real money into the dashboard
+        if not df.empty:
+            return df.iloc[0].to_dict()
+        return default_state
+        
+    except Exception as e:
+        # If the table is still building, do not crash the UI
+        return default_state
+
+# Execute the hook
+live_state = fetch_live_portfolio_state()
+
+# Map the database values to the UI variables
+current_regime = live_state["current_regime"]
+regime_color = live_state["regime_color"]
+total_nav = float(live_state["total_nav"])
+daily_pnl = float(live_state["daily_pnl"])
+active_agent = live_state["active_agent"]
+target_beta = float(live_state["target_beta"])
 
 # ==========================================
 # 1. DYNAMIC REGIME BANNER
