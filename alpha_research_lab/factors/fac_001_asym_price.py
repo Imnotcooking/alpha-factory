@@ -8,7 +8,7 @@ FACTOR_ID = "fac_001_asym_price"
 FACTOR_NAME = "Asymmetric Price Locator"
 CATEGORY = "Momentum"
 COMPLEXITY = 3  # Low complexity, just simple arithmetic
-
+# ECONOMIC RATIONALE: ... 
 # ==========================================
 # THE MATH ENGINE
 # ==========================================

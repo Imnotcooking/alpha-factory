@@ -1,49 +1,96 @@
-import yfinance as yf
-import polars as pl
 import os
+import requests
+import polars as pl
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dotenv import load_dotenv
 
-print("Starting Institutional Data Ingestion...")
+print("Starting Institutional Data Ingestion (FMP Premium Stable Engine)...")
 
-# 1. Define the Universe
-# We start with highly liquid macro proxies and mega-caps to build our State Space.
-# Once you verify this works, you can expand this list to 500 stocks.
-universe = [
-    "SPY", "QQQ", "IWM", "TLT", "GLD", # Macro ETFs
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", # Mega-cap Tech
-    "JPM", "XOM", "UNH", "JNJ", "V" # Diversified Sectors
+# 1. LOAD API KEY
+load_dotenv()
+FMP_API_KEY = os.getenv("FMP_API_KEY")
+if not FMP_API_KEY: 
+    raise ValueError("❌ FMP_API_KEY is missing in your local .env file!")
+
+DATA_DIR = "offline_quant_lab/data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# 2. DEFINE UNIVERSES
+# Top 50 S&P 500 components for ultra-liquid Institutional Macro testing
+SP500_TICKERS = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK-B", "TSLA", "LLY", "AVGO",
+    "JPM", "UNH", "V", "XOM", "MA", "JNJ", "PG", "HD", "COST", "MRK",
+    "ABBV", "CRM", "CVX", "NFLX", "AMD", "PEP", "KO", "ADBE", "WMT", "TMO",
+    "ACN", "MCD", "DIS", "CSCO", "ABT", "INTC", "QCOM", "INTU", "VZ", "CMCSA",
+    "IBM", "PFE", "NOW", "AMAT", "TXN", "GE", "ISRG", "BA", "SPY", "QQQ"
 ]
 
-# 2. Fetch Data
-print(f"Downloading 20 years of data for {len(universe)} assets...")
-# We use auto_adjust=True to adjust for stock splits and dividends automatically
-raw_data = yf.download(tickers=universe, period="20y", interval="1d", auto_adjust=True, progress=True)
+# Note: FMP usually expects crypto without hyphens (e.g., BTCUSD)
+MEME_CRYPTO_TICKERS = ["BTCUSD", "ETHUSD", "DOGEUSD", "CIFR", "HIMS", "RKLB", "OKLO", "MSTR", "CRCL"]
 
-# 3. Clean and Transform (Pandas -> Polars)
-print("Transforming matrix to Polars columnar format...")
+def fetch_single_ticker(ticker: str) -> pl.DataFrame:
+    """Pulls historical data using FMP's Premium Stable endpoint."""
+    # The new August 2025+ FMP Stable Endpoint
+    url = f"https://financialmodelingprep.com/stable/historical-price-eod/full?symbol={ticker}&apikey={FMP_API_KEY}"
+    
+    try:
+        response = requests.get(url, timeout=15)
+        
+        # If FMP blocks us, print the exact reason
+        if response.status_code != 200:
+            print(f"⚠️ FMP Error {response.status_code} for {ticker}: {response.text}")
+            return None
+            
+        data = response.json()
+        
+        # FMP Stable API returns a direct list of dicts OR a dict containing 'historical'
+        records = []
+        if isinstance(data, list):
+            records = data
+        elif isinstance(data, dict) and 'historical' in data:
+            records = data['historical']
+        elif isinstance(data, dict) and "Error Message" in data:
+            print(f"⚠️ FMP Rejected {ticker}: {data['Error Message']}")
+            return None
+            
+        if len(records) > 0:
+            df = pl.DataFrame(records)
+            
+            # Select strictly capitalized columns to prevent Agent crashes
+            df = df.select([
+                pl.col("date").alias("Date"),
+                pl.col("close").alias("Close"),
+                pl.col("volume").alias("Volume")
+            ])
+            # Add Ticker column
+            return df.with_columns(pl.lit(ticker).alias("Ticker"))
+            
+    except Exception as e:
+        print(f"⚠️ Failed to fetch {ticker}: {e}")
+        
+    return None
 
-# yfinance returns a multi-index dataframe if multiple tickers are requested. 
-# We isolate the 'Close' and 'Volume' prices, stack them, and reset the index.
-closes = raw_data['Close'].stack().reset_index()
-closes.columns = ['Date', 'Ticker', 'Close']
+def build_lake(tickers: list, filename: str):
+    print(f"🌊 Downloading {len(tickers)} assets for {filename}...")
+    all_data = []
+    
+    # Multi-threading to hit FMP Premium rate limits safely
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_ticker = {executor.submit(fetch_single_ticker, t): t for t in tickers}
+        for future in as_completed(future_to_ticker):
+            df = future.result()
+            if df is not None:
+                all_data.append(df)
+                
+    if all_data:
+        master_df = pl.concat(all_data)
+        master_df = master_df.sort(["Ticker", "Date"])
+        file_path = os.path.join(DATA_DIR, filename)
+        master_df.write_parquet(file_path)
+        print(f"✅ Success! Saved {filename}. Total rows: {master_df.height:,}")
+    else:
+        print(f"❌ Critical Failure: No data downloaded for {filename}")
 
-volumes = raw_data['Volume'].stack().reset_index()
-volumes.columns = ['Date', 'Ticker', 'Volume']
-
-# Merge them together using Pandas before converting to Polars
-df_merged = closes.merge(volumes, on=['Date', 'Ticker'])
-
-# Convert to Polars DataFrame for high-performance saving
-df_pl = pl.from_pandas(df_merged)
-
-# Sort the data chronologically and by ticker
-df_pl = df_pl.sort(["Ticker", "Date"])
-
-# 4. Save to Parquet
-output_dir = "data"
-os.makedirs(output_dir, exist_ok=True)
-file_path = os.path.join(output_dir, "master_price_history.parquet")
-
-print(f"Compressing and saving to {file_path}...")
-df_pl.write_parquet(file_path)
-
-print(f"✅ Success! Data Lake built. Total rows: {df_pl.height:,}")
+if __name__ == "__main__":
+    build_lake(SP500_TICKERS, "institutional_macro.parquet")
+    build_lake(MEME_CRYPTO_TICKERS, "crypto_meme.parquet")
