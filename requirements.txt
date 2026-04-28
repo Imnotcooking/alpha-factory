@@ -1,11 +1,13 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-streamlit
-polars
 pandas
+numpy
+polars
 yfinance
-torch
-stable-baselines3
-ib_insync
-nest_asyncio
+requests
 python-dotenv
+ib_insync
+stable-baselines3[extra]
+torch
+streamlit
 plotly
+scipy
