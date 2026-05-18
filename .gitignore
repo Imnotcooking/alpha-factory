@@ -7,6 +7,7 @@
 venv/
 __pycache__/
 .DS_Store
+*.pem
 
 # 2. Databases (Never overwrite production with local testing data)
 *.db
@@ -23,3 +24,4 @@ offline_quant_lab/data/
 # 4. PyTorch Model Checkpoints (Only upload the final, compressed .zip or .pt)
 # Uncomment the line below if you want to ignore all models
 # models/*.p
+
