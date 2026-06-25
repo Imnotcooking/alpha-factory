@@ -108,6 +108,7 @@ class OQPSettings:
     ibkr_live_client_id: int
     ibkr_live_monitor_enabled: bool
     allow_paper_trading: bool
+    allow_paper_order_submit: bool
     paper_max_order_notional: float | None
     paper_max_daily_notional: float | None
     paper_allowed_symbols: tuple[str, ...]
@@ -195,6 +196,9 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
             "IBKR_LIVE_MONITOR_ENABLED", env_values, False
         ),
         allow_paper_trading=_setting_bool("ALLOW_PAPER_TRADING", env_values, False),
+        allow_paper_order_submit=_setting_bool(
+            "ALLOW_PAPER_ORDER_SUBMIT", env_values, False
+        ),
         paper_max_order_notional=_setting_float_default(
             "PAPER_MAX_ORDER_NOTIONAL",
             env_values,

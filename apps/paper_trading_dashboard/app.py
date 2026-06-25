@@ -59,6 +59,7 @@ from oqp.paper_trading import (  # noqa: E402
     load_latest_paper_positions,
     paper_order_notional_today,
     review_paper_execution_proposal,
+    review_paper_order_submission,
     set_paper_order_ticket_approval,
 )
 from apps.broker_monitor import (  # noqa: E402
@@ -768,6 +769,57 @@ else:
                 st.caption("Broker submit enabled: false")
                 st.rerun()
 
+approved_ticket_df = (
+    paper_orders_df[
+        paper_orders_df["status"].eq(PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value)
+    ]
+    if not paper_orders_df.empty and "status" in paper_orders_df.columns
+    else pd.DataFrame()
+)
+st.markdown("#### Submission Preflight")
+if approved_ticket_df.empty:
+    st.info("No approved paper ticket is waiting for submission preflight.")
+else:
+    approved_ticket_lookup = {
+        (
+            f"{row['order_id']} | {row['symbol']} {row['side']} "
+            f"{format_metric(coerce_float(row['quantity']), digits=4)} "
+            f"{row['order_type']}"
+        ): row
+        for row in approved_ticket_df.to_dict("records")
+    }
+    selected_submit_label = st.selectbox(
+        "Submission preflight ticket",
+        options=list(approved_ticket_lookup),
+        index=0,
+    )
+    submission_preflight = review_paper_order_submission(
+        approved_ticket_lookup[selected_submit_label],
+        settings=settings,
+        broker_config=broker_config,
+    )
+    submit_cols = st.columns(3)
+    submit_cols[0].metric("Decision", submission_preflight.decision.value)
+    submit_cols[1].metric("Ticket", submission_preflight.order_id)
+    submit_cols[2].metric("Broker Submit", "disabled")
+    st.caption(submission_preflight.message)
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Check": check.name,
+                    "Status": "pass" if check.passed else "blocked",
+                    "Severity": check.severity,
+                    "Detail": check.detail,
+                }
+                for check in submission_preflight.checks
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption("This preflight does not submit IBKR orders.")
+
 ledger_left, ledger_right = st.columns([1.2, 1])
 with ledger_left:
     st.markdown("#### Latest Ledger Positions")
@@ -840,6 +892,10 @@ with right:
             {
                 "Setting": "Paper trading allowed",
                 "Value": yes_no(settings.allow_paper_trading),
+            },
+            {
+                "Setting": "Paper order submit allowed",
+                "Value": yes_no(settings.allow_paper_order_submit),
             },
             {
                 "Setting": "Paper max order notional",

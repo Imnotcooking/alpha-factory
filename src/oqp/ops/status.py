@@ -483,6 +483,15 @@ def safety_status_items(settings: OQPSettings) -> list[OpsStatusItem]:
         ),
         OpsStatusItem(
             "Safety",
+            "Paper order submit disabled",
+            "pass" if not settings.allow_paper_order_submit else "warn",
+            (
+                "ALLOW_PAPER_ORDER_SUBMIT="
+                f"{str(settings.allow_paper_order_submit).lower()}"
+            ),
+        ),
+        OpsStatusItem(
+            "Safety",
             "Live monitor gate",
             "pass" if settings.ibkr_live_monitor_enabled else "warn",
             f"IBKR_LIVE_MONITOR_ENABLED={str(settings.ibkr_live_monitor_enabled).lower()}",
