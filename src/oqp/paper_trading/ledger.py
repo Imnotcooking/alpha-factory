@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import pandas as pd
 
+from oqp.accounts import account_snapshot_from_ibkr_readonly, write_account_snapshot
 from oqp.brokers import IBKRReadOnlyPortfolioSnapshot
 
 
@@ -126,6 +127,8 @@ class PaperSnapshotWriteResult:
     net_liquidation: float
     cash: float
     daily_pnl: float
+    account_ledger_path: Path | None = None
+    account_snapshot_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -137,6 +140,10 @@ class PaperSnapshotWriteResult:
             "net_liquidation": self.net_liquidation,
             "cash": self.cash,
             "daily_pnl": self.daily_pnl,
+            "account_ledger_path": None
+            if self.account_ledger_path is None
+            else str(self.account_ledger_path),
+            "account_snapshot_id": self.account_snapshot_id,
         }
 
 
@@ -185,6 +192,7 @@ def write_paper_snapshot(
     snapshot_date: str | date | datetime | None = None,
     broker_label: str = "IBKR Paper",
     profile: str = "ibkr_paper_readonly",
+    account_ledger_path: str | Path | None = None,
 ) -> PaperSnapshotWriteResult:
     """Persist one read-only IBKR paper snapshot and daily NAV observation."""
 
@@ -201,6 +209,8 @@ def write_paper_snapshot(
     cash = _float(metrics.get("Available_Cash_USD"))
     margin_buffer = _float(metrics.get("Margin_Buffer_USD"))
     positions = [_position_row(row) for row in snapshot.position_rows]
+    account_snapshot_id = None
+    account_ledger_written_path = None
 
     with closing(sqlite3.connect(path)) as conn:
         daily_pnl = _daily_pnl_from_previous_nav(conn, date_value, net_liquidation)
@@ -308,6 +318,22 @@ def write_paper_snapshot(
             )
         conn.commit()
 
+    if account_ledger_path is not None:
+        account_write = write_account_snapshot(
+            account_ledger_path,
+            account_snapshot_from_ibkr_readonly(
+                snapshot,
+                environment="paper",
+                profile=profile,
+                broker="ibkr",
+                broker_label=broker_label,
+                snapshot_date=date_value,
+            ),
+            snapshot_date=date_value,
+        )
+        account_snapshot_id = account_write.snapshot_id
+        account_ledger_written_path = account_write.db_path
+
     return PaperSnapshotWriteResult(
         db_path=path,
         snapshot_id=snapshot_id,
@@ -317,6 +343,8 @@ def write_paper_snapshot(
         net_liquidation=net_liquidation,
         cash=cash,
         daily_pnl=daily_pnl,
+        account_ledger_path=account_ledger_written_path,
+        account_snapshot_id=account_snapshot_id,
     )
 
 

@@ -21,6 +21,7 @@ from oqp.portfolio import (  # noqa: E402
     default_portfolio_ledger_path,
     run_portfolio_ingestion,
 )
+from oqp.accounts import default_account_ledger_path  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +57,11 @@ def parse_args() -> argparse.Namespace:
         help="Directory for optional unified portfolio CSV backups.",
     )
     parser.add_argument(
+        "--account-ledger-path",
+        default=str(default_account_ledger_path()),
+        help="SQLite account ledger path for unified live/paper account snapshots.",
+    )
+    parser.add_argument(
         "--no-legacy-raw-fallback",
         action="store_true",
         help="Do not read legacy Middle_Office/Portfolio/raw_data when raw-dir is empty.",
@@ -76,6 +82,7 @@ def main() -> int:
         raw_dir=args.raw_dir,
         state_dir=args.state_dir,
         backup_csv_dir=args.backup_csv_dir,
+        account_ledger_path=args.account_ledger_path,
         include_legacy_raw_fallback=not args.no_legacy_raw_fallback,
     )
     payload = result.to_dict()

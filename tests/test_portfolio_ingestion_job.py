@@ -13,6 +13,7 @@ from oqp.portfolio import (
     run_portfolio_ingestion,
     save_ibkr_metrics,
 )
+from oqp.accounts import load_latest_account_nav
 
 
 class PortfolioIngestionJobTests(unittest.TestCase):
@@ -56,12 +57,16 @@ class PortfolioIngestionJobTests(unittest.TestCase):
             db_path = tmp_path / "portfolio.db"
             state_dir = tmp_path / "state"
             backup_dir = tmp_path / "exports"
+            account_db_path = tmp_path / "accounts.db"
 
             with patch(
                 "oqp.portfolio.ingestion_job.fetch_live_ibkr_portfolio",
                 return_value=(
                     ibkr_positions,
-                    {"Available_Cash_USD": 5_000.0},
+                    {
+                        "Total_NAV_USD": 42_000.0,
+                        "Available_Cash_USD": 5_000.0,
+                    },
                 ),
             ):
                 result = run_portfolio_ingestion(
@@ -70,9 +75,15 @@ class PortfolioIngestionJobTests(unittest.TestCase):
                     raw_dir=tmp_path / "imports",
                     state_dir=state_dir,
                     backup_csv_dir=backup_dir,
+                    account_ledger_path=account_db_path,
                     include_legacy_raw_fallback=False,
                 )
             latest = load_latest_live_positions(db_path)
+            latest_account_nav = load_latest_account_nav(
+                account_db_path,
+                environment="live",
+                profile="ibkr_live_readonly",
+            )
             metrics_exists = bool(result.ibkr_metrics_path and result.ibkr_metrics_path.exists())
             backup_exists = bool(result.backup_csv_path and result.backup_csv_path.exists())
 
@@ -81,6 +92,8 @@ class PortfolioIngestionJobTests(unittest.TestCase):
         self.assertEqual(result.ibkr_position_rows, 1)
         self.assertTrue(metrics_exists)
         self.assertTrue(backup_exists)
+        self.assertIsNotNone(result.account_snapshot_id)
+        self.assertEqual(float(latest_account_nav.iloc[0]["net_liquidation"]), 42_000.0)
         self.assertEqual(latest.iloc[0]["ticker"], "AAPL")
 
 

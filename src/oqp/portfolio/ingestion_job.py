@@ -15,6 +15,10 @@ from typing import Any
 
 import pandas as pd
 
+from oqp.accounts import (
+    account_snapshot_from_live_positions_frame,
+    write_account_snapshot,
+)
 from oqp.brokers import (
     fetch_ibkr_readonly_portfolio_snapshot,
     get_broker_adapter,
@@ -53,6 +57,8 @@ class PortfolioIngestionResult:
     ibkr_metrics_path: Path | None = None
     banked_profits_path: Path | None = None
     backup_csv_path: Path | None = None
+    account_ledger_path: Path | None = None
+    account_snapshot_id: str | None = None
     message: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -73,6 +79,10 @@ class PortfolioIngestionResult:
             if self.banked_profits_path is None
             else str(self.banked_profits_path),
             "backup_csv_path": None if self.backup_csv_path is None else str(self.backup_csv_path),
+            "account_ledger_path": None
+            if self.account_ledger_path is None
+            else str(self.account_ledger_path),
+            "account_snapshot_id": self.account_snapshot_id,
             "message": self.message,
         }
 
@@ -156,6 +166,7 @@ def run_portfolio_ingestion(
     raw_dir: str | Path | None = None,
     state_dir: str | Path | None = None,
     backup_csv_dir: str | Path | None = None,
+    account_ledger_path: str | Path | None = None,
     include_legacy_raw_fallback: bool = True,
 ) -> PortfolioIngestionResult:
     date_value = _date_text(snapshot_date or date.today())
@@ -167,6 +178,7 @@ def run_portfolio_ingestion(
         if backup_csv_dir is not None
         else DEFAULT_PORTFOLIO_EXPORTS_DIR
     )
+    account_ledger = Path(account_ledger_path) if account_ledger_path is not None else None
 
     import_dir.mkdir(parents=True, exist_ok=True)
     state_path.mkdir(parents=True, exist_ok=True)
@@ -187,6 +199,24 @@ def run_portfolio_ingestion(
         ibkr_metrics,
         metrics_path=state_path / "ibkr_metrics.json",
     )
+    account_snapshot_id = None
+    account_ledger_written_path = None
+    if account_ledger is not None and (not df_ibkr.empty or ibkr_metrics):
+        account_write = write_account_snapshot(
+            account_ledger,
+            account_snapshot_from_live_positions_frame(
+                df_ibkr,
+                metrics=ibkr_metrics,
+                environment="live",
+                profile="ibkr_live_readonly",
+                broker="ibkr",
+                broker_label="IBKR Live",
+                snapshot_date=date_value,
+            ),
+            snapshot_date=date_value,
+        )
+        account_snapshot_id = account_write.snapshot_id
+        account_ledger_written_path = account_write.db_path
     if not df_ibkr.empty:
         frames.append(df_ibkr)
 
@@ -227,6 +257,8 @@ def run_portfolio_ingestion(
             trading212_position_rows=0,
             ibkr_metrics_path=ibkr_metrics_path,
             banked_profits_path=banked_profits_path,
+            account_ledger_path=account_ledger_written_path,
+            account_snapshot_id=account_snapshot_id,
             message="No broker position rows were available to write.",
         )
 
@@ -253,6 +285,8 @@ def run_portfolio_ingestion(
         ibkr_metrics_path=ibkr_metrics_path,
         banked_profits_path=banked_profits_path,
         backup_csv_path=backup_csv_path,
+        account_ledger_path=account_ledger_written_path,
+        account_snapshot_id=account_snapshot_id,
     )
 
 

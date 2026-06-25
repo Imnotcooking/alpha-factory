@@ -18,6 +18,7 @@ from oqp.paper_trading import (
     write_paper_execution_review,
     write_paper_snapshot,
 )
+from oqp.accounts import load_latest_account_nav
 
 
 def sample_snapshot(*, nav: float = 1_000_000.0) -> IBKRReadOnlyPortfolioSnapshot:
@@ -82,26 +83,37 @@ class PaperTradingLedgerTests(unittest.TestCase):
 
     def test_writes_snapshot_positions_and_daily_nav(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            db_path = Path(tmp) / "paper.db"
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "paper.db"
+            account_db_path = tmp_path / "accounts.db"
             first = write_paper_snapshot(
                 db_path,
                 sample_snapshot(nav=1_000_000),
                 snapshot_date="2026-06-24",
+                account_ledger_path=account_db_path,
             )
             second = write_paper_snapshot(
                 db_path,
                 sample_snapshot(nav=1_010_000),
                 snapshot_date="2026-06-25",
+                account_ledger_path=account_db_path,
             )
 
             latest_nav = load_latest_paper_nav(db_path)
             latest_positions = load_latest_paper_positions(db_path)
+            latest_account_nav = load_latest_account_nav(
+                account_db_path,
+                environment="paper",
+                profile="ibkr_paper_readonly",
+            )
 
         self.assertNotEqual(first.snapshot_id, second.snapshot_id)
         self.assertEqual(first.position_rows, 2)
+        self.assertIsNotNone(second.account_snapshot_id)
         self.assertEqual(second.daily_pnl, 10_000)
         self.assertEqual(latest_nav.iloc[0]["date"], "2026-06-25")
         self.assertEqual(float(latest_nav.iloc[0]["net_liquidation"]), 1_010_000)
+        self.assertEqual(float(latest_account_nav.iloc[0]["net_liquidation"]), 1_010_000)
         self.assertEqual(len(latest_positions), 2)
 
     def test_rejects_error_snapshot(self) -> None:

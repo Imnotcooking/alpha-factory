@@ -20,6 +20,7 @@ from oqp.brokers import (  # noqa: E402
     get_broker_adapter,
     get_broker_profile_config,
 )
+from oqp.accounts import default_account_ledger_path  # noqa: E402
 from oqp.config import load_settings  # noqa: E402
 from oqp.paper_trading import (  # noqa: E402
     default_paper_trading_ledger_path,
@@ -46,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Snapshot date to write into paper_nav, in YYYY-MM-DD format.",
     )
+    parser.add_argument(
+        "--account-ledger-path",
+        default=str(default_account_ledger_path()),
+        help="SQLite account ledger path for unified live/paper account snapshots.",
+    )
     return parser.parse_args()
 
 
@@ -65,6 +71,7 @@ def main() -> int:
         args.db_path,
         snapshot,
         snapshot_date=args.snapshot_date,
+        account_ledger_path=args.account_ledger_path,
     )
     print(json.dumps({"status": "updated", **result.to_dict()}, indent=2, sort_keys=True))
     return 0
