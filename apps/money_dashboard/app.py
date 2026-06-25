@@ -16,6 +16,15 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from oqp.accounts import (  # noqa: E402
+    account_asset_summary,
+    account_nav_drawdowns,
+    account_positions_display,
+    default_account_ledger_path,
+    load_account_nav_history,
+    load_latest_account_nav,
+    load_latest_account_positions,
+)
 from oqp.portfolio import (  # noqa: E402
     DEFAULT_BANKED_PROFITS_PATH,
     DEFAULT_IBKR_METRICS_PATH,
@@ -211,9 +220,20 @@ def display_positions(enriched: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def state_table(*, ibkr_metrics: dict[str, Any], manual_inputs: dict[str, Any]) -> pd.DataFrame:
+def state_table(
+    *,
+    account_ledger_path: Path,
+    live_account_nav: pd.DataFrame,
+    live_account_positions: pd.DataFrame,
+    ibkr_metrics: dict[str, Any],
+    manual_inputs: dict[str, Any],
+) -> pd.DataFrame:
     return pd.DataFrame(
         [
+            {
+                "Item": "Unified account ledger",
+                "Value": display_path(account_ledger_path),
+            },
             {
                 "Item": "Portfolio ledger",
                 "Value": display_path(default_portfolio_ledger_path()),
@@ -237,6 +257,14 @@ def state_table(*, ibkr_metrics: dict[str, Any], manual_inputs: dict[str, Any]) 
                 else "missing",
             },
             {
+                "Item": "Unified live NAV rows",
+                "Value": str(len(live_account_nav)),
+            },
+            {
+                "Item": "Unified live positions",
+                "Value": str(len(live_account_positions)),
+            },
+            {
                 "Item": "Manual input fields",
                 "Value": str(len(manual_inputs)),
             },
@@ -244,6 +272,15 @@ def state_table(*, ibkr_metrics: dict[str, Any], manual_inputs: dict[str, Any]) 
     )
 
 
+account_ledger_path = default_account_ledger_path()
+live_account_nav = load_latest_account_nav(account_ledger_path, environment="live")
+live_account_nav_history = account_nav_drawdowns(
+    load_account_nav_history(account_ledger_path, environment="live")
+)
+live_account_positions = load_latest_account_positions(
+    account_ledger_path,
+    environment="live",
+)
 ledger_path = default_portfolio_ledger_path()
 positions = load_latest_live_positions(ledger_path)
 enriched_positions = enrich_positions(positions)
@@ -261,26 +298,73 @@ portfolio_beta = None if latest_nav is None else as_float(latest_nav["portfolio_
 max_drawdown = None if nav_history.empty else as_float(nav_history["drawdown"].min())
 max_drawdown_pct = None if nav_history.empty else as_float(nav_history["drawdown_pct"].min()) * 100
 
-st.title("Money Dashboard")
-st.caption("Real portfolio command center backed by the shared runtime ledger.")
+latest_account_nav = None if live_account_nav.empty else live_account_nav.iloc[0]
+account_nav_value = (
+    None
+    if latest_account_nav is None
+    else as_float(latest_account_nav.get("net_liquidation"))
+)
+account_daily_pnl = (
+    None if latest_account_nav is None else as_float(latest_account_nav.get("daily_pnl"))
+)
+account_cash = None if latest_account_nav is None else as_float(latest_account_nav.get("cash"))
+account_position_count = (
+    None
+    if latest_account_nav is None
+    else int(as_float(latest_account_nav.get("position_count")))
+)
+account_snapshot_as_of = (
+    None if latest_account_nav is None else str(latest_account_nav.get("as_of") or "")
+)
 
-metric_cols = st.columns(5)
-metric_cols[0].metric("Latest NAV", money(latest_nav_value))
-metric_cols[1].metric("Daily P&L", signed_money(daily_pnl))
-metric_cols[2].metric("Cash", money(latest_cash))
-metric_cols[3].metric("Portfolio Beta", "missing" if portfolio_beta is None else f"{portfolio_beta:.4f}")
-metric_cols[4].metric("Snapshot Date", latest_date)
+dashboard_nav_value = account_nav_value if account_nav_value is not None else latest_nav_value
+dashboard_daily_pnl = account_daily_pnl if account_daily_pnl is not None else daily_pnl
+dashboard_cash = account_cash if account_cash is not None else latest_cash
+dashboard_position_count = (
+    account_position_count if account_position_count is not None else len(positions)
+)
+dashboard_snapshot = account_snapshot_as_of or latest_date
+dashboard_source = "unified account ledger" if latest_account_nav is not None else "portfolio ledger"
+
+if not live_account_nav_history.empty:
+    max_drawdown = as_float(live_account_nav_history["drawdown"].min())
+    max_drawdown_pct = as_float(live_account_nav_history["drawdown_pct"].min()) * 100
+
+st.title("Money Dashboard")
+st.caption("Real portfolio command center backed by the unified account ledger.")
+
+metric_cols = st.columns(6)
+metric_cols[0].metric("Latest NAV", money(dashboard_nav_value))
+metric_cols[1].metric("Daily P&L", signed_money(dashboard_daily_pnl))
+metric_cols[2].metric("Cash", money(dashboard_cash))
+metric_cols[3].metric("Positions", str(dashboard_position_count))
+metric_cols[4].metric("Snapshot", dashboard_snapshot)
+metric_cols[5].metric("Source", dashboard_source)
 
 drawdown_cols = st.columns(4)
-drawdown_cols[0].metric("Stored NAV Days", str(len(nav_history)))
+drawdown_cols[0].metric(
+    "Stored NAV Days",
+    str(len(live_account_nav_history) if not live_account_nav_history.empty else len(nav_history)),
+)
 drawdown_cols[1].metric("Max Drawdown", signed_money(max_drawdown))
 drawdown_cols[2].metric("Max Drawdown %", percent(max_drawdown_pct))
-drawdown_cols[3].metric("Ledger Rows", str(len(positions)))
+drawdown_cols[3].metric("Ledger Rows", str(len(live_account_positions) or len(positions)))
 
-if nav_history.empty:
+if not live_account_nav_history.empty:
+    st.subheader("Unified Account Equity & Drawdown")
+    account_chart = live_account_nav_history.set_index("date")[
+        ["net_liquidation", "equity_peak"]
+    ]
+    account_drawdown_chart = live_account_nav_history.set_index("date")[["drawdown"]]
+    chart_left, chart_right = st.columns([1.2, 1])
+    with chart_left:
+        st.line_chart(account_chart)
+    with chart_right:
+        st.line_chart(account_drawdown_chart)
+elif nav_history.empty:
     st.info("No stored NAV history found yet.")
 else:
-    st.subheader("Equity & Drawdown")
+    st.subheader("Portfolio Ledger Equity & Drawdown")
     nav_chart = nav_history.set_index("date")[["total_net_worth", "equity_peak"]]
     drawdown_chart = nav_history.set_index("date")[["drawdown"]]
     chart_left, chart_right = st.columns([1.2, 1])
@@ -289,7 +373,54 @@ else:
     with chart_right:
         st.line_chart(drawdown_chart)
 
-st.subheader("Portfolio Ledger")
+st.subheader("Unified Live Account Positions")
+account_positions_table = account_positions_display(live_account_positions)
+if account_positions_table.empty:
+    st.info("No unified live account position rows found yet.")
+else:
+    st.dataframe(account_positions_table, use_container_width=True, hide_index=True)
+st.caption(f"Account ledger database: {display_path(account_ledger_path)}")
+
+account_left, account_right = st.columns([1, 1])
+with account_left:
+    st.subheader("Unified Asset Mix")
+    st.dataframe(
+        account_asset_summary(live_account_positions),
+        use_container_width=True,
+        hide_index=True,
+    )
+with account_right:
+    st.subheader("Unified Snapshot State")
+    account_state_rows = [
+        {
+            "Item": "Account",
+            "Value": (
+                "missing"
+                if latest_account_nav is None
+                else str(latest_account_nav.get("account_id") or "missing")
+            ),
+        },
+        {
+            "Item": "Profile",
+            "Value": (
+                "missing"
+                if latest_account_nav is None
+                else str(latest_account_nav.get("profile") or "missing")
+            ),
+        },
+        {
+            "Item": "Environment",
+            "Value": (
+                "missing"
+                if latest_account_nav is None
+                else str(latest_account_nav.get("environment") or "missing")
+            ),
+        },
+        {"Item": "As Of", "Value": dashboard_snapshot},
+    ]
+    st.dataframe(pd.DataFrame(account_state_rows), use_container_width=True, hide_index=True)
+
+st.subheader("Legacy Portfolio Ledger")
 if enriched_positions.empty:
     st.info("No live position rows found yet.")
 else:
@@ -309,7 +440,13 @@ state_left, state_right = st.columns([1, 1])
 with state_left:
     st.subheader("Runtime State")
     st.dataframe(
-        state_table(ibkr_metrics=ibkr_metrics, manual_inputs=manual_inputs),
+        state_table(
+            account_ledger_path=account_ledger_path,
+            live_account_nav=live_account_nav,
+            live_account_positions=live_account_positions,
+            ibkr_metrics=ibkr_metrics,
+            manual_inputs=manual_inputs,
+        ),
         use_container_width=True,
         hide_index=True,
     )

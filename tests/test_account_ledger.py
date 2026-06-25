@@ -12,7 +12,11 @@ import pandas as pd
 from oqp.accounts import (
     account_snapshot_from_ibkr_readonly,
     account_snapshot_from_live_positions_frame,
+    account_asset_summary,
+    account_nav_drawdowns,
+    account_positions_display,
     ensure_account_ledger_schema,
+    load_account_nav_history,
     load_latest_account_nav,
     load_latest_account_positions,
     write_account_snapshot,
@@ -106,6 +110,12 @@ class AccountLedgerTests(unittest.TestCase):
                 snapshot_date="2026-06-25",
             )
             latest_nav = load_latest_account_nav(db_path, environment="paper")
+            nav_history = load_account_nav_history(db_path, environment="paper")
+            limited_history = load_account_nav_history(
+                db_path,
+                environment="paper",
+                limit=1,
+            )
             latest_positions = load_latest_account_positions(db_path, environment="paper")
 
         self.assertEqual(first_result.daily_pnl, 0.0)
@@ -113,6 +123,8 @@ class AccountLedgerTests(unittest.TestCase):
         self.assertEqual(second_result.position_rows, 1)
         self.assertEqual(latest_nav.iloc[0]["account_id"], "DU123456")
         self.assertEqual(float(latest_nav.iloc[0]["net_liquidation"]), 1_010_000.0)
+        self.assertEqual(list(nav_history["date"]), ["2026-06-24", "2026-06-25"])
+        self.assertEqual(list(limited_history["date"]), ["2026-06-25"])
         self.assertEqual(latest_positions.iloc[0]["symbol"], "AAPL")
         self.assertEqual(float(latest_positions.iloc[0]["market_value"]), 1200.0)
 
@@ -145,6 +157,51 @@ class AccountLedgerTests(unittest.TestCase):
         self.assertEqual(snapshot.position_count, 1)
         self.assertEqual(snapshot.positions[0].symbol, "MSFT")
         self.assertEqual(snapshot.cash_balances[0].cash, 1_000)
+
+    def test_account_reporting_transforms_are_dashboard_ready(self) -> None:
+        nav_history = pd.DataFrame(
+            [
+                {
+                    "date": "2026-06-24",
+                    "net_liquidation": 100.0,
+                    "cash": 10.0,
+                    "daily_pnl": 0.0,
+                    "position_count": 1,
+                },
+                {
+                    "date": "2026-06-25",
+                    "net_liquidation": 90.0,
+                    "cash": 12.0,
+                    "daily_pnl": -10.0,
+                    "position_count": 1,
+                },
+            ]
+        )
+        positions = pd.DataFrame(
+            [
+                {
+                    "symbol": "SPY",
+                    "asset_class": "etf",
+                    "quantity": 2,
+                    "market_price": 500.0,
+                    "market_value": 1000.0,
+                    "unrealized_pnl": 25.0,
+                    "currency": "USD",
+                    "as_of": "2026-06-25T12:00:00+00:00",
+                }
+            ]
+        )
+
+        drawdowns = account_nav_drawdowns(nav_history)
+        display = account_positions_display(positions)
+        summary = account_asset_summary(positions)
+
+        self.assertEqual(float(drawdowns.iloc[-1]["drawdown"]), -10.0)
+        self.assertEqual(float(drawdowns.iloc[-1]["drawdown_pct"]), -0.1)
+        self.assertIn("Market Value", display.columns)
+        self.assertEqual(display.iloc[0]["Symbol"], "SPY")
+        self.assertEqual(summary.iloc[0]["Asset Class"], "etf")
+        self.assertEqual(float(summary.iloc[0]["Market Value"]), 1000.0)
 
 
 if __name__ == "__main__":

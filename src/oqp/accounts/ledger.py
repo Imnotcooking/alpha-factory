@@ -429,6 +429,55 @@ def load_latest_account_nav(
         return pd.read_sql(query, conn, params=params)
 
 
+def load_account_nav_history(
+    db_path: str | Path,
+    *,
+    account_key: str | None = None,
+    environment: str | None = None,
+    profile: str | None = None,
+    limit: int | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "date",
+        "account_key",
+        "account_id",
+        "broker",
+        "profile",
+        "environment",
+        "as_of",
+        "net_liquidation",
+        "cash",
+        "daily_pnl",
+        "position_count",
+        "snapshot_id",
+    ]
+    path = Path(db_path)
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+
+    ensure_account_ledger_schema(path)
+    where, params = _filters(
+        account_key=account_key,
+        environment=environment,
+        profile=profile,
+    )
+    limit_clause = "" if limit is None else "LIMIT ?"
+    query = f"""
+        SELECT {", ".join(columns)}
+        FROM account_nav
+        {where}
+        ORDER BY date DESC, as_of DESC
+        {limit_clause}
+    """
+    query_params = params if limit is None else (*params, int(limit))
+    with closing(sqlite3.connect(path)) as conn:
+        frame = pd.read_sql(query, conn, params=query_params)
+
+    if frame.empty:
+        return frame
+    return frame.sort_values(["date", "as_of"]).reset_index(drop=True)
+
+
 def load_latest_account_positions(
     db_path: str | Path,
     *,

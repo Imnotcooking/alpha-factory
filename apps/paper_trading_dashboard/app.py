@@ -16,6 +16,15 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from oqp.accounts import (  # noqa: E402
+    account_asset_summary,
+    account_nav_drawdowns,
+    account_positions_display,
+    default_account_ledger_path,
+    load_account_nav_history,
+    load_latest_account_nav,
+    load_latest_account_positions,
+)
 from oqp.brokers import (  # noqa: E402
     get_broker_adapter,
     get_broker_profile_config,
@@ -357,6 +366,15 @@ candidate_result = load_strategy_candidate_artifacts(
     max_files=50,
 )
 paper_ledger_path = default_paper_trading_ledger_path()
+account_ledger_path = default_account_ledger_path()
+paper_account_nav_df = load_latest_account_nav(account_ledger_path, environment="paper")
+paper_account_nav_history = account_nav_drawdowns(
+    load_account_nav_history(account_ledger_path, environment="paper")
+)
+paper_account_positions_df = load_latest_account_positions(
+    account_ledger_path,
+    environment="paper",
+)
 paper_nav_df = load_latest_paper_nav(paper_ledger_path)
 paper_positions_df = load_latest_paper_positions(paper_ledger_path)
 paper_reviews_df = load_latest_paper_execution_reviews(paper_ledger_path, limit=25)
@@ -418,30 +436,84 @@ gate_rows = [
 ]
 gate_df = pd.DataFrame(gate_rows)
 execution_ready = bool(gate_df["Status"].eq("pass").all())
+latest_paper_account_nav = (
+    None if paper_account_nav_df.empty else paper_account_nav_df.iloc[0]
+)
+paper_account_nav_value = (
+    None
+    if latest_paper_account_nav is None
+    else coerce_float(latest_paper_account_nav.get("net_liquidation"))
+)
+paper_account_daily_pnl = (
+    None
+    if latest_paper_account_nav is None
+    else coerce_float(latest_paper_account_nav.get("daily_pnl"))
+)
+paper_account_cash_value = (
+    None
+    if latest_paper_account_nav is None
+    else coerce_float(latest_paper_account_nav.get("cash"))
+)
+paper_account_position_count = (
+    None
+    if latest_paper_account_nav is None
+    else int(coerce_float(latest_paper_account_nav.get("position_count")) or 0)
+)
+paper_account_as_of = (
+    ""
+    if latest_paper_account_nav is None
+    else str(latest_paper_account_nav.get("as_of") or "")
+)
 latest_paper_nav = None if paper_nav_df.empty else paper_nav_df.iloc[0]
-paper_nav_value = (
+legacy_paper_nav_value = (
     None if latest_paper_nav is None else coerce_float(latest_paper_nav.get("net_liquidation"))
 )
-paper_daily_pnl = (
+legacy_paper_daily_pnl = (
     None if latest_paper_nav is None else coerce_float(latest_paper_nav.get("daily_pnl"))
 )
-paper_cash_value = (
+legacy_paper_cash_value = (
     None if latest_paper_nav is None else coerce_float(latest_paper_nav.get("cash"))
 )
-paper_position_count = (
+legacy_paper_position_count = (
     0 if latest_paper_nav is None else int(coerce_float(latest_paper_nav.get("position_count")) or 0)
+)
+paper_nav_value = (
+    paper_account_nav_value
+    if paper_account_nav_value is not None
+    else legacy_paper_nav_value
+)
+paper_daily_pnl = (
+    paper_account_daily_pnl
+    if paper_account_daily_pnl is not None
+    else legacy_paper_daily_pnl
+)
+paper_cash_value = (
+    paper_account_cash_value
+    if paper_account_cash_value is not None
+    else legacy_paper_cash_value
+)
+paper_position_count = (
+    paper_account_position_count
+    if paper_account_position_count is not None
+    else legacy_paper_position_count
+)
+paper_nav_source = (
+    "unified account ledger"
+    if latest_paper_account_nav is not None
+    else "paper trading ledger"
 )
 
 
 st.title("Paper Trading")
 st.caption("IBKR paper execution cockpit")
 
-summary_cols = st.columns(5)
+summary_cols = st.columns(6)
 summary_cols[0].metric("Execution Gate", "unlocked" if execution_ready else "locked")
 summary_cols[1].metric("Snapshot", "ready" if account_summary else "offline")
 summary_cols[2].metric("IBKR", broker_health.status.value)
 summary_cols[3].metric("Paper NAV", format_money(paper_nav_value) or "missing")
 summary_cols[4].metric("Review Queue", str(unreviewed_proposal_count))
+summary_cols[5].metric("NAV Source", paper_nav_source)
 
 st.error("Execution locked. Order placement remains unavailable.")
 
@@ -456,17 +528,75 @@ else:
         "password in this repository."
     )
 
-st.subheader("Paper Ledger")
+st.subheader("Unified Paper Account")
 ledger_metric_cols = st.columns(5)
 ledger_metric_cols[0].metric("Recorded NAV", format_money(paper_nav_value) or "missing")
 ledger_metric_cols[1].metric("Daily P&L", format_signed_money(paper_daily_pnl) or "missing")
 ledger_metric_cols[2].metric("Cash", format_money(paper_cash_value) or "missing")
 ledger_metric_cols[3].metric("Ledger Positions", str(paper_position_count))
 ledger_metric_cols[4].metric(
+    "Snapshot As Of",
+    paper_account_as_of or "missing",
+)
+st.caption(f"Account ledger path: {display_path(account_ledger_path)}")
+
+if paper_account_nav_history.empty:
+    st.info("No unified paper account NAV history has been recorded yet.")
+else:
+    account_chart_left, account_chart_right = st.columns([1.2, 1])
+    with account_chart_left:
+        st.line_chart(
+            paper_account_nav_history.set_index("date")[
+                ["net_liquidation", "equity_peak"]
+            ]
+        )
+    with account_chart_right:
+        st.line_chart(paper_account_nav_history.set_index("date")[["drawdown"]])
+
+account_left, account_right = st.columns([1.2, 1])
+with account_left:
+    st.markdown("#### Unified Account Positions")
+    account_positions_table = account_positions_display(paper_account_positions_df)
+    if account_positions_table.empty:
+        st.info("No unified paper account positions have been recorded yet.")
+    else:
+        st.dataframe(
+            account_positions_table,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+with account_right:
+    st.markdown("#### Unified Asset Mix")
+    st.dataframe(
+        account_asset_summary(paper_account_positions_df),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+st.subheader("Paper Trading Ledger")
+paper_ledger_metric_cols = st.columns(5)
+paper_ledger_metric_cols[0].metric(
+    "Legacy NAV",
+    format_money(legacy_paper_nav_value) or "missing",
+)
+paper_ledger_metric_cols[1].metric(
+    "Legacy Daily P&L",
+    format_signed_money(legacy_paper_daily_pnl) or "missing",
+)
+paper_ledger_metric_cols[2].metric(
+    "Legacy Cash",
+    format_money(legacy_paper_cash_value) or "missing",
+)
+paper_ledger_metric_cols[3].metric(
+    "Legacy Positions",
+    str(legacy_paper_position_count),
+)
+paper_ledger_metric_cols[4].metric(
     "Daily Notional Used",
     format_money(paper_daily_notional_used) or "0.00",
 )
-st.caption(f"Ledger path: {display_path(paper_ledger_path)}")
+st.caption(f"Paper trading ledger path: {display_path(paper_ledger_path)}")
 
 ledger_left, ledger_right = st.columns([1.2, 1])
 with ledger_left:
