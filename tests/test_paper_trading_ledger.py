@@ -16,6 +16,8 @@ from oqp.paper_trading import (
     load_latest_paper_nav,
     load_latest_paper_orders,
     load_latest_paper_positions,
+    load_paper_order_ticket,
+    update_paper_order_ticket_status,
     write_paper_order_tickets,
     write_paper_execution_review,
     write_paper_snapshot,
@@ -223,6 +225,45 @@ class PaperTradingLedgerTests(unittest.TestCase):
         self.assertEqual(orders.iloc[0]["order_id"], "paper-dryrun-proposal-001-1")
         self.assertEqual(orders.iloc[0]["status"], "dry_run")
         self.assertIn("proposal-001", orders.iloc[0]["metadata_json"])
+
+    def test_updates_paper_order_ticket_status_with_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "paper.db"
+            write_paper_order_tickets(
+                db_path,
+                [
+                    {
+                        "order_id": "paper-dryrun-proposal-001-1",
+                        "created_at": "2026-06-25T12:00:00+00:00",
+                        "strategy_id": "strategy-001",
+                        "symbol": "SPY",
+                        "side": "buy",
+                        "quantity": 2,
+                        "order_type": "limit",
+                        "limit_price": 500,
+                        "status": "dry_run",
+                        "metadata": {"proposal_id": "proposal-001"},
+                    }
+                ],
+            )
+
+            update = update_paper_order_ticket_status(
+                db_path,
+                "paper-dryrun-proposal-001-1",
+                "approved_for_submit",
+                decided_at="2026-06-25T12:05:00+00:00",
+                decided_by="unit-test",
+                reason="looks good",
+            )
+            ticket = load_paper_order_ticket(db_path, "paper-dryrun-proposal-001-1")
+
+        self.assertEqual(update.previous_status, "dry_run")
+        self.assertEqual(update.new_status, "approved_for_submit")
+        self.assertIsNotNone(ticket)
+        self.assertEqual(ticket["status"], "approved_for_submit")
+        self.assertEqual(ticket["metadata"]["approval_status"], "approved_for_submit")
+        self.assertEqual(ticket["metadata"]["approved_by"], "unit-test")
+        self.assertFalse(ticket["metadata"]["broker_submit_enabled"])
 
 
 if __name__ == "__main__":

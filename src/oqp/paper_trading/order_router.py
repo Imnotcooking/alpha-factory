@@ -21,12 +21,18 @@ from oqp.brokers import BrokerConnectionConfig
 from oqp.domain import utc_now
 from oqp.execution import TradeProposal
 from oqp.paper_trading.execution_safety import PaperExecutionReview
-from oqp.paper_trading.ledger import write_paper_order_tickets
+from oqp.paper_trading.ledger import (
+    load_paper_order_ticket,
+    update_paper_order_ticket_status,
+    write_paper_order_tickets,
+)
 
 
 class PaperOrderTicketStatus(str, Enum):
     DRY_RUN = "dry_run"
     BLOCKED = "blocked"
+    APPROVED_FOR_SUBMIT = "approved_for_submit"
+    REJECTED = "rejected"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +110,28 @@ class PaperOrderTicketResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class PaperOrderTicketApprovalResult:
+    order_id: str
+    previous_status: str
+    new_status: PaperOrderTicketStatus
+    message: str
+    account_event_id: str
+    paper_ledger_path: Path
+    account_ledger_path: Path
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "order_id": self.order_id,
+            "previous_status": self.previous_status,
+            "new_status": self.new_status.value,
+            "message": self.message,
+            "account_event_id": self.account_event_id,
+            "paper_ledger_path": str(self.paper_ledger_path),
+            "account_ledger_path": str(self.account_ledger_path),
+        }
+
+
 def create_dry_run_order_tickets(
     proposal: TradeProposal,
     *,
@@ -168,6 +196,65 @@ def create_dry_run_order_tickets(
         order_ids=paper_write.order_ids,
         account_event_ids=account_write.event_ids,
         paper_ledger_path=paper_write.db_path,
+        account_ledger_path=account_write.db_path,
+    )
+
+
+def set_paper_order_ticket_approval(
+    *,
+    order_id: str,
+    status: PaperOrderTicketStatus | str,
+    paper_ledger_path: str | Path,
+    account_ledger_path: str | Path,
+    broker_config: BrokerConnectionConfig,
+    account_id: str | None = None,
+    decided_by: str | None = None,
+    reason: str | None = None,
+    decided_at: datetime | None = None,
+) -> PaperOrderTicketApprovalResult:
+    new_status = _approval_status(status)
+    timestamp = (decided_at or utc_now()).replace(microsecond=0)
+    ticket_before = load_paper_order_ticket(paper_ledger_path, order_id)
+    if ticket_before is None:
+        raise ValueError(f"Paper order ticket not found: {order_id}")
+
+    update_result = update_paper_order_ticket_status(
+        paper_ledger_path,
+        order_id,
+        new_status.value,
+        decided_at=timestamp,
+        decided_by=decided_by,
+        reason=reason,
+    )
+    ticket = load_paper_order_ticket(paper_ledger_path, order_id) or ticket_before
+    metadata = dict(ticket.get("metadata") or {})
+    profile = str(broker_config.metadata.get("profile") or "ibkr_paper_readonly")
+    event = _approval_event_from_ticket(
+        ticket,
+        new_status=new_status,
+        previous_status=update_result.previous_status,
+        account_id=account_id,
+        broker=broker_config.broker,
+        profile=profile,
+        decided_by=decided_by,
+        reason=reason,
+        decided_at=timestamp,
+        metadata=metadata,
+    )
+    account_write = write_account_trade_events(account_ledger_path, (event,))
+    message = (
+        "Dry-run ticket approved for later paper submission. "
+        "No broker order was submitted."
+        if new_status == PaperOrderTicketStatus.APPROVED_FOR_SUBMIT
+        else "Dry-run ticket rejected. No broker order was submitted."
+    )
+    return PaperOrderTicketApprovalResult(
+        order_id=str(order_id),
+        previous_status=update_result.previous_status,
+        new_status=new_status,
+        message=message,
+        account_event_id=account_write.event_ids[0],
+        paper_ledger_path=update_result.db_path,
         account_ledger_path=account_write.db_path,
     )
 
@@ -246,6 +333,87 @@ def _event_from_ticket(
             **ticket.metadata,
         },
     )
+
+
+def _approval_event_from_ticket(
+    ticket: dict[str, Any],
+    *,
+    new_status: PaperOrderTicketStatus,
+    previous_status: str,
+    account_id: str | None,
+    broker: str,
+    profile: str,
+    decided_by: str | None,
+    reason: str | None,
+    decided_at: datetime,
+    metadata: dict[str, Any],
+) -> TradeEvent:
+    event_type = (
+        "paper_order_ticket_approved"
+        if new_status == PaperOrderTicketStatus.APPROVED_FOR_SUBMIT
+        else "paper_order_ticket_rejected"
+    )
+    order_id = str(ticket["order_id"])
+    return TradeEvent(
+        event_id=(
+            f"evt-{event_type}-{_safe_id(order_id)}-"
+            f"{decided_at.strftime('%Y%m%dT%H%M%SZ')}"
+        ),
+        event_type=event_type,
+        occurred_at=decided_at,
+        account_id=account_id,
+        broker=broker,
+        profile=profile,
+        environment=AccountEnvironment.PAPER,
+        symbol=str(ticket["symbol"]),
+        side=str(ticket.get("side") or ""),
+        quantity=_optional_float(ticket.get("quantity")),
+        price=_optional_float(ticket.get("limit_price")),
+        currency=str(metadata.get("currency") or "USD"),
+        strategy_id=ticket.get("strategy_id"),
+        order_id=order_id,
+        metadata={
+            "proposal_id": metadata.get("proposal_id"),
+            "review_id": metadata.get("review_id"),
+            "previous_status": previous_status,
+            "new_status": new_status.value,
+            "decided_by": decided_by,
+            "reason": reason,
+            "broker_submit_enabled": False,
+            "event_source": "paper_order_ticket_approval",
+            "approval_only": True,
+        },
+    )
+
+
+def _approval_status(value: PaperOrderTicketStatus | str) -> PaperOrderTicketStatus:
+    try:
+        status = (
+            value
+            if isinstance(value, PaperOrderTicketStatus)
+            else PaperOrderTicketStatus(str(value))
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "Paper order ticket approval status must be approved_for_submit or rejected."
+        ) from exc
+    if status not in {
+        PaperOrderTicketStatus.APPROVED_FOR_SUBMIT,
+        PaperOrderTicketStatus.REJECTED,
+    }:
+        raise ValueError(
+            "Paper order ticket approval status must be approved_for_submit or rejected."
+        )
+    return status
+
+
+def _optional_float(value: Any) -> float | None:
+    if value in (None, "", "nan"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_id(value: str) -> str:

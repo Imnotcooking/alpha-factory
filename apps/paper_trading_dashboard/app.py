@@ -51,6 +51,7 @@ from oqp.execution import (  # noqa: E402
     trade_proposal_directory,
 )
 from oqp.paper_trading import (  # noqa: E402
+    PaperOrderTicketStatus,
     default_paper_trading_ledger_path,
     load_latest_paper_execution_reviews,
     load_latest_paper_nav,
@@ -58,6 +59,7 @@ from oqp.paper_trading import (  # noqa: E402
     load_latest_paper_positions,
     paper_order_notional_today,
     review_paper_execution_proposal,
+    set_paper_order_ticket_approval,
 )
 from apps.broker_monitor import (  # noqa: E402
     connect_readonly_snapshot,
@@ -693,6 +695,78 @@ if order_ticket_display.empty:
     st.info("No dry-run paper order tickets have been created yet.")
 else:
     st.dataframe(order_ticket_display, use_container_width=True, hide_index=True)
+
+pending_ticket_df = (
+    paper_orders_df[paper_orders_df["status"].eq(PaperOrderTicketStatus.DRY_RUN.value)]
+    if not paper_orders_df.empty and "status" in paper_orders_df.columns
+    else pd.DataFrame()
+)
+if pending_ticket_df.empty:
+    st.info("No dry-run ticket is waiting for human approval.")
+else:
+    st.markdown("#### Human Ticket Approval")
+    ticket_lookup = {
+        (
+            f"{row.order_id} | {row.symbol} {row.side} "
+            f"{format_metric(coerce_float(row.quantity), digits=4)} {row.order_type}"
+        ): row
+        for row in pending_ticket_df.itertuples(index=False)
+    }
+    with st.form("paper_ticket_approval_form"):
+        selected_ticket_label = st.selectbox(
+            "Ticket",
+            options=list(ticket_lookup),
+            index=0,
+        )
+        decision = st.selectbox(
+            "Decision",
+            options=[
+                PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value,
+                PaperOrderTicketStatus.REJECTED.value,
+            ],
+            index=0,
+        )
+        decision_by = st.text_input("Decision by", value="dashboard")
+        reason = st.text_input("Reason", value="manual paper ticket review")
+        confirmation = st.text_input(
+            "Confirmation",
+            value="",
+            placeholder="APPROVE or REJECT",
+        )
+        submitted = st.form_submit_button("Record Decision")
+
+    if submitted:
+        expected = (
+            "APPROVE"
+            if decision == PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value
+            else "REJECT"
+        )
+        if confirmation.strip().upper() != expected:
+            st.error(f"Type {expected} to record this decision.")
+        else:
+            selected_ticket = ticket_lookup[selected_ticket_label]
+            paper_account_id = (
+                None
+                if latest_paper_account_nav is None
+                else str(latest_paper_account_nav.get("account_id") or "").strip()
+            )
+            try:
+                result = set_paper_order_ticket_approval(
+                    order_id=str(selected_ticket.order_id),
+                    status=decision,
+                    paper_ledger_path=paper_ledger_path,
+                    account_ledger_path=account_ledger_path,
+                    broker_config=broker_config,
+                    account_id=paper_account_id or None,
+                    decided_by=decision_by.strip() or "dashboard",
+                    reason=reason.strip() or None,
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success(result.message)
+                st.caption("Broker submit enabled: false")
+                st.rerun()
 
 ledger_left, ledger_right = st.columns([1.2, 1])
 with ledger_left:

@@ -184,6 +184,26 @@ class PaperOrderTicketWriteResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class PaperOrderTicketStatusUpdateResult:
+    db_path: Path
+    order_id: str
+    previous_status: str
+    new_status: str
+    updated_at: str
+    metadata: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "db_path": str(self.db_path),
+            "order_id": self.order_id,
+            "previous_status": self.previous_status,
+            "new_status": self.new_status,
+            "updated_at": self.updated_at,
+            "metadata": self.metadata,
+        }
+
+
 def default_paper_trading_ledger_path() -> Path:
     return DEFAULT_PAPER_TRADING_DB_PATH
 
@@ -591,6 +611,104 @@ def load_latest_paper_orders(
         )
 
 
+def load_paper_order_ticket(
+    db_path: str | Path,
+    order_id: str,
+) -> dict[str, Any] | None:
+    path = Path(db_path)
+    if not path.exists():
+        return None
+    ensure_paper_trading_schema(path)
+    with closing(sqlite3.connect(path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT order_id, created_at, strategy_id, symbol, side, quantity,
+                   order_type, limit_price, status, metadata_json
+            FROM paper_orders
+            WHERE order_id = ?
+            """,
+            (str(order_id),),
+        ).fetchone()
+    if row is None:
+        return None
+    ticket = dict(row)
+    ticket["metadata"] = _metadata_dict(ticket.get("metadata_json"))
+    return ticket
+
+
+def update_paper_order_ticket_status(
+    db_path: str | Path,
+    order_id: str,
+    status: str,
+    *,
+    decided_at: str | datetime | None = None,
+    decided_by: str | None = None,
+    reason: str | None = None,
+) -> PaperOrderTicketStatusUpdateResult:
+    path = ensure_paper_trading_schema(db_path)
+    new_status = str(status).strip()
+    if not new_status:
+        raise ValueError("status is required")
+    timestamp = _datetime_text(decided_at or datetime.now(timezone.utc))
+
+    with closing(sqlite3.connect(path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT order_id, status, metadata_json
+            FROM paper_orders
+            WHERE order_id = ?
+            """,
+            (str(order_id),),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Paper order ticket not found: {order_id}")
+
+        previous_status = str(row["status"])
+        metadata = _metadata_dict(row["metadata_json"])
+        metadata.update(
+            {
+                "previous_status": previous_status,
+                "approval_status": new_status,
+                "approval_decided_at": timestamp,
+                "human_approval_required": True,
+                "broker_submit_enabled": False,
+            }
+        )
+        if decided_by:
+            metadata["approval_decided_by"] = str(decided_by)
+        if reason:
+            metadata["approval_reason"] = str(reason)
+        if new_status == "approved_for_submit":
+            metadata["approved_at"] = timestamp
+            if decided_by:
+                metadata["approved_by"] = str(decided_by)
+        elif new_status == "rejected":
+            metadata["rejected_at"] = timestamp
+            if decided_by:
+                metadata["rejected_by"] = str(decided_by)
+
+        conn.execute(
+            """
+            UPDATE paper_orders
+            SET status = ?, metadata_json = ?
+            WHERE order_id = ?
+            """,
+            (new_status, json.dumps(metadata, sort_keys=True), str(order_id)),
+        )
+        conn.commit()
+
+    return PaperOrderTicketStatusUpdateResult(
+        db_path=path,
+        order_id=str(order_id),
+        previous_status=previous_status,
+        new_status=new_status,
+        updated_at=timestamp,
+        metadata=metadata,
+    )
+
+
 def paper_order_notional_today(db_path: str | Path, *, today: str | None = None) -> float:
     path = Path(db_path)
     if not path.exists():
@@ -663,6 +781,24 @@ def _date_text(value: str | date | datetime) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
+
+
+def _datetime_text(value: str | datetime) -> str:
+    if isinstance(value, datetime):
+        return value.replace(microsecond=0).isoformat()
+    return str(value)
+
+
+def _metadata_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if not value:
+        return {}
+    try:
+        decoded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
 
 
 def _float(value: Any, *, default: float = 0.0) -> float:
