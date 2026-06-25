@@ -14,7 +14,9 @@ from oqp.paper_trading import (
     ensure_paper_trading_schema,
     load_latest_paper_execution_reviews,
     load_latest_paper_nav,
+    load_latest_paper_orders,
     load_latest_paper_positions,
+    write_paper_order_tickets,
     write_paper_execution_review,
     write_paper_snapshot,
 )
@@ -190,6 +192,37 @@ class PaperTradingLedgerTests(unittest.TestCase):
         self.assertEqual(len(reviews), 1)
         self.assertEqual(reviews.iloc[0]["proposal_id"], "proposal-new")
         self.assertEqual(reviews.iloc[0]["decision"], "ready")
+
+    def test_writes_and_loads_dry_run_order_tickets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "paper.db"
+            result = write_paper_order_tickets(
+                db_path,
+                [
+                    {
+                        "order_id": "paper-dryrun-proposal-001-1",
+                        "created_at": "2026-06-25T12:00:00+00:00",
+                        "strategy_id": "strategy-001",
+                        "symbol": "SPY",
+                        "side": "buy",
+                        "quantity": 2,
+                        "order_type": "limit",
+                        "limit_price": 500,
+                        "status": "dry_run",
+                        "metadata": {
+                            "proposal_id": "proposal-001",
+                            "review_id": "review-001",
+                            "broker_submit_enabled": False,
+                        },
+                    }
+                ],
+            )
+            orders = load_latest_paper_orders(db_path)
+
+        self.assertEqual(result.order_count, 1)
+        self.assertEqual(orders.iloc[0]["order_id"], "paper-dryrun-proposal-001-1")
+        self.assertEqual(orders.iloc[0]["status"], "dry_run")
+        self.assertIn("proposal-001", orders.iloc[0]["metadata_json"])
 
 
 if __name__ == "__main__":

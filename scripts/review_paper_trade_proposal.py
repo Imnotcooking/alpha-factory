@@ -33,6 +33,7 @@ from oqp.execution import (  # noqa: E402
     trade_proposal_directory,
 )
 from oqp.paper_trading import (  # noqa: E402
+    create_dry_run_order_tickets,
     default_paper_trading_ledger_path,
     paper_order_notional_today,
     review_paper_execution_proposal,
@@ -75,6 +76,14 @@ def parse_args() -> argparse.Namespace:
         "--notify",
         action="store_true",
         help="Post each review to the configured Discord webhook.",
+    )
+    parser.add_argument(
+        "--create-dry-run-tickets",
+        action="store_true",
+        help=(
+            "For READY reviews, write dry-run paper order tickets and account "
+            "events. This does not submit anything to IBKR."
+        ),
     )
     parser.add_argument(
         "--require-ready",
@@ -143,11 +152,24 @@ def main() -> int:
                 message=review.message,
             ),
         )
+        ticket_result = None
+        if args.create_dry_run_tickets:
+            ticket_result = create_dry_run_order_tickets(
+                proposal,
+                review=review,
+                paper_ledger_path=db_path,
+                account_ledger_path=account_ledger_path,
+                broker_config=broker_config,
+                account_id=account_id,
+                review_id=write_result.review_id,
+                created_at=review.reviewed_at,
+            )
         payload = {
             "proposal": proposal.proposal_id,
             "review": review.to_dict(),
             "write": write_result.to_dict(),
             "account_events": event_result.to_dict(),
+            "order_tickets": None if ticket_result is None else ticket_result.to_dict(),
         }
         reviews.append(payload)
         if args.notify:
@@ -213,6 +235,12 @@ def _print_reviews(result: dict[str, Any]) -> None:
         account_events = item.get("account_events", {})
         if account_events:
             print(f"        account_events={account_events.get('event_count', 0)}")
+        order_tickets = item.get("order_tickets")
+        if order_tickets:
+            print(
+                f"        dry_run_tickets={order_tickets.get('order_count', 0)} "
+                f"status={order_tickets.get('status')}"
+            )
         print(f"        {review['message']}")
         for check in review["checks"]:
             status = "PASS" if check["passed"] else "FAIL"
@@ -258,6 +286,7 @@ def _post_discord(payload: dict[str, Any]) -> None:
 def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
     review = payload["review"]
     account_events = payload.get("account_events", {})
+    order_tickets = payload.get("order_tickets") or {}
     failed = [
         check for check in review["checks"]
         if not check["passed"] and check["severity"] == "block"
@@ -268,6 +297,7 @@ def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _discord_field("Orders", str(review["order_count"])),
         _discord_field("Estimated Notional", _money(review["estimated_notional"])),
         _discord_field("Account Events", str(account_events.get("event_count", 0))),
+        _discord_field("Dry-Run Tickets", str(order_tickets.get("order_count", 0))),
         _discord_field("Message", review["message"]),
     ]
     for check in failed[:5]:

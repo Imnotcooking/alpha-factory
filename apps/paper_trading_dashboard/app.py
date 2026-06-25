@@ -54,6 +54,7 @@ from oqp.paper_trading import (  # noqa: E402
     default_paper_trading_ledger_path,
     load_latest_paper_execution_reviews,
     load_latest_paper_nav,
+    load_latest_paper_orders,
     load_latest_paper_positions,
     paper_order_notional_today,
     review_paper_execution_proposal,
@@ -208,6 +209,18 @@ def parse_review_checks(value: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in decoded if isinstance(item, dict)]
 
 
+def parse_metadata(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        decoded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def review_blockers(checks: list[dict[str, Any]]) -> str:
     blockers = [
         str(check.get("name", ""))
@@ -282,6 +295,48 @@ def paper_position_display(df: pd.DataFrame) -> pd.DataFrame:
             "as_of": "As Of",
         }
     )
+
+
+def paper_order_ticket_display(df: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "Ticket ID",
+        "Created",
+        "Status",
+        "Proposal",
+        "Review",
+        "Symbol",
+        "Side",
+        "Quantity",
+        "Type",
+        "Price",
+        "Strategy",
+        "Est. Notional",
+        "Submit Enabled",
+    ]
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+    for row in df.to_dict("records"):
+        metadata = parse_metadata(row.get("metadata_json"))
+        rows.append(
+            {
+                "Ticket ID": row.get("order_id"),
+                "Created": row.get("created_at"),
+                "Status": row.get("status"),
+                "Proposal": metadata.get("proposal_id", ""),
+                "Review": metadata.get("review_id", ""),
+                "Symbol": row.get("symbol"),
+                "Side": row.get("side"),
+                "Quantity": row.get("quantity"),
+                "Type": row.get("order_type"),
+                "Price": row.get("limit_price"),
+                "Strategy": row.get("strategy_id") or "",
+                "Est. Notional": metadata.get("estimated_notional"),
+                "Submit Enabled": yes_no(bool(metadata.get("broker_submit_enabled"))),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
 
 
 def intent_row(intent: Any) -> dict[str, Any]:
@@ -386,6 +441,7 @@ paper_account_events_df = load_account_trade_events(
 paper_nav_df = load_latest_paper_nav(paper_ledger_path)
 paper_positions_df = load_latest_paper_positions(paper_ledger_path)
 paper_reviews_df = load_latest_paper_execution_reviews(paper_ledger_path, limit=25)
+paper_orders_df = load_latest_paper_orders(paper_ledger_path, limit=50)
 paper_daily_notional_used = paper_order_notional_today(paper_ledger_path)
 reviewed_proposal_ids = (
     set(paper_reviews_df["proposal_id"].dropna().astype(str))
@@ -602,7 +658,7 @@ else:
 st.caption(f"NAV source: {paper_nav_source}")
 
 st.subheader("Paper Trading Ledger")
-paper_ledger_metric_cols = st.columns(5)
+paper_ledger_metric_cols = st.columns(6)
 paper_ledger_metric_cols[0].metric(
     "Legacy NAV",
     format_money(legacy_paper_nav_value) or "missing",
@@ -623,7 +679,20 @@ paper_ledger_metric_cols[4].metric(
     "Daily Notional Used",
     format_money(paper_daily_notional_used) or "0.00",
 )
+paper_ledger_metric_cols[5].metric(
+    "Dry-Run Tickets",
+    str(len(paper_orders_df[paper_orders_df["status"].eq("dry_run")]))
+    if not paper_orders_df.empty and "status" in paper_orders_df.columns
+    else "0",
+)
 st.caption(f"Paper trading ledger path: {display_path(paper_ledger_path)}")
+
+st.markdown("#### Dry-Run Order Tickets")
+order_ticket_display = paper_order_ticket_display(paper_orders_df)
+if order_ticket_display.empty:
+    st.info("No dry-run paper order tickets have been created yet.")
+else:
+    st.dataframe(order_ticket_display, use_container_width=True, hide_index=True)
 
 ledger_left, ledger_right = st.columns([1.2, 1])
 with ledger_left:

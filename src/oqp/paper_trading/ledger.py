@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 import pandas as pd
@@ -164,6 +164,23 @@ class PaperExecutionReviewWriteResult:
             "decision": self.decision,
             "order_count": self.order_count,
             "estimated_notional": self.estimated_notional,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PaperOrderTicketWriteResult:
+    db_path: Path
+    order_ids: tuple[str, ...]
+
+    @property
+    def order_count(self) -> int:
+        return len(self.order_ids)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "db_path": str(self.db_path),
+            "order_count": self.order_count,
+            "order_ids": list(self.order_ids),
         }
 
 
@@ -492,6 +509,88 @@ def write_paper_execution_review(
     )
 
 
+def write_paper_order_tickets(
+    db_path: str | Path,
+    tickets: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> PaperOrderTicketWriteResult:
+    path = ensure_paper_trading_schema(db_path)
+    if not tickets:
+        return PaperOrderTicketWriteResult(db_path=path, order_ids=())
+
+    with closing(sqlite3.connect(path)) as conn:
+        for ticket in tickets:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO paper_orders (
+                    order_id,
+                    created_at,
+                    strategy_id,
+                    symbol,
+                    side,
+                    quantity,
+                    order_type,
+                    limit_price,
+                    status,
+                    metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _required_text(ticket, "order_id"),
+                    _required_text(ticket, "created_at"),
+                    _optional_text(ticket.get("strategy_id")),
+                    _required_text(ticket, "symbol"),
+                    _required_text(ticket, "side"),
+                    _float(ticket.get("quantity")),
+                    _required_text(ticket, "order_type"),
+                    _optional_float(ticket.get("limit_price")),
+                    _required_text(ticket, "status"),
+                    json.dumps(dict(ticket.get("metadata") or {}), sort_keys=True),
+                ),
+            )
+        conn.commit()
+
+    return PaperOrderTicketWriteResult(
+        db_path=path,
+        order_ids=tuple(str(ticket["order_id"]) for ticket in tickets),
+    )
+
+
+def load_latest_paper_orders(
+    db_path: str | Path,
+    *,
+    limit: int = 50,
+) -> pd.DataFrame:
+    columns = [
+        "order_id",
+        "created_at",
+        "strategy_id",
+        "symbol",
+        "side",
+        "quantity",
+        "order_type",
+        "limit_price",
+        "status",
+        "metadata_json",
+    ]
+    path = Path(db_path)
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    ensure_paper_trading_schema(path)
+    with closing(sqlite3.connect(path)) as conn:
+        return pd.read_sql(
+            """
+            SELECT order_id, created_at, strategy_id, symbol, side, quantity,
+                   order_type, limit_price, status, metadata_json
+            FROM paper_orders
+            ORDER BY created_at DESC, order_id DESC
+            LIMIT ?
+            """,
+            conn,
+            params=(max(int(limit), 1),),
+        )
+
+
 def paper_order_notional_today(db_path: str | Path, *, today: str | None = None) -> float:
     path = Path(db_path)
     if not path.exists():
@@ -571,6 +670,29 @@ def _float(value: Any, *, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _optional_float(value: Any) -> float | None:
+    if value in (None, "", "nan"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _required_text(row: Mapping[str, Any], key: str) -> str:
+    text = _optional_text(row.get(key))
+    if text is None:
+        raise ValueError(f"{key} is required")
+    return text
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _redact_account(account_id: str | None) -> str:
