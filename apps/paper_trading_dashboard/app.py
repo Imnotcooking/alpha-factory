@@ -63,6 +63,7 @@ from oqp.paper_trading import (  # noqa: E402
     paper_order_notional_today,
     review_paper_execution_proposal,
     review_paper_order_submission,
+    review_paper_strategy_gate,
     set_paper_order_ticket_approval,
     upsert_paper_strategy_from_candidate,
 )
@@ -1315,6 +1316,40 @@ with proposal_right:
             ]
         )
         st.dataframe(safety_df, use_container_width=True, hide_index=True)
+        strategy_gate = review_paper_strategy_gate(
+            paper_ledger_path,
+            selected_proposal,
+        )
+        st.markdown("##### Paper Strategy Gate")
+        gate_cols = st.columns(3)
+        gate_cols[0].metric(
+            "Strategy Gate",
+            "pass" if strategy_gate.passed else "blocked",
+        )
+        gate_cols[1].metric("Strategy", strategy_gate.strategy_id or "missing")
+        gate_cols[2].metric(
+            "Registry",
+            (
+                str(strategy_gate.record.get("status"))
+                if strategy_gate.record
+                else "missing"
+            ),
+        )
+        st.caption(strategy_gate.message)
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Check": check.name,
+                        "Status": "pass" if check.passed else "blocked",
+                        "Detail": check.detail,
+                    }
+                    for check in strategy_gate.checks
+                ]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 snapshot_left, snapshot_right = st.columns([1.4, 1])
 

@@ -26,6 +26,7 @@ from oqp.paper_trading.ledger import (
     update_paper_order_ticket_status,
     write_paper_order_tickets,
 )
+from oqp.paper_trading.strategy_registry import review_paper_strategy_gate
 
 
 class PaperOrderTicketStatus(str, Enum):
@@ -152,6 +153,18 @@ def create_dry_run_order_tickets(
             review_id=review_id,
             status=PaperOrderTicketStatus.BLOCKED,
             message="Dry-run tickets were not created because the review is blocked.",
+        )
+
+    strategy_gate = review_paper_strategy_gate(paper_ledger_path, proposal)
+    if not strategy_gate.passed:
+        return PaperOrderTicketResult(
+            proposal_id=proposal.proposal_id,
+            review_id=review_id,
+            status=PaperOrderTicketStatus.BLOCKED,
+            message=(
+                "Dry-run tickets were not created because the paper strategy "
+                f"gate is blocked. {strategy_gate.message}"
+            ),
         )
 
     tickets = tuple(

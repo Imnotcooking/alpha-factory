@@ -241,6 +241,8 @@ def _print_reviews(result: dict[str, Any]) -> None:
                 f"        dry_run_tickets={order_tickets.get('order_count', 0)} "
                 f"status={order_tickets.get('status')}"
             )
+            if order_tickets.get("message"):
+                print(f"        ticket_gate={order_tickets['message']}")
         print(f"        {review['message']}")
         for check in review["checks"]:
             status = "PASS" if check["passed"] else "FAIL"
@@ -298,6 +300,7 @@ def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _discord_field("Estimated Notional", _money(review["estimated_notional"])),
         _discord_field("Account Events", str(account_events.get("event_count", 0))),
         _discord_field("Dry-Run Tickets", str(order_tickets.get("order_count", 0))),
+        _discord_field("Ticket Gate", order_tickets.get("message", "not requested")),
         _discord_field("Message", review["message"]),
     ]
     for check in failed[:5]:

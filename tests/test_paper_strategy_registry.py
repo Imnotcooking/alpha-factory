@@ -6,11 +6,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from oqp.contracts import CandidateStatus, StrategyCandidate
+from oqp.domain import AssetClass, Instrument, OrderSide, OrderType
+from oqp.execution import OrderIntent, TradeProposal
 from oqp.paper_trading import (
     PaperStrategyStatus,
     is_paper_strategy_running,
     load_paper_strategy_record,
     load_paper_strategy_registry,
+    review_paper_strategy_gate,
     upsert_paper_strategy_from_candidate,
 )
 
@@ -28,6 +31,26 @@ def paper_candidate(**overrides) -> StrategyCandidate:
     }
     values.update(overrides)
     return StrategyCandidate(**values)
+
+
+def trade_proposal(**overrides) -> TradeProposal:
+    values = {
+        "proposal_id": "proposal-001",
+        "source": "unit_test",
+        "strategy_id": "fac_demo",
+        "intents": (
+            OrderIntent(
+                instrument=Instrument("SPY", AssetClass.ETF),
+                side=OrderSide.BUY,
+                quantity=1,
+                order_type=OrderType.LIMIT,
+                limit_price=500,
+                reference_price=500,
+            ),
+        ),
+    }
+    values.update(overrides)
+    return TradeProposal(**values)
 
 
 class PaperStrategyRegistryTests(unittest.TestCase):
@@ -93,6 +116,47 @@ class PaperStrategyRegistryTests(unittest.TestCase):
         self.assertIsNotNone(record)
         self.assertTrue(record["kill_switch"])
         self.assertFalse(is_paper_strategy_running(record))
+
+    def test_strategy_gate_passes_for_running_strategy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "paper.db"
+            upsert_paper_strategy_from_candidate(
+                db_path,
+                paper_candidate(),
+                status=PaperStrategyStatus.RUNNING,
+                max_order_notional=1_000,
+                allowed_symbols=("SPY",),
+            )
+
+            gate = review_paper_strategy_gate(db_path, trade_proposal())
+
+        self.assertTrue(gate.passed)
+        self.assertEqual(gate.strategy_id, "fac_demo")
+
+    def test_strategy_gate_blocks_unregistered_strategy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = review_paper_strategy_gate(Path(tmp) / "paper.db", trade_proposal())
+
+        self.assertFalse(gate.passed)
+        self.assertIn("Strategy registered", [check.name for check in gate.checks if not check.passed])
+
+    def test_strategy_gate_blocks_symbol_outside_strategy_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "paper.db"
+            upsert_paper_strategy_from_candidate(
+                db_path,
+                paper_candidate(),
+                status=PaperStrategyStatus.RUNNING,
+                allowed_symbols=("AAPL",),
+            )
+
+            gate = review_paper_strategy_gate(db_path, trade_proposal())
+
+        self.assertFalse(gate.passed)
+        self.assertIn(
+            "Strategy symbol allowlist",
+            [check.name for check in gate.checks if not check.passed],
+        )
 
 
 if __name__ == "__main__":

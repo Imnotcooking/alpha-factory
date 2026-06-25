@@ -26,11 +26,14 @@ from oqp.paper_trading.submitter import (
     review_paper_order_submission,
 )
 from oqp.paper_trading.strategy_registry import (
+    PaperStrategyGateCheck,
+    PaperStrategyGateResult,
     PaperStrategyRegistryWriteResult,
     PaperStrategyStatus,
     is_paper_strategy_running,
     load_paper_strategy_record,
     load_paper_strategy_registry,
+    review_paper_strategy_gate,
     upsert_paper_strategy_from_candidate,
 )
 from oqp.paper_trading.ledger import (
@@ -73,6 +76,8 @@ __all__ = [
     "PaperSubmissionPreflight",
     "PaperSubmissionPreflightRecordResult",
     "PaperSnapshotWriteResult",
+    "PaperStrategyGateCheck",
+    "PaperStrategyGateResult",
     "PaperStrategyRegistryWriteResult",
     "PaperStrategyStatus",
     "create_dry_run_order_tickets",
@@ -90,6 +95,7 @@ __all__ = [
     "record_paper_submission_preflight",
     "review_paper_execution_proposal",
     "review_paper_order_submission",
+    "review_paper_strategy_gate",
     "set_paper_order_ticket_approval",
     "update_paper_order_ticket_status",
     "upsert_paper_strategy_from_candidate",

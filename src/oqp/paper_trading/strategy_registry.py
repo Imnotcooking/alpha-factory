@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -22,6 +22,40 @@ class PaperStrategyStatus(str, Enum):
     RUNNING = "paper_running"
     PAUSED = "paused"
     RETIRED = "retired"
+
+
+@dataclass(frozen=True, slots=True)
+class PaperStrategyGateCheck:
+    name: str
+    passed: bool
+    detail: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "passed": self.passed,
+            "detail": self.detail,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PaperStrategyGateResult:
+    strategy_id: str | None
+    passed: bool
+    message: str
+    checks: tuple[PaperStrategyGateCheck, ...]
+    record: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strategy_id": self.strategy_id,
+            "passed": self.passed,
+            "message": self.message,
+            "checks": [check.to_dict() for check in self.checks],
+            "record": self.record,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +277,56 @@ def is_paper_strategy_running(record: dict[str, Any] | None) -> bool:
     )
 
 
+def review_paper_strategy_gate(
+    db_path: str | Path,
+    proposal: Any,
+) -> PaperStrategyGateResult:
+    strategy_ids = _proposal_strategy_ids(proposal)
+    strategy_id = next(iter(strategy_ids)) if len(strategy_ids) == 1 else None
+    record = load_paper_strategy_record(db_path, strategy_id)
+    checks = [
+        PaperStrategyGateCheck(
+            name="Strategy ID present",
+            passed=bool(strategy_ids),
+            detail=", ".join(sorted(strategy_ids)) if strategy_ids else "missing",
+        ),
+        PaperStrategyGateCheck(
+            name="Single strategy",
+            passed=len(strategy_ids) == 1,
+            detail=f"strategy_ids={', '.join(sorted(strategy_ids)) or 'none'}",
+        ),
+        PaperStrategyGateCheck(
+            name="Strategy registered",
+            passed=record is not None,
+            detail=(
+                f"{strategy_id} found in paper strategy registry"
+                if record is not None
+                else f"{strategy_id or 'missing'} is not registered"
+            ),
+        ),
+        PaperStrategyGateCheck(
+            name="Strategy paper-running",
+            passed=is_paper_strategy_running(record),
+            detail=_strategy_status_detail(record),
+        ),
+        _allowed_symbols_check(record, proposal),
+        _max_order_notional_check(record, proposal),
+    ]
+    blockers = [check.name for check in checks if not check.passed]
+    passed = not blockers
+    return PaperStrategyGateResult(
+        strategy_id=strategy_id,
+        passed=passed,
+        message=(
+            "Paper strategy gate passed."
+            if passed
+            else "Blocked by: " + ", ".join(blockers)
+        ),
+        checks=tuple(checks),
+        record=record,
+    )
+
+
 def _registry_columns() -> list[str]:
     return [
         "strategy_id",
@@ -263,6 +347,82 @@ def _registry_columns() -> list[str]:
         "source_artifact",
         "metadata_json",
     ]
+
+
+def _proposal_strategy_ids(proposal: Any) -> set[str]:
+    ids: set[str] = set()
+    proposal_strategy = _text(getattr(proposal, "strategy_id", None))
+    if proposal_strategy:
+        ids.add(proposal_strategy)
+    for intent in getattr(proposal, "intents", ()) or ():
+        intent_strategy = _text(getattr(intent, "strategy_id", None))
+        if intent_strategy:
+            ids.add(intent_strategy)
+    return ids
+
+
+def _strategy_status_detail(record: dict[str, Any] | None) -> str:
+    if not record:
+        return "missing paper strategy registry record"
+    return (
+        f"status={record.get('status') or 'missing'}, "
+        f"kill_switch={str(bool(record.get('kill_switch'))).lower()}"
+    )
+
+
+def _allowed_symbols_check(
+    record: dict[str, Any] | None,
+    proposal: Any,
+) -> PaperStrategyGateCheck:
+    allowed = tuple(record.get("allowed_symbols", ())) if record else ()
+    symbols = tuple(
+        str(getattr(getattr(intent, "instrument", None), "symbol", "")).upper()
+        for intent in getattr(proposal, "intents", ()) or ()
+    )
+    symbols = tuple(symbol for symbol in symbols if symbol)
+    if not allowed:
+        return PaperStrategyGateCheck(
+            name="Strategy symbol allowlist",
+            passed=True,
+            detail="no per-strategy symbol allowlist",
+            metadata={"symbols": list(symbols)},
+        )
+    missing = sorted(set(symbols) - set(allowed))
+    return PaperStrategyGateCheck(
+        name="Strategy symbol allowlist",
+        passed=not missing,
+        detail=(
+            f"symbols={', '.join(symbols) or 'none'} allowed={', '.join(allowed)}"
+        ),
+        metadata={"missing": missing, "symbols": list(symbols), "allowed": list(allowed)},
+    )
+
+
+def _max_order_notional_check(
+    record: dict[str, Any] | None,
+    proposal: Any,
+) -> PaperStrategyGateCheck:
+    limit = _optional_float(record.get("max_order_notional")) if record else None
+    notionals = tuple(
+        _optional_float(getattr(intent, "estimated_notional", None))
+        for intent in getattr(proposal, "intents", ()) or ()
+    )
+    if limit is None:
+        return PaperStrategyGateCheck(
+            name="Strategy max order notional",
+            passed=True,
+            detail="no per-strategy max order notional",
+        )
+    missing = any(value is None for value in notionals)
+    too_large = [value for value in notionals if value is not None and value > limit]
+    passed = not missing and not too_large
+    max_seen = max((value or 0.0 for value in notionals), default=0.0)
+    return PaperStrategyGateCheck(
+        name="Strategy max order notional",
+        passed=passed,
+        detail=f"max_intent_notional={max_seen:,.2f} limit={limit:,.2f}",
+        metadata={"missing_notional": missing, "too_large": too_large},
+    )
 
 
 def _paper_strategy_status(value: PaperStrategyStatus | str) -> PaperStrategyStatus:
@@ -306,6 +466,13 @@ def _datetime_text(value: str | datetime) -> str:
     if isinstance(value, datetime):
         return value.replace(microsecond=0).isoformat()
     return str(value)
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _optional_float(value: Any) -> float | None:

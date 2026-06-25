@@ -8,15 +8,18 @@ from pathlib import Path
 from oqp.accounts import load_account_trade_events
 from oqp.brokers import get_broker_profile_config
 from oqp.config import load_settings
+from oqp.contracts import CandidateStatus, StrategyCandidate
 from oqp.domain import AssetClass, Instrument, OrderSide, OrderType
 from oqp.execution import OrderIntent, TradeProposal
 from oqp.paper_trading import (
     PaperExecutionPolicy,
     PaperOrderTicketStatus,
+    PaperStrategyStatus,
     create_dry_run_order_tickets,
     load_latest_paper_orders,
     review_paper_execution_proposal,
     set_paper_order_ticket_approval,
+    upsert_paper_strategy_from_candidate,
 )
 
 
@@ -47,6 +50,30 @@ def proposal() -> TradeProposal:
     )
 
 
+def candidate() -> StrategyCandidate:
+    return StrategyCandidate(
+        candidate_id="candidate-001",
+        strategy_id="strategy-001",
+        source="unit_test",
+        promotion_status=CandidateStatus.PAPER_CANDIDATE,
+        native_market_vertical="EQUITY_US",
+        tested_market_vertical="EQUITY_US",
+        target_market_vertical="EQUITY_US",
+    )
+
+
+def register_strategy(db_path: Path) -> None:
+    upsert_paper_strategy_from_candidate(
+        db_path,
+        candidate(),
+        status=PaperStrategyStatus.RUNNING,
+        max_order_notional=2_000,
+        max_daily_notional=5_000,
+        allowed_symbols=("SPY",),
+        approved_by="unit-test",
+    )
+
+
 class PaperOrderRouterTests(unittest.TestCase):
     def test_ready_review_creates_dry_run_tickets_and_events(self) -> None:
         tmp, settings = settings_from_lines(
@@ -63,6 +90,7 @@ class PaperOrderRouterTests(unittest.TestCase):
         broker_config = get_broker_profile_config("ibkr_paper_readonly", settings=settings)
         paper_db = Path(tmp.name) / "paper.db"
         account_db = Path(tmp.name) / "accounts.db"
+        register_strategy(paper_db)
         trade_proposal = proposal()
         review = review_paper_execution_proposal(
             trade_proposal,
@@ -105,6 +133,7 @@ class PaperOrderRouterTests(unittest.TestCase):
         broker_config = get_broker_profile_config("ibkr_paper_readonly", settings=settings)
         paper_db = Path(tmp.name) / "paper.db"
         account_db = Path(tmp.name) / "accounts.db"
+        register_strategy(paper_db)
         trade_proposal = proposal()
         review = review_paper_execution_proposal(
             trade_proposal,
@@ -146,6 +175,36 @@ class PaperOrderRouterTests(unittest.TestCase):
         self.assertEqual(events.iloc[0]["event_type"], "paper_order_ticket_approved")
         self.assertEqual(events.iloc[0]["order_id"], "paper-dryrun-proposal-001-1")
         self.assertIn('"broker_submit_enabled": false', events.iloc[0]["metadata_json"])
+
+    def test_ready_review_without_running_strategy_creates_no_tickets(self) -> None:
+        tmp, settings = settings_from_lines(
+            [
+                "ALLOW_PAPER_TRADING=true",
+                "ALLOW_LIVE_TRADING=false",
+                "PAPER_ALLOWED_SYMBOLS=SPY",
+                "PAPER_ALLOWED_ASSET_CLASSES=etf",
+            ]
+        )
+        self.addCleanup(tmp.cleanup)
+        broker_config = get_broker_profile_config("ibkr_paper_readonly", settings=settings)
+        trade_proposal = proposal()
+        review = review_paper_execution_proposal(
+            trade_proposal,
+            settings=settings,
+            broker_config=broker_config,
+        )
+
+        result = create_dry_run_order_tickets(
+            trade_proposal,
+            review=review,
+            paper_ledger_path=Path(tmp.name) / "paper.db",
+            account_ledger_path=Path(tmp.name) / "accounts.db",
+            broker_config=broker_config,
+        )
+
+        self.assertEqual(result.status.value, "blocked")
+        self.assertEqual(result.order_count, 0)
+        self.assertIn("paper strategy gate is blocked", result.message)
 
     def test_blocked_review_creates_no_tickets(self) -> None:
         tmp, settings = settings_from_lines(["ALLOW_LIVE_TRADING=false"])
