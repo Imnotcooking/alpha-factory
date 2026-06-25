@@ -1,4 +1,4 @@
-"""Operations dashboard for live-account read-only monitoring."""
+"""Operations command center for Alpha Factory."""
 
 from __future__ import annotations
 
@@ -14,27 +14,9 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from apps.broker_monitor import (  # noqa: E402
-    connect_readonly_snapshot,
-    render_account_metrics,
-    render_broker_health_json,
-    render_cash_table,
-    render_open_orders_table,
-    render_positions_table,
-    yes_no,
-)
-from oqp.brokers import (  # noqa: E402
-    BrokerProfileError,
-    get_broker_adapter,
-    get_broker_profile_config,
-)
+from oqp.accounts import default_account_ledger_path  # noqa: E402
 from oqp.config import load_settings  # noqa: E402
-from oqp.portfolio import (  # noqa: E402
-    compute_nav_drawdowns,
-    default_portfolio_ledger_path,
-    load_historical_nav,
-    load_latest_live_positions,
-)
+from oqp.ops import collect_ops_status  # noqa: E402
 
 
 def display_path(path: Path) -> str:
@@ -44,120 +26,146 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-st.set_page_config(page_title="Ops Monitor", layout="wide", page_icon="OPS")
+def status_label(status: str) -> str:
+    return status.upper()
+
+
+def money(value: object) -> str:
+    try:
+        return f"{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def status_dataframe(rows: list[dict[str, object]]) -> None:
+    if not rows:
+        st.info("No status rows available.")
+        return
+    frame = pd.DataFrame(rows)
+    st.dataframe(
+        frame,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Status": st.column_config.TextColumn("Status", width="small"),
+            "Detail": st.column_config.TextColumn("Detail", width="large"),
+        },
+    )
+
+
+def category_rows(frame: pd.DataFrame, category: str) -> list[dict[str, object]]:
+    if frame.empty:
+        return []
+    return frame[frame["Category"].eq(category)].to_dict("records")
+
+
+st.set_page_config(page_title="Ops Dashboard", layout="wide", page_icon="OPS")
 
 settings = load_settings()
+snapshot = collect_ops_status(settings=settings)
+items_df = pd.DataFrame(snapshot.item_rows)
+account_df = pd.DataFrame(snapshot.account_rows)
+account_ledger_path = default_account_ledger_path()
 
-st.title("Ops Monitor")
-st.caption("Live IBKR account monitor. Read-only by design.")
-st.error("Live order placement is unavailable from this dashboard.")
+st.title("Ops Dashboard")
+st.caption(f"Checked at {snapshot.checked_at.isoformat(timespec='seconds')}")
 
-ledger_path = default_portfolio_ledger_path()
-ledger_df = load_latest_live_positions(ledger_path)
-nav_df = compute_nav_drawdowns(load_historical_nav(ledger_path))
+overall_counts = items_df["Status"].value_counts().to_dict() if not items_df.empty else {}
+top_cols = st.columns(5)
+top_cols[0].metric("Overall", status_label(snapshot.overall_status))
+top_cols[1].metric("Failures", str(overall_counts.get("fail", 0)))
+top_cols[2].metric("Warnings", str(overall_counts.get("warn", 0)))
+top_cols[3].metric("Checks", str(len(items_df)))
+top_cols[4].metric("Accounts", str(len(account_df)))
 
-st.subheader("Unified Portfolio Ledger")
-if ledger_df.empty:
-    st.info(
-        "No unified portfolio snapshot found yet. Run the live portfolio "
-        "snapshot job to populate the shared live_positions ledger."
-    )
+st.divider()
+
+st.subheader("Account Snapshots")
+if account_df.empty:
+    st.warning(f"No unified account snapshots found in {display_path(account_ledger_path)}.")
 else:
-    ledger_cols = st.columns(4)
-    ledger_cols[0].metric("Snapshot Date", str(ledger_df["date"].iloc[0]))
-    ledger_cols[1].metric("Ledger Rows", str(len(ledger_df)))
-    ledger_cols[2].metric("Brokers", str(ledger_df["broker"].nunique()))
-    ledger_cols[3].metric("Options", str(ledger_df["asset_type"].eq("Option").sum()))
-    st.dataframe(ledger_df, use_container_width=True, hide_index=True)
-st.caption(f"Ledger database: {display_path(ledger_path)}")
-
-st.subheader("Portfolio Equity History")
-if nav_df.empty:
-    st.info(
-        "No NAV history found yet. Run the portfolio snapshot job after "
-        "positions are populated to write the first NAV row."
+    account_view = account_df.copy()
+    account_view["NAV"] = account_view["net_liquidation"].map(money)
+    account_view["Cash"] = account_view["cash"].map(money)
+    account_view["Daily P&L"] = account_view["daily_pnl"].map(money)
+    account_view["Age Hours"] = account_view["age_hours"].map(
+        lambda value: "" if value is None else f"{float(value):.2f}"
     )
+    account_view = account_view[
+        [
+            "environment",
+            "profile",
+            "account_id",
+            "as_of",
+            "NAV",
+            "Cash",
+            "Daily P&L",
+            "position_count",
+            "Age Hours",
+        ]
+    ].rename(
+        columns={
+            "environment": "Environment",
+            "profile": "Profile",
+            "account_id": "Account",
+            "as_of": "As Of",
+            "position_count": "Positions",
+        }
+    )
+    st.dataframe(account_view, use_container_width=True, hide_index=True)
+st.caption(f"Account ledger: {display_path(account_ledger_path)}")
+
+if not items_df.empty:
+    failed_or_warn = items_df[items_df["Status"].isin(["fail", "warn"])]
 else:
-    latest_nav = nav_df.iloc[-1]
-    max_drawdown = float(nav_df["drawdown"].min())
-    max_drawdown_pct = float(nav_df["drawdown_pct"].min()) * 100
-    nav_cols = st.columns(4)
-    nav_cols[0].metric("NAV Days", str(len(nav_df)))
-    nav_cols[1].metric("Latest NAV", f"{float(latest_nav['total_net_worth']):,.2f}")
-    nav_cols[2].metric("Daily PnL", f"{float(latest_nav['daily_pnl']):,.2f}")
-    nav_cols[3].metric(
-        "Max Drawdown",
-        f"{max_drawdown:,.2f}",
-        f"{max_drawdown_pct:.2f}%",
-    )
-    nav_chart = nav_df.set_index("date")[["total_net_worth", "equity_peak"]]
-    drawdown_chart = nav_df.set_index("date")[["drawdown"]]
-    st.line_chart(nav_chart)
-    st.line_chart(drawdown_chart)
+    failed_or_warn = pd.DataFrame()
 
-if not settings.ibkr_live_monitor_enabled:
-    st.warning(
-        "Live read-only monitoring is disabled. Set "
-        "IBKR_LIVE_MONITOR_ENABLED=true only on a secured server/session."
-    )
-    st.stop()
-
-try:
-    broker_config = get_broker_profile_config("ibkr_live_readonly", settings=settings)
-except BrokerProfileError as exc:
-    st.warning(str(exc))
-    st.stop()
-
-broker = get_broker_adapter("ibkr", settings=settings)
-snapshot = connect_readonly_snapshot(broker, broker_config)
-broker_health = snapshot["health"]
-account_summary = snapshot["account_summary"]
-cash_balances = snapshot["cash_balances"]
-positions = snapshot["positions"]
-open_orders = snapshot["open_orders"]
-snapshot_error = snapshot["snapshot_error"]
-
-summary_cols = st.columns(4)
-summary_cols[0].metric("Profile", broker_config.metadata.get("profile", ""))
-summary_cols[1].metric("IBKR", broker_health.status.value)
-summary_cols[2].metric("Snapshot", "ready" if account_summary else "offline")
-summary_cols[3].metric("Positions", str(len(positions)))
-
-if account_summary:
-    render_account_metrics(account_summary)
-elif snapshot_error:
-    st.warning(f"Connected to IBKR, but snapshot fetch failed: {snapshot_error}")
+st.subheader("Attention")
+if failed_or_warn.empty:
+    st.success("All collected checks are passing.")
 else:
-    st.info(
-        "Log in to live TWS or IB Gateway on this host and enable API socket access. "
-        "The dashboard connects read-only to the local socket."
-    )
+    status_dataframe(failed_or_warn.to_dict("records"))
 
-left, right = st.columns([1.4, 1])
-
+left, right = st.columns(2)
 with left:
-    st.subheader("Live Read-Only Positions")
-    render_positions_table(positions)
+    st.subheader("Gateways")
+    status_dataframe(category_rows(items_df, "Gateway"))
 
 with right:
-    st.subheader("Cash Balances")
-    render_cash_table(cash_balances)
+    st.subheader("Safety Gates")
+    status_dataframe(category_rows(items_df, "Safety"))
 
-st.subheader("Open Orders")
-render_open_orders_table(open_orders)
+left, right = st.columns(2)
+with left:
+    st.subheader("Schedulers And Jobs")
+    status_dataframe(category_rows(items_df, "Schedulers") + category_rows(items_df, "Jobs"))
 
-st.subheader("Runtime Guardrails")
-guardrails_df = pd.DataFrame(
-    [
-        {"Check": "Live monitor enabled", "Value": yes_no(settings.ibkr_live_monitor_enabled)},
-        {"Check": "Live trading allowed", "Value": yes_no(settings.allow_live_trading)},
-        {"Check": "Broker read-only", "Value": yes_no(broker_config.readonly)},
-        {"Check": "Host", "Value": broker_config.host},
-        {"Check": "Port", "Value": str(broker_config.port)},
-        {"Check": "Client ID", "Value": str(broker_config.client_id)},
-    ]
+with right:
+    st.subheader("Notifications")
+    status_dataframe(category_rows(items_df, "Notifications"))
+
+st.subheader("Host Health")
+host_cols = st.columns(4)
+host_cols[0].metric(
+    "Disk Used",
+    f"{float(snapshot.host_summary.get('disk_used_pct', 0.0)) * 100:.1f}%",
 )
-st.dataframe(guardrails_df, use_container_width=True, hide_index=True)
+host_cols[1].metric(
+    "Disk Free",
+    f"{float(snapshot.host_summary.get('disk_free_gb', 0.0)):.1f} GB",
+)
+memory_used = snapshot.host_summary.get("memory_used_pct")
+host_cols[2].metric(
+    "Memory Used",
+    "n/a" if memory_used is None else f"{float(memory_used) * 100:.1f}%",
+)
+host_cols[3].metric(
+    "Memory Free",
+    "n/a"
+    if snapshot.host_summary.get("memory_free_gb") is None
+    else f"{float(snapshot.host_summary.get('memory_free_gb')):.1f} GB",
+)
+status_dataframe(category_rows(items_df, "Host"))
 
-with st.expander("Broker Health Payload", expanded=False):
-    render_broker_health_json(broker_health)
+with st.expander("All Checks", expanded=False):
+    status_dataframe(snapshot.item_rows)
