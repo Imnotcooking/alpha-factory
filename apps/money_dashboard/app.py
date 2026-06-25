@@ -20,8 +20,11 @@ from oqp.accounts import (  # noqa: E402
     account_asset_summary,
     account_nav_drawdowns,
     account_positions_display,
+    account_trade_event_summary,
+    account_trade_events_display,
     default_account_ledger_path,
     load_account_nav_history,
+    load_account_trade_events,
     load_latest_account_nav,
     load_latest_account_positions,
 )
@@ -281,6 +284,11 @@ live_account_positions = load_latest_account_positions(
     account_ledger_path,
     environment="live",
 )
+live_account_events = load_account_trade_events(
+    account_ledger_path,
+    environment="live",
+    limit=25,
+)
 ledger_path = default_portfolio_ledger_path()
 positions = load_latest_live_positions(ledger_path)
 enriched_positions = enrich_positions(positions)
@@ -419,6 +427,24 @@ with account_right:
         {"Item": "As Of", "Value": dashboard_snapshot},
     ]
     st.dataframe(pd.DataFrame(account_state_rows), use_container_width=True, hide_index=True)
+
+st.subheader("Unified Live Trade Events")
+if live_account_events.empty:
+    st.info("No live account trade events have been recorded yet.")
+else:
+    events_left, events_right = st.columns([1.3, 1])
+    with events_left:
+        st.dataframe(
+            account_trade_events_display(live_account_events),
+            use_container_width=True,
+            hide_index=True,
+        )
+    with events_right:
+        st.dataframe(
+            account_trade_event_summary(live_account_events),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 st.subheader("Legacy Portfolio Ledger")
 if enriched_positions.empty:

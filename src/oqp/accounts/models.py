@@ -95,6 +95,23 @@ class TradeEvent:
     broker_order_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not self.event_id.strip():
+            raise ValueError("TradeEvent.event_id is required")
+        if not self.event_type.strip():
+            raise ValueError("TradeEvent.event_type is required")
+        if not self.broker.strip():
+            raise ValueError("TradeEvent.broker is required")
+        if not self.profile.strip():
+            raise ValueError("TradeEvent.profile is required")
+        if not self.symbol.strip():
+            raise ValueError("TradeEvent.symbol is required")
+
+    @property
+    def account_key(self) -> str:
+        account = self.account_id or "unknown"
+        return f"{self.environment.value}:{self.broker}:{self.profile}:{account}"
+
 
 @dataclass(frozen=True, slots=True)
 class AccountSnapshot:

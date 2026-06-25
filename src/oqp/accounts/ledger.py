@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from oqp.accounts.models import AccountSnapshot
+from oqp.accounts.models import AccountSnapshot, TradeEvent
 from oqp.config.paths import REPO_ROOT
 
 
@@ -152,6 +152,23 @@ class AccountSnapshotWriteResult:
             "cash_rows": self.cash_rows,
             "net_liquidation": self.net_liquidation,
             "daily_pnl": self.daily_pnl,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AccountTradeEventWriteResult:
+    db_path: Path
+    event_ids: tuple[str, ...]
+
+    @property
+    def event_count(self) -> int:
+        return len(self.event_ids)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "db_path": str(self.db_path),
+            "event_count": self.event_count,
+            "event_ids": list(self.event_ids),
         }
 
 
@@ -387,6 +404,140 @@ def write_account_snapshot(
     )
 
 
+def write_account_trade_event(
+    db_path: str | Path,
+    event: TradeEvent,
+) -> AccountTradeEventWriteResult:
+    return write_account_trade_events(db_path, [event])
+
+
+def write_account_trade_events(
+    db_path: str | Path,
+    events: list[TradeEvent] | tuple[TradeEvent, ...],
+) -> AccountTradeEventWriteResult:
+    path = ensure_account_ledger_schema(db_path)
+    if not events:
+        return AccountTradeEventWriteResult(db_path=path, event_ids=())
+
+    with closing(sqlite3.connect(path)) as conn:
+        for event in events:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO account_trade_events (
+                    event_id,
+                    account_key,
+                    account_id,
+                    broker,
+                    profile,
+                    environment,
+                    event_type,
+                    symbol,
+                    side,
+                    quantity,
+                    price,
+                    commission,
+                    currency,
+                    occurred_at,
+                    strategy_id,
+                    order_id,
+                    broker_order_id,
+                    metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.account_key,
+                    event.account_id,
+                    event.broker,
+                    event.profile,
+                    event.environment.value,
+                    event.event_type,
+                    event.symbol,
+                    event.side,
+                    _optional_float(event.quantity),
+                    _optional_float(event.price),
+                    _optional_float(event.commission),
+                    event.currency,
+                    event.occurred_at.isoformat(),
+                    event.strategy_id,
+                    event.order_id,
+                    event.broker_order_id,
+                    _json(event.metadata),
+                ),
+            )
+        conn.commit()
+
+    return AccountTradeEventWriteResult(
+        db_path=path,
+        event_ids=tuple(event.event_id for event in events),
+    )
+
+
+def load_account_trade_events(
+    db_path: str | Path,
+    *,
+    account_key: str | None = None,
+    environment: str | None = None,
+    profile: str | None = None,
+    event_type: str | None = None,
+    since: str | date | datetime | None = None,
+    limit: int = 50,
+) -> pd.DataFrame:
+    columns = [
+        "event_id",
+        "account_key",
+        "account_id",
+        "broker",
+        "profile",
+        "environment",
+        "event_type",
+        "symbol",
+        "side",
+        "quantity",
+        "price",
+        "commission",
+        "currency",
+        "occurred_at",
+        "strategy_id",
+        "order_id",
+        "broker_order_id",
+        "metadata_json",
+    ]
+    path = Path(db_path)
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+
+    ensure_account_ledger_schema(path)
+    where, params = _filters(
+        account_key=account_key,
+        environment=environment,
+        profile=profile,
+    )
+    clauses = [] if not where else [where.removeprefix("WHERE ")]
+    extra_params: list[Any] = list(params)
+    if event_type:
+        clauses.append("event_type = ?")
+        extra_params.append(event_type)
+    if since is not None:
+        clauses.append("occurred_at >= ?")
+        extra_params.append(_datetime_text(since))
+    where_clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+    query = f"""
+        SELECT {", ".join(columns)}
+        FROM account_trade_events
+        {where_clause}
+        ORDER BY occurred_at DESC, event_id DESC
+        LIMIT ?
+    """
+    with closing(sqlite3.connect(path)) as conn:
+        return pd.read_sql(
+            query,
+            conn,
+            params=(*extra_params, max(int(limit), 1)),
+        )
+
+
 def load_latest_account_nav(
     db_path: str | Path,
     *,
@@ -572,6 +723,14 @@ def _json(payload: dict[str, Any]) -> str:
 def _date_text(value: str | date | datetime) -> str:
     if isinstance(value, datetime):
         return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
+
+
+def _datetime_text(value: str | date | datetime) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()
     return str(value)

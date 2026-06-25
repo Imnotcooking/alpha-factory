@@ -12,12 +12,16 @@ from oqp.accounts import (
     AccountSnapshot,
     CashSnapshot,
     PositionSnapshot,
+    TradeEvent,
     write_account_snapshot,
+    write_account_trade_event,
 )
 from oqp.ops.status import (
+    account_event_items,
     command_status,
     discord_status_items,
     host_health_items,
+    latest_account_event_rows,
     latest_account_rows,
     socket_status_item,
 )
@@ -69,6 +73,38 @@ class OpsStatusTests(unittest.TestCase):
         self.assertEqual(rows[0]["account_id"], "U1***56")
         self.assertEqual(rows[1]["account_id"], "DU***56")
         self.assertEqual(rows[0]["position_count"], 1)
+
+    def test_latest_account_event_rows_redacts_and_reports_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "accounts.db"
+            write_account_trade_event(
+                db_path,
+                TradeEvent(
+                    event_id="evt-001",
+                    event_type="paper_review",
+                    occurred_at=datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc),
+                    account_id="DU123456",
+                    broker="ibkr",
+                    profile="ibkr_paper_readonly",
+                    environment=AccountEnvironment.PAPER,
+                    symbol="SPY",
+                    side="buy",
+                    quantity=1,
+                    price=500,
+                    currency="USD",
+                    strategy_id="strategy-001",
+                    order_id="proposal-001",
+                ),
+            )
+
+            rows = latest_account_event_rows(db_path)
+            items = account_event_items(rows)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["account_id"], "DU***56")
+        self.assertEqual(rows[0]["event_type"], "paper_review")
+        self.assertEqual(items[0].status, "pass")
+        self.assertIn("events=1", items[0].detail)
 
     def test_socket_status_item_passes_for_reachable_port(self) -> None:
         with patch("socket.create_connection") as create_connection:

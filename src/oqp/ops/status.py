@@ -19,7 +19,11 @@ from typing import Any
 
 import pandas as pd
 
-from oqp.accounts import default_account_ledger_path, ensure_account_ledger_schema
+from oqp.accounts import (
+    default_account_ledger_path,
+    ensure_account_ledger_schema,
+    load_account_trade_events,
+)
 from oqp.config import REPO_ROOT, OQPSettings, load_settings
 
 
@@ -66,6 +70,7 @@ class OpsStatusSnapshot:
     checked_at: datetime
     items: tuple[OpsStatusItem, ...]
     account_rows: tuple[dict[str, Any], ...]
+    event_rows: tuple[dict[str, Any], ...]
     host_summary: dict[str, Any]
 
     @property
@@ -95,6 +100,7 @@ def collect_ops_status(
     root = Path(repo_root)
 
     account_rows = latest_account_rows(ledger_path)
+    event_rows = latest_account_event_rows(ledger_path)
     items: list[OpsStatusItem] = []
     items.extend(
         [
@@ -113,6 +119,7 @@ def collect_ops_status(
         ]
     )
     items.extend(account_freshness_items(account_rows, max_age_hours=max_age_hours))
+    items.extend(account_event_items(event_rows))
     items.extend(
         health_file_items(
             Path(portfolio_health_path),
@@ -140,6 +147,7 @@ def collect_ops_status(
         checked_at=datetime.now(timezone.utc),
         items=tuple(items),
         account_rows=tuple(account_rows),
+        event_rows=tuple(event_rows),
         host_summary=host_summary,
     )
 
@@ -185,6 +193,36 @@ def latest_account_rows(db_path: str | Path) -> list[dict[str, Any]]:
                 "position_count": int(row.get("position_count") or 0),
                 "snapshot_id": row.get("snapshot_id"),
                 "age_hours": _datetime_age_hours(row.get("as_of")),
+            }
+        )
+    return rows
+
+
+def latest_account_event_rows(db_path: str | Path, *, limit: int = 20) -> list[dict[str, Any]]:
+    path = Path(db_path)
+    if not path.exists():
+        return []
+
+    frame = load_account_trade_events(path, limit=limit)
+    if frame.empty:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for row in frame.to_dict("records"):
+        rows.append(
+            {
+                "occurred_at": row.get("occurred_at"),
+                "environment": row.get("environment"),
+                "profile": row.get("profile"),
+                "account_id": _redact_account(row.get("account_id")),
+                "event_type": row.get("event_type"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "quantity": _float(row.get("quantity")),
+                "price": _float(row.get("price")),
+                "strategy_id": row.get("strategy_id"),
+                "order_id": row.get("order_id"),
+                "broker_order_id": row.get("broker_order_id"),
             }
         )
     return rows
@@ -238,6 +276,33 @@ def account_freshness_items(
             )
         )
     return items
+
+
+def account_event_items(rows: list[dict[str, Any]]) -> list[OpsStatusItem]:
+    if not rows:
+        return [
+            OpsStatusItem(
+                "Accounts",
+                "Account trade events",
+                "pass",
+                "No account trade events recorded yet.",
+            )
+        ]
+
+    latest = rows[0]
+    environments = sorted({str(row.get("environment") or "") for row in rows})
+    return [
+        OpsStatusItem(
+            "Accounts",
+            "Account trade events",
+            "pass",
+            (
+                f"events={len(rows)} latest={latest.get('event_type')} "
+                f"{latest.get('symbol')} at {latest.get('occurred_at')}"
+            ),
+            {"Environments": ", ".join(item for item in environments if item)},
+        )
+    ]
 
 
 def socket_status_item(

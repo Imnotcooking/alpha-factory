@@ -19,6 +19,12 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from oqp.brokers import get_broker_profile_config  # noqa: E402
+from oqp.accounts import (  # noqa: E402
+    account_trade_events_from_proposal_review,
+    default_account_ledger_path,
+    load_latest_account_nav,
+    write_account_trade_events,
+)
 from oqp.config import load_settings  # noqa: E402
 from oqp.execution import (  # noqa: E402
     TradeProposal,
@@ -48,6 +54,11 @@ def parse_args() -> argparse.Namespace:
         "--db-path",
         default=str(default_paper_trading_ledger_path()),
         help="SQLite paper trading ledger path.",
+    )
+    parser.add_argument(
+        "--account-ledger-path",
+        default=str(default_account_ledger_path()),
+        help="Unified account ledger path for paper review events.",
     )
     parser.add_argument(
         "--env-file",
@@ -82,6 +93,7 @@ def main() -> int:
     args = parse_args()
     settings = load_settings(args.env_file)
     db_path = Path(args.db_path)
+    account_ledger_path = Path(args.account_ledger_path)
     proposal_path = (
         Path(args.proposal_path)
         if args.proposal_path is not None
@@ -91,6 +103,11 @@ def main() -> int:
     proposals = _load_proposals(proposal_path, max_files=args.max_files)
     broker_config = get_broker_profile_config("ibkr_paper_readonly", settings=settings)
     daily_used = paper_order_notional_today(db_path)
+    account_id = broker_config.account_id or _latest_account_id(
+        account_ledger_path,
+        environment="paper",
+        profile=str(broker_config.metadata.get("profile") or "ibkr_paper_readonly"),
+    )
 
     reviews = []
     for proposal in proposals:
@@ -110,10 +127,27 @@ def main() -> int:
             message=review.message,
             reviewed_at=review.reviewed_at,
         )
+        event_result = write_account_trade_events(
+            account_ledger_path,
+            account_trade_events_from_proposal_review(
+                proposal,
+                decision=review.decision.value,
+                reviewed_at=review.reviewed_at,
+                environment="paper",
+                profile=str(
+                    broker_config.metadata.get("profile") or "ibkr_paper_readonly"
+                ),
+                broker=broker_config.broker,
+                account_id=account_id,
+                review_id=write_result.review_id,
+                message=review.message,
+            ),
+        )
         payload = {
             "proposal": proposal.proposal_id,
             "review": review.to_dict(),
             "write": write_result.to_dict(),
+            "account_events": event_result.to_dict(),
         }
         reviews.append(payload)
         if args.notify:
@@ -146,6 +180,24 @@ def _load_proposals(path: Path, *, max_files: int) -> list[TradeProposal]:
     return [loaded.proposal for loaded in result.loaded]
 
 
+def _latest_account_id(
+    account_ledger_path: Path,
+    *,
+    environment: str,
+    profile: str,
+) -> str | None:
+    nav = load_latest_account_nav(
+        account_ledger_path,
+        environment=environment,
+        profile=profile,
+    )
+    if nav.empty:
+        return None
+    value = nav.iloc[0].get("account_id")
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
 def _print_reviews(result: dict[str, Any]) -> None:
     reviews = result["reviews"]
     if not reviews:
@@ -158,6 +210,9 @@ def _print_reviews(result: dict[str, Any]) -> None:
             f"orders={review['order_count']} "
             f"notional={_money(review['estimated_notional'])}"
         )
+        account_events = item.get("account_events", {})
+        if account_events:
+            print(f"        account_events={account_events.get('event_count', 0)}")
         print(f"        {review['message']}")
         for check in review["checks"]:
             status = "PASS" if check["passed"] else "FAIL"
@@ -202,6 +257,7 @@ def _post_discord(payload: dict[str, Any]) -> None:
 
 def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
     review = payload["review"]
+    account_events = payload.get("account_events", {})
     failed = [
         check for check in review["checks"]
         if not check["passed"] and check["severity"] == "block"
@@ -211,6 +267,7 @@ def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _discord_field("Decision", review["decision"].upper()),
         _discord_field("Orders", str(review["order_count"])),
         _discord_field("Estimated Notional", _money(review["estimated_notional"])),
+        _discord_field("Account Events", str(account_events.get("event_count", 0))),
         _discord_field("Message", review["message"]),
     ]
     for check in failed[:5]:

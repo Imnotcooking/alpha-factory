@@ -20,8 +20,11 @@ from oqp.accounts import (  # noqa: E402
     account_asset_summary,
     account_nav_drawdowns,
     account_positions_display,
+    account_trade_event_summary,
+    account_trade_events_display,
     default_account_ledger_path,
     load_account_nav_history,
+    load_account_trade_events,
     load_latest_account_nav,
     load_latest_account_positions,
 )
@@ -375,6 +378,11 @@ paper_account_positions_df = load_latest_account_positions(
     account_ledger_path,
     environment="paper",
 )
+paper_account_events_df = load_account_trade_events(
+    account_ledger_path,
+    environment="paper",
+    limit=50,
+)
 paper_nav_df = load_latest_paper_nav(paper_ledger_path)
 paper_positions_df = load_latest_paper_positions(paper_ledger_path)
 paper_reviews_df = load_latest_paper_execution_reviews(paper_ledger_path, limit=25)
@@ -513,7 +521,7 @@ summary_cols[1].metric("Snapshot", "ready" if account_summary else "offline")
 summary_cols[2].metric("IBKR", broker_health.status.value)
 summary_cols[3].metric("Paper NAV", format_money(paper_nav_value) or "missing")
 summary_cols[4].metric("Review Queue", str(unreviewed_proposal_count))
-summary_cols[5].metric("NAV Source", paper_nav_source)
+summary_cols[5].metric("Account Events", str(len(paper_account_events_df)))
 
 st.error("Execution locked. Order placement remains unavailable.")
 
@@ -573,6 +581,25 @@ with account_right:
         use_container_width=True,
         hide_index=True,
     )
+
+st.subheader("Unified Paper Account Events")
+if paper_account_events_df.empty:
+    st.info("No paper account events have been recorded yet.")
+else:
+    event_left, event_right = st.columns([1.4, 1])
+    with event_left:
+        st.dataframe(
+            account_trade_events_display(paper_account_events_df),
+            use_container_width=True,
+            hide_index=True,
+        )
+    with event_right:
+        st.dataframe(
+            account_trade_event_summary(paper_account_events_df),
+            use_container_width=True,
+            hide_index=True,
+        )
+st.caption(f"NAV source: {paper_nav_source}")
 
 st.subheader("Paper Trading Ledger")
 paper_ledger_metric_cols = st.columns(5)

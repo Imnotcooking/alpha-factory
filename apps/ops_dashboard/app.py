@@ -65,18 +65,20 @@ settings = load_settings()
 snapshot = collect_ops_status(settings=settings)
 items_df = pd.DataFrame(snapshot.item_rows)
 account_df = pd.DataFrame(snapshot.account_rows)
+event_df = pd.DataFrame(snapshot.event_rows)
 account_ledger_path = default_account_ledger_path()
 
 st.title("Ops Dashboard")
 st.caption(f"Checked at {snapshot.checked_at.isoformat(timespec='seconds')}")
 
 overall_counts = items_df["Status"].value_counts().to_dict() if not items_df.empty else {}
-top_cols = st.columns(5)
+top_cols = st.columns(6)
 top_cols[0].metric("Overall", status_label(snapshot.overall_status))
 top_cols[1].metric("Failures", str(overall_counts.get("fail", 0)))
 top_cols[2].metric("Warnings", str(overall_counts.get("warn", 0)))
 top_cols[3].metric("Checks", str(len(items_df)))
 top_cols[4].metric("Accounts", str(len(account_df)))
+top_cols[5].metric("Events", str(len(event_df)))
 
 st.divider()
 
@@ -114,6 +116,40 @@ else:
     )
     st.dataframe(account_view, use_container_width=True, hide_index=True)
 st.caption(f"Account ledger: {display_path(account_ledger_path)}")
+
+st.subheader("Recent Account Events")
+if event_df.empty:
+    st.info("No account trade events have been recorded yet.")
+else:
+    event_view = event_df.copy()
+    event_view["Quantity"] = event_view["quantity"].map(
+        lambda value: "" if value is None else f"{float(value):,.4f}"
+    )
+    event_view["Price"] = event_view["price"].map(money)
+    event_view = event_view[
+        [
+            "occurred_at",
+            "environment",
+            "event_type",
+            "symbol",
+            "side",
+            "Quantity",
+            "Price",
+            "strategy_id",
+            "order_id",
+        ]
+    ].rename(
+        columns={
+            "occurred_at": "Occurred",
+            "environment": "Environment",
+            "event_type": "Event",
+            "symbol": "Symbol",
+            "side": "Side",
+            "strategy_id": "Strategy",
+            "order_id": "Order / Proposal",
+        }
+    )
+    st.dataframe(event_view, use_container_width=True, hide_index=True)
 
 if not items_df.empty:
     failed_or_warn = items_df[items_df["Status"].isin(["fail", "warn"])]

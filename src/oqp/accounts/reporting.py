@@ -100,3 +100,69 @@ def account_asset_summary(positions: pd.DataFrame) -> pd.DataFrame:
             }
         )
     )
+
+
+def account_trade_events_display(events: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "Occurred",
+        "Environment",
+        "Event",
+        "Symbol",
+        "Side",
+        "Quantity",
+        "Price",
+        "Strategy",
+        "Order / Proposal",
+        "Broker Order",
+        "Currency",
+    ]
+    if events.empty:
+        return pd.DataFrame(columns=columns)
+
+    display = events.copy()
+    for column in ("quantity", "price", "commission"):
+        if column in display.columns:
+            display[column] = pd.to_numeric(display[column], errors="coerce")
+    rename = {
+        "occurred_at": "Occurred",
+        "environment": "Environment",
+        "event_type": "Event",
+        "symbol": "Symbol",
+        "side": "Side",
+        "quantity": "Quantity",
+        "price": "Price",
+        "strategy_id": "Strategy",
+        "order_id": "Order / Proposal",
+        "broker_order_id": "Broker Order",
+        "currency": "Currency",
+    }
+    return (
+        display.reindex(columns=list(rename))
+        .rename(columns=rename)
+        .reindex(columns=columns)
+    )
+
+
+def account_trade_event_summary(events: pd.DataFrame) -> pd.DataFrame:
+    if events.empty:
+        return pd.DataFrame(columns=["Event", "Rows", "Symbols", "Quantity"])
+
+    out = events.copy()
+    out["quantity"] = pd.to_numeric(out["quantity"], errors="coerce").fillna(0.0)
+    return (
+        out.groupby("event_type")
+        .agg(
+            rows=("event_id", "count"),
+            symbols=("symbol", lambda values: ", ".join(sorted(set(map(str, values))))),
+            quantity=("quantity", "sum"),
+        )
+        .reset_index()
+        .rename(
+            columns={
+                "event_type": "Event",
+                "rows": "Rows",
+                "symbols": "Symbols",
+                "quantity": "Quantity",
+            }
+        )
+    )

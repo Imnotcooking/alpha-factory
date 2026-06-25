@@ -13,6 +13,7 @@ from oqp.accounts.models import (
     AccountSnapshot,
     CashSnapshot,
     PositionSnapshot,
+    TradeEvent,
     account_timestamp,
 )
 from oqp.brokers import IBKRReadOnlyPortfolioSnapshot
@@ -150,6 +151,83 @@ def account_snapshot_from_live_positions_frame(
     )
 
 
+def account_trade_events_from_proposal_review(
+    proposal: Any,
+    *,
+    decision: str,
+    reviewed_at: datetime,
+    environment: AccountEnvironment | str = AccountEnvironment.PAPER,
+    profile: str = "ibkr_paper_readonly",
+    broker: str = "ibkr",
+    account_id: str | None = None,
+    review_id: str | None = None,
+    message: str | None = None,
+) -> tuple[TradeEvent, ...]:
+    """Represent a paper safety review as canonical non-fill account events."""
+
+    env = _environment(environment)
+    proposal_id = _text(getattr(proposal, "proposal_id", None), default="proposal")
+    proposal_strategy_id = _optional_text(getattr(proposal, "strategy_id", None))
+    research_run_id = _optional_text(getattr(proposal, "research_run_id", None))
+    source = _optional_text(getattr(proposal, "source", None))
+    events: list[TradeEvent] = []
+
+    for index, intent in enumerate(tuple(getattr(proposal, "intents", ()) or ()), start=1):
+        instrument = getattr(intent, "instrument", None)
+        symbol = _text(getattr(instrument, "symbol", None), default="UNKNOWN")
+        strategy_id = (
+            _optional_text(getattr(intent, "strategy_id", None))
+            or proposal_strategy_id
+        )
+        price = (
+            _optional_float(getattr(intent, "reference_price", None))
+            or _optional_float(getattr(intent, "limit_price", None))
+            or _optional_float(getattr(intent, "stop_price", None))
+        )
+        metadata = {
+            "proposal_id": proposal_id,
+            "proposal_source": source,
+            "decision": str(decision),
+            "review_id": review_id,
+            "message": message,
+            "intent_index": index,
+            "order_type": _enum_text(getattr(intent, "order_type", None)),
+            "estimated_notional": _optional_float(getattr(intent, "estimated_notional", None)),
+            "signal_id": _optional_text(getattr(intent, "signal_id", None)),
+            "research_run_id": research_run_id,
+            "target_weight": _optional_float(getattr(intent, "target_weight", None)),
+            "confidence": _optional_float(getattr(intent, "confidence", None)),
+            "paper_only": bool(getattr(proposal, "paper_only", True)),
+        }
+        events.append(
+            TradeEvent(
+                event_id=_event_id(
+                    event_type="paper_review",
+                    environment=env,
+                    proposal_id=proposal_id,
+                    index=index,
+                    timestamp=reviewed_at,
+                ),
+                event_type="paper_review",
+                occurred_at=reviewed_at,
+                account_id=account_id,
+                broker=broker,
+                profile=profile,
+                environment=env,
+                symbol=symbol,
+                side=_enum_text(getattr(intent, "side", None)),
+                quantity=_optional_float(getattr(intent, "quantity", None)),
+                price=price,
+                currency=_optional_text(getattr(instrument, "currency", None)) or "USD",
+                strategy_id=strategy_id,
+                order_id=proposal_id,
+                metadata=metadata,
+            )
+        )
+
+    return tuple(events)
+
+
 def position_snapshot_from_legacy_row(row: dict[str, Any]) -> PositionSnapshot:
     symbol = str(row.get("Ticker") or row.get("ticker") or "").strip()
     asset_class = _asset_class(row.get("AssetType") or row.get("asset_type") or "Equity")
@@ -215,6 +293,25 @@ def _snapshot_id(
     return f"acct-{environment.value}-{profile}-{account}-{compact}-{uuid4().hex[:8]}"
 
 
+def _event_id(
+    *,
+    event_type: str,
+    environment: AccountEnvironment,
+    proposal_id: str,
+    index: int,
+    timestamp: datetime,
+) -> str:
+    compact = timestamp.strftime("%Y%m%dT%H%M%SZ")
+    proposal = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "-"
+        for character in proposal_id
+    ).strip("-")
+    return (
+        f"evt-{environment.value}-{event_type}-{proposal or 'proposal'}-"
+        f"{index}-{compact}-{uuid4().hex[:8]}"
+    )
+
+
 def _gross_value(positions: tuple[PositionSnapshot, ...]) -> float | None:
     values = [
         abs(value)
@@ -239,6 +336,24 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _text(value: Any, *, default: str) -> str:
+    return _optional_text(value) or default
+
+
+def _enum_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    enum_value = getattr(value, "value", None)
+    return _optional_text(enum_value if enum_value is not None else value)
 
 
 def _float(value: Any, *, default: float) -> float:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -10,15 +11,22 @@ from pathlib import Path
 import pandas as pd
 
 from oqp.accounts import (
+    AccountEnvironment,
+    TradeEvent,
     account_snapshot_from_ibkr_readonly,
     account_snapshot_from_live_positions_frame,
     account_asset_summary,
     account_nav_drawdowns,
     account_positions_display,
+    account_trade_event_summary,
+    account_trade_events_display,
+    account_trade_events_from_proposal_review,
     ensure_account_ledger_schema,
     load_account_nav_history,
+    load_account_trade_events,
     load_latest_account_nav,
     load_latest_account_positions,
+    write_account_trade_event,
     write_account_snapshot,
 )
 from oqp.brokers import (
@@ -26,6 +34,8 @@ from oqp.brokers import (
     BrokerHealth,
     IBKRReadOnlyPortfolioSnapshot,
 )
+from oqp.domain import AssetClass, Instrument, OrderSide, OrderType
+from oqp.execution import OrderIntent, TradeProposal
 
 
 def sample_ibkr_snapshot(
@@ -202,6 +212,85 @@ class AccountLedgerTests(unittest.TestCase):
         self.assertEqual(display.iloc[0]["Symbol"], "SPY")
         self.assertEqual(summary.iloc[0]["Asset Class"], "etf")
         self.assertEqual(float(summary.iloc[0]["Market Value"]), 1000.0)
+
+    def test_writes_and_loads_account_trade_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "accounts.db"
+            event = TradeEvent(
+                event_id="evt-001",
+                event_type="fill",
+                occurred_at=datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc),
+                account_id="DU123456",
+                broker="ibkr",
+                profile="ibkr_paper_readonly",
+                environment=AccountEnvironment.PAPER,
+                symbol="SPY",
+                side="buy",
+                quantity=2,
+                price=500,
+                commission=1,
+                currency="USD",
+                strategy_id="strategy-001",
+                order_id="order-001",
+                broker_order_id="broker-001",
+                metadata={"proposal_id": "proposal-001"},
+            )
+
+            result = write_account_trade_event(db_path, event)
+            loaded = load_account_trade_events(db_path, environment="paper")
+            display = account_trade_events_display(loaded)
+            summary = account_trade_event_summary(loaded)
+
+        self.assertEqual(result.event_count, 1)
+        self.assertEqual(loaded.iloc[0]["event_id"], "evt-001")
+        self.assertEqual(
+            loaded.iloc[0]["account_key"],
+            "paper:ibkr:ibkr_paper_readonly:DU123456",
+        )
+        self.assertEqual(
+            json.loads(loaded.iloc[0]["metadata_json"])["proposal_id"],
+            "proposal-001",
+        )
+        self.assertEqual(display.iloc[0]["Symbol"], "SPY")
+        self.assertEqual(summary.iloc[0]["Event"], "fill")
+
+    def test_converts_paper_review_to_account_trade_events(self) -> None:
+        proposal = TradeProposal(
+            proposal_id="proposal-001",
+            source="unit_test",
+            strategy_id="strategy-proposal",
+            research_run_id="run-001",
+            intents=(
+                OrderIntent(
+                    instrument=Instrument("SPY", AssetClass.ETF),
+                    side=OrderSide.BUY,
+                    quantity=2,
+                    order_type=OrderType.LIMIT,
+                    limit_price=500,
+                    reference_price=501,
+                    strategy_id="strategy-intent",
+                    signal_id="signal-001",
+                ),
+            ),
+        )
+
+        events = account_trade_events_from_proposal_review(
+            proposal,
+            decision="blocked",
+            reviewed_at=datetime(2026, 6, 25, 12, 0, tzinfo=timezone.utc),
+            account_id="DU123456",
+            review_id="review-001",
+            message="Blocked by switch",
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].event_type, "paper_review")
+        self.assertEqual(events[0].symbol, "SPY")
+        self.assertEqual(events[0].side, "buy")
+        self.assertEqual(events[0].price, 501)
+        self.assertEqual(events[0].strategy_id, "strategy-intent")
+        self.assertEqual(events[0].metadata["decision"], "blocked")
+        self.assertEqual(events[0].metadata["review_id"], "review-001")
 
 
 if __name__ == "__main__":
