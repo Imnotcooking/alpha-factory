@@ -6,6 +6,7 @@
 .env
 .env.*
 !.env.example
+departments/platform/deployment/server.env
 venv/
 .venv/
 */venv/

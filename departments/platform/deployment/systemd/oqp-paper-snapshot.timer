@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Alpha Factory Paper Trading Snapshot on Market Weekdays
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 21:45:00
+Persistent=true
+Unit=oqp-paper-snapshot.service
+
+[Install]
+WantedBy=timers.target

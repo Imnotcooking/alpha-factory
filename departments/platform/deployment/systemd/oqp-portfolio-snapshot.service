@@ -1,0 +1,15 @@
+[Unit]
+Description=Alpha Factory Live Portfolio Snapshot Job
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/oqp_new
+EnvironmentFile=-/home/ubuntu/.oqp_server_env
+Environment=PYTHONPATH=src:.
+ExecStart=/home/ubuntu/oqp_new/scripts/run_portfolio_snapshot_job.sh
+StandardOutput=append:/home/ubuntu/oqp_new/logs/portfolio_snapshot_job.log
+StandardError=append:/home/ubuntu/oqp_new/logs/portfolio_snapshot_job.log

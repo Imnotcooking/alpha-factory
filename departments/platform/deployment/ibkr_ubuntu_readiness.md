@@ -1,5 +1,8 @@
 # IBKR Ubuntu Readiness
 
+For full server rebuild instructions, see
+`departments/platform/deployment/SERVER_RUNBOOK.md`.
+
 ## What To Check
 
 Use the redacted readiness script before running the daily broker ETL:
@@ -44,7 +47,37 @@ For TWS live, use:
 IBKR_LIVE_PORT=7496
 ```
 
-Paper defaults are usually `4002` for IB Gateway paper and `7497` for TWS paper.
+The current reproducible Ubuntu template exposes paper Gateway on local host
+port `7497`, mapped to the container's internal paper API port. Keep
+`IBKR_PAPER_PORT=7497` unless the Compose file is changed too.
+
+## Docker Compose Template
+
+The tracked template is:
+
+```bash
+departments/platform/deployment/docker-compose.ibkr.yml
+```
+
+If the server has Docker but not Docker Compose, use the tracked fallback:
+
+```bash
+departments/platform/deployment/ibkr_gateway_docker_run.sh check
+departments/platform/deployment/ibkr_gateway_docker_run.sh start
+departments/platform/deployment/ibkr_gateway_docker_run.sh status
+```
+
+It binds live, paper, and VNC ports to `127.0.0.1` only:
+
+```text
+live API      127.0.0.1:4001
+live VNC      127.0.0.1:5901
+paper API     127.0.0.1:7497
+paper VNC     127.0.0.1:5902
+```
+
+Filled broker login credentials belong in `/home/ubuntu/.oqp_server_env`, not
+in this repository.
 
 ## Daily Order
 

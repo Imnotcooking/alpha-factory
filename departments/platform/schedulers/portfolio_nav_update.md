@@ -46,6 +46,17 @@ from those metrics, even when `live_positions` has no IBKR rows.
 
 ## Suggested Ubuntu Schedule
 
+Preferred reproducible deployment uses the tracked systemd units:
+
+```bash
+sudo cp departments/platform/deployment/systemd/oqp-portfolio-snapshot.service /etc/systemd/system/
+sudo cp departments/platform/deployment/systemd/oqp-portfolio-snapshot.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now oqp-portfolio-snapshot.timer
+```
+
+Cron remains a simple fallback:
+
 Run the combined broker-ingestion and NAV update job:
 
 ```cron

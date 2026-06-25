@@ -78,6 +78,17 @@ The runner sources both `~/.oqp_portfolio_health_env` and
 
 ## Suggested Cron
 
+Preferred reproducible deployment uses the tracked systemd units:
+
+```bash
+sudo cp departments/platform/deployment/systemd/oqp-paper-snapshot.service /etc/systemd/system/
+sudo cp departments/platform/deployment/systemd/oqp-paper-snapshot.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now oqp-paper-snapshot.timer
+```
+
+Cron remains a simple fallback.
+
 Run after the real portfolio snapshot, or at another time that fits the paper
 trial cadence:
 

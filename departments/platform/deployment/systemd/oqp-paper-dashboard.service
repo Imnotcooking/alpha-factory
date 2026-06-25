@@ -1,10 +1,5 @@
 [Unit]
-# Compatibility copy. Canonical systemd templates now live in:
-# departments/platform/deployment/systemd/
-#
-# Prefer departments/platform/deployment/systemd/oqp-paper-dashboard.service
-# when rebuilding or installing the server.
-Description=OQP Paper Trading Dashboard
+Description=Alpha Factory Paper Trading Dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -13,6 +8,7 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/oqp_new
+EnvironmentFile=-/home/ubuntu/.oqp_server_env
 Environment=PYTHONPATH=src:.
 Environment=STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 ExecStart=/home/ubuntu/oqp_new/.venv/bin/python -m streamlit run apps/paper_trading_dashboard/app.py --server.port 8527 --server.address 127.0.0.1 --server.headless true

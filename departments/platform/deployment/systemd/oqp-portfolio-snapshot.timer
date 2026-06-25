@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Alpha Factory Live Portfolio Snapshot on Market Weekdays
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 21:30:00
+Persistent=true
+Unit=oqp-portfolio-snapshot.service
+
+[Install]
+WantedBy=timers.target

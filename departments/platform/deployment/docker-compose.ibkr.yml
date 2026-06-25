@@ -1,0 +1,36 @@
+name: alpha-factory-ibkr
+
+services:
+  ib-gateway-live:
+    image: ${IB_GATEWAY_IMAGE:-ghcr.io/gnzsnz/ib-gateway:latest}
+    container_name: ib-gateway-live
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${IBKR_LIVE_API_PORT:-4001}:${IBKR_LIVE_CONTAINER_API_PORT:-4001}"
+      - "127.0.0.1:${IBKR_LIVE_VNC_PORT:-5901}:5900"
+    environment:
+      TWS_USERID: ${IBKR_LIVE_USER:?set IBKR_LIVE_USER}
+      TWS_PASSWORD: ${IBKR_LIVE_PASSWORD:?set IBKR_LIVE_PASSWORD}
+      TRADING_MODE: live
+      GATEWAY_OR_TWS: gateway
+      READ_ONLY_API: "yes"
+      TWS_ACCEPT_INCOMING: accept
+      EXISTING_SESSION_DETECTED_ACTION: ${IBKR_EXISTING_SESSION_ACTION:-primary}
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:?set IBKR_VNC_PASSWORD}
+
+  ib-gateway-paper:
+    image: ${IB_GATEWAY_IMAGE:-ghcr.io/gnzsnz/ib-gateway:latest}
+    container_name: ib-gateway-paper
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${IBKR_PAPER_API_PORT:-7497}:${IBKR_PAPER_CONTAINER_API_PORT:-4004}"
+      - "127.0.0.1:${IBKR_PAPER_VNC_PORT:-5902}:5900"
+    environment:
+      TWS_USERID: ${IBKR_PAPER_USER:?set IBKR_PAPER_USER}
+      TWS_PASSWORD: ${IBKR_PAPER_PASSWORD:?set IBKR_PAPER_PASSWORD}
+      TRADING_MODE: paper
+      GATEWAY_OR_TWS: gateway
+      READ_ONLY_API: ${IBKR_PAPER_READ_ONLY_API:-yes}
+      TWS_ACCEPT_INCOMING: accept
+      EXISTING_SESSION_DETECTED_ACTION: ${IBKR_EXISTING_SESSION_ACTION:-primary}
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:?set IBKR_VNC_PASSWORD}
