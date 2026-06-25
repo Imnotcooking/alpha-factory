@@ -23,6 +23,7 @@ from oqp.brokers import BrokerConnectionConfig, BrokerEnvironment
 from oqp.config import OQPSettings
 from oqp.domain import utc_now
 from oqp.paper_trading.order_router import PaperOrderTicketStatus
+from oqp.paper_trading.strategy_registry import PaperStrategyStatus
 
 
 class PaperSubmissionDecision(str, Enum):
@@ -103,6 +104,7 @@ def review_paper_order_submission(
     *,
     settings: OQPSettings,
     broker_config: BrokerConnectionConfig,
+    strategy_record: Mapping[str, Any] | None = None,
     checked_at: datetime | None = None,
 ) -> PaperSubmissionPreflight:
     timestamp = (checked_at or utc_now()).replace(microsecond=0)
@@ -114,12 +116,22 @@ def review_paper_order_submission(
     quantity = _optional_float(ticket.get("quantity"))
     price = _optional_float(ticket.get("limit_price"))
     strategy_id = _text(ticket.get("strategy_id"))
+    strategy_status = _text((strategy_record or {}).get("status"))
+    strategy_kill_switch = _bool((strategy_record or {}).get("kill_switch"))
 
     checks = (
         _check(
             "Ticket human-approved",
             status == PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value,
             status or "missing",
+        ),
+        _check(
+            "Strategy paper-running",
+            (
+                strategy_status == PaperStrategyStatus.RUNNING.value
+                and not strategy_kill_switch
+            ),
+            _strategy_detail(strategy_record),
         ),
         _check(
             "Paper submit switch",
@@ -178,6 +190,8 @@ def review_paper_order_submission(
             "proposal_id": metadata.get("proposal_id"),
             "review_id": metadata.get("review_id"),
             "approval_status": metadata.get("approval_status"),
+            "strategy_registry_status": strategy_status,
+            "strategy_kill_switch": strategy_kill_switch,
             "broker_submit_enabled": False,
             "submitter_skeleton": True,
         },
@@ -234,6 +248,14 @@ def _check(name: str, passed: bool, detail: str) -> PaperSubmissionCheck:
     return PaperSubmissionCheck(name=name, passed=passed, detail=detail)
 
 
+def _strategy_detail(strategy_record: Mapping[str, Any] | None) -> str:
+    if not strategy_record:
+        return "missing paper strategy registry record"
+    status = _text(strategy_record.get("status")) or "missing"
+    kill_switch = _bool(strategy_record.get("kill_switch"))
+    return f"status={status}, kill_switch={str(kill_switch).lower()}"
+
+
 def _metadata_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
@@ -260,6 +282,14 @@ def _text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _safe_id(value: str) -> str:

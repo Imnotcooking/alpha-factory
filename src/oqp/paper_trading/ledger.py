@@ -116,6 +116,29 @@ CREATE TABLE IF NOT EXISTS paper_execution_reviews (
 )
 """
 
+PAPER_STRATEGY_REGISTRY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS paper_strategy_registry (
+    strategy_id TEXT NOT NULL,
+    market_vertical TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    research_run_id TEXT,
+    approved_broker_profile TEXT,
+    max_order_notional REAL,
+    max_daily_notional REAL,
+    allowed_symbols_json TEXT NOT NULL,
+    rebalance_frequency TEXT,
+    kill_switch INTEGER NOT NULL DEFAULT 0,
+    approved_by TEXT,
+    approved_at TEXT,
+    notes TEXT,
+    source_artifact TEXT,
+    metadata_json TEXT,
+    PRIMARY KEY (strategy_id, market_vertical)
+)
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class PaperSnapshotWriteResult:
@@ -218,6 +241,7 @@ def ensure_paper_trading_schema(db_path: str | Path) -> Path:
         conn.execute(PAPER_ORDERS_SCHEMA)
         conn.execute(PAPER_FILLS_SCHEMA)
         conn.execute(PAPER_EXECUTION_REVIEWS_SCHEMA)
+        conn.execute(PAPER_STRATEGY_REGISTRY_SCHEMA)
         conn.commit()
     return path
 

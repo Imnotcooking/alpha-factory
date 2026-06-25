@@ -52,15 +52,19 @@ from oqp.execution import (  # noqa: E402
 )
 from oqp.paper_trading import (  # noqa: E402
     PaperOrderTicketStatus,
+    PaperStrategyStatus,
     default_paper_trading_ledger_path,
     load_latest_paper_execution_reviews,
     load_latest_paper_nav,
     load_latest_paper_orders,
     load_latest_paper_positions,
+    load_paper_strategy_record,
+    load_paper_strategy_registry,
     paper_order_notional_today,
     review_paper_execution_proposal,
     review_paper_order_submission,
     set_paper_order_ticket_approval,
+    upsert_paper_strategy_from_candidate,
 )
 from apps.broker_monitor import (  # noqa: E402
     connect_readonly_snapshot,
@@ -342,6 +346,61 @@ def paper_order_ticket_display(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+def parse_json_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if not value:
+        return []
+    try:
+        decoded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in decoded] if isinstance(decoded, list) else []
+
+
+def paper_strategy_registry_display(df: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "Strategy",
+        "Status",
+        "Market",
+        "Candidate",
+        "Research Run",
+        "Max Order",
+        "Max Daily",
+        "Allowed Symbols",
+        "Rebalance",
+        "Kill Switch",
+        "Approved By",
+        "Approved At",
+        "Notes",
+    ]
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+    for row in df.to_dict("records"):
+        rows.append(
+            {
+                "Strategy": row.get("strategy_id", ""),
+                "Status": row.get("status", ""),
+                "Market": row.get("market_vertical", ""),
+                "Candidate": row.get("candidate_id", ""),
+                "Research Run": row.get("research_run_id", ""),
+                "Max Order": row.get("max_order_notional"),
+                "Max Daily": row.get("max_daily_notional"),
+                "Allowed Symbols": ", ".join(
+                    parse_json_list(row.get("allowed_symbols_json"))
+                ),
+                "Rebalance": row.get("rebalance_frequency", ""),
+                "Kill Switch": yes_no(bool(row.get("kill_switch"))),
+                "Approved By": row.get("approved_by", ""),
+                "Approved At": row.get("approved_at", ""),
+                "Notes": row.get("notes", ""),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def intent_row(intent: Any) -> dict[str, Any]:
     return {
         "Symbol": intent.instrument.symbol,
@@ -445,6 +504,7 @@ paper_nav_df = load_latest_paper_nav(paper_ledger_path)
 paper_positions_df = load_latest_paper_positions(paper_ledger_path)
 paper_reviews_df = load_latest_paper_execution_reviews(paper_ledger_path, limit=25)
 paper_orders_df = load_latest_paper_orders(paper_ledger_path, limit=50)
+paper_strategy_registry_df = load_paper_strategy_registry(paper_ledger_path, limit=100)
 paper_daily_notional_used = paper_order_notional_today(paper_ledger_path)
 reviewed_proposal_ids = (
     set(paper_reviews_df["proposal_id"].dropna().astype(str))
@@ -797,6 +857,10 @@ else:
         approved_ticket_lookup[selected_submit_label],
         settings=settings,
         broker_config=broker_config,
+        strategy_record=load_paper_strategy_record(
+            paper_ledger_path,
+            str(approved_ticket_lookup[selected_submit_label].get("strategy_id") or ""),
+        ),
     )
     submit_cols = st.columns(3)
     submit_cols[0].metric("Decision", submission_preflight.decision.value)
@@ -1026,6 +1090,94 @@ if queue_candidate_df.empty:
     st.info("No exported candidate is currently eligible for the paper queue.")
 else:
     st.dataframe(queue_candidate_df, use_container_width=True, hide_index=True)
+
+st.markdown("#### Paper Strategy Registry")
+registry_display = paper_strategy_registry_display(paper_strategy_registry_df)
+if registry_display.empty:
+    st.info("No strategy has been approved for paper running yet.")
+else:
+    st.dataframe(registry_display, use_container_width=True, hide_index=True)
+
+eligible_candidate_lookup = {
+    f"{loaded.candidate.strategy_id} | {loaded.candidate.candidate_id} | "
+    f"{loaded.candidate.target_market_vertical}": loaded
+    for loaded in candidate_result.loaded
+    if loaded.candidate.can_enter_paper_queue
+}
+if eligible_candidate_lookup:
+    st.markdown("#### Approve Strategy For Paper Running")
+    with st.form("approve_strategy_for_paper_running_form"):
+        selected_candidate_label = st.selectbox(
+            "Candidate",
+            options=list(eligible_candidate_lookup),
+            index=0,
+        )
+        selected_candidate = eligible_candidate_lookup[selected_candidate_label].candidate
+        default_max_order = (
+            selected_candidate.safety_limits.max_order_notional
+            or settings.paper_max_order_notional
+            or 0.0
+        )
+        default_max_daily = settings.paper_max_daily_notional or 0.0
+        max_order_notional = st.number_input(
+            "Max order notional",
+            min_value=0.0,
+            value=float(default_max_order),
+            step=500.0,
+        )
+        max_daily_notional = st.number_input(
+            "Max daily notional",
+            min_value=0.0,
+            value=float(default_max_daily),
+            step=1000.0,
+        )
+        allowed_symbols_text = st.text_input(
+            "Allowed symbols",
+            value=", ".join(settings.paper_allowed_symbols),
+        )
+        rebalance_frequency = st.text_input(
+            "Rebalance frequency",
+            value="manual",
+        )
+        approved_by = st.text_input("Approved by", value="dashboard")
+        notes = st.text_input("Notes", value="paper strategy approval")
+        confirmation = st.text_input(
+            "Confirmation",
+            value="",
+            placeholder="PAPER",
+        )
+        approve_strategy = st.form_submit_button("Approve Strategy")
+
+    if approve_strategy:
+        if confirmation.strip().upper() != "PAPER":
+            st.error("Type PAPER to approve this strategy for paper running.")
+        else:
+            loaded_candidate = eligible_candidate_lookup[selected_candidate_label]
+            try:
+                result = upsert_paper_strategy_from_candidate(
+                    paper_ledger_path,
+                    loaded_candidate.candidate,
+                    status=PaperStrategyStatus.RUNNING,
+                    max_order_notional=max_order_notional or None,
+                    max_daily_notional=max_daily_notional or None,
+                    allowed_symbols=tuple(
+                        symbol.strip()
+                        for symbol in allowed_symbols_text.split(",")
+                        if symbol.strip()
+                    ),
+                    rebalance_frequency=rebalance_frequency.strip() or "manual",
+                    approved_by=approved_by.strip() or "dashboard",
+                    notes=notes.strip() or None,
+                    source_artifact=display_path(loaded_candidate.path),
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.success(
+                    f"{result.strategy_id} approved as {result.status.value} "
+                    f"for {result.market_vertical}."
+                )
+                st.rerun()
 
 st.markdown("#### Research Candidate Snapshots")
 st.dataframe(snapshot_candidate_df, use_container_width=True, hide_index=True)

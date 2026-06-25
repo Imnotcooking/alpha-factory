@@ -84,6 +84,7 @@ class PaperTradingLedgerTests(unittest.TestCase):
         self.assertIn("paper_orders", tables)
         self.assertIn("paper_fills", tables)
         self.assertIn("paper_execution_reviews", tables)
+        self.assertIn("paper_strategy_registry", tables)
 
     def test_writes_snapshot_positions_and_daily_nav(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

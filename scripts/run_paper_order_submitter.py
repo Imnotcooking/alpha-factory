@@ -25,6 +25,7 @@ from oqp.paper_trading import (  # noqa: E402
     PaperOrderTicketStatus,
     default_paper_trading_ledger_path,
     load_latest_paper_orders,
+    load_paper_strategy_record,
     record_paper_submission_preflight,
     review_paper_order_submission,
 )
@@ -100,10 +101,15 @@ def main() -> int:
 
     preflights: list[dict[str, Any]] = []
     for row in approved.to_dict("records"):
+        strategy_record = load_paper_strategy_record(
+            Path(args.db_path),
+            str(row.get("strategy_id") or ""),
+        )
         preflight = review_paper_order_submission(
             row,
             settings=settings,
             broker_config=broker_config,
+            strategy_record=strategy_record,
         )
         record = None
         if args.record_events:

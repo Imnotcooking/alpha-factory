@@ -11,6 +11,7 @@ from oqp.config import load_settings
 from oqp.paper_trading import (
     PaperOrderTicketStatus,
     PaperSubmissionDecision,
+    PaperStrategyStatus,
     record_paper_submission_preflight,
     review_paper_order_submission,
 )
@@ -66,6 +67,7 @@ class PaperOrderSubmitterTests(unittest.TestCase):
         }
 
         self.assertEqual(preflight.decision, PaperSubmissionDecision.BLOCKED)
+        self.assertIn("Strategy paper-running", failed_checks)
         self.assertIn("Paper submit switch", failed_checks)
         self.assertIn("Broker profile write-enabled", failed_checks)
         self.assertIn("Broker placement implementation", failed_checks)
@@ -94,6 +96,11 @@ class PaperOrderSubmitterTests(unittest.TestCase):
             approved_ticket(),
             settings=settings,
             broker_config=broker_config,
+            strategy_record={
+                "strategy_id": "strategy-001",
+                "status": PaperStrategyStatus.RUNNING.value,
+                "kill_switch": False,
+            },
         )
         failed_checks = {
             check.name
