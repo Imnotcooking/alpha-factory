@@ -1,0 +1,258 @@
+"""Central runtime settings for the Oxford Quant Pipeline."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+from oqp.config.credentials import JsonCredentialSource, load_credential
+from oqp.config.paths import REPO_ROOT, legacy_middle_office_root
+
+
+MIDDLE_OFFICE_ROOT = legacy_middle_office_root()
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
+
+
+def _setting(name: str, env_values: dict[str, str], default: str | None = None) -> str | None:
+    return os.getenv(name) or env_values.get(name) or default
+
+
+def _credential(
+    env_names: tuple[str, ...],
+    env_values: dict[str, str],
+    json_sources: tuple[JsonCredentialSource, ...] = (),
+) -> str | None:
+    return load_credential(env_names, env_values, json_sources).value
+
+
+def _setting_int(name: str, env_values: dict[str, str], default: int) -> int:
+    raw = _setting(name, env_values, str(default))
+    try:
+        return int(raw) if raw is not None else default
+    except ValueError:
+        return default
+
+
+def _setting_float(name: str, env_values: dict[str, str]) -> float | None:
+    raw = _setting(name, env_values)
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _setting_float_default(
+    name: str,
+    env_values: dict[str, str],
+    default: float | None,
+) -> float | None:
+    parsed = _setting_float(name, env_values)
+    return default if parsed is None else parsed
+
+
+def _setting_csv_tuple(
+    name: str,
+    env_values: dict[str, str],
+    default: str | None = None,
+) -> tuple[str, ...]:
+    raw = _setting(name, env_values, default)
+    if raw in (None, ""):
+        return ()
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
+def _setting_bool(name: str, env_values: dict[str, str], default: bool) -> bool:
+    raw = _setting(name, env_values)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+@dataclass(frozen=True, slots=True)
+class OQPSettings:
+    fmp_api_key: str | None
+    polygon_api_key: str | None
+    massive_api_key: str | None
+    options_api_key: str | None
+    rapid_api_key: str | None
+    gemini_api_key: str | None
+    anthropic_api_key: str | None
+    massive_flat_files_access_key_id: str | None
+    massive_flat_files_secret_access_key: str | None
+    massive_flat_files_endpoint: str
+    massive_flat_files_bucket: str
+    ibkr_host: str
+    ibkr_paper_port: int
+    ibkr_live_port: int
+    ibkr_client_id: int
+    ibkr_paper_client_id: int
+    ibkr_live_client_id: int
+    ibkr_live_monitor_enabled: bool
+    allow_paper_trading: bool
+    paper_max_order_notional: float | None
+    paper_max_daily_notional: float | None
+    paper_allowed_symbols: tuple[str, ...]
+    paper_allowed_asset_classes: tuple[str, ...]
+    paper_options_enabled: bool
+    paper_option_allowed_underlyings: tuple[str, ...]
+    paper_option_allowed_strategies: tuple[str, ...]
+    paper_option_max_contracts: float | None
+    paper_option_max_premium: float | None
+    paper_option_max_defined_risk: float | None
+    paper_option_max_spread_width: float | None
+    trading_mode: str
+    allow_live_trading: bool
+    max_daily_loss_pct: float | None
+    max_gross_exposure: float | None
+    database_url: str
+    data_root: Path
+    artifact_root: Path
+    log_level: str
+
+    @property
+    def ibkr_port(self) -> int:
+        if self.trading_mode.lower() == "live":
+            return self.ibkr_live_port
+        return self.ibkr_paper_port
+
+    @property
+    def has_massive_api_key(self) -> bool:
+        return bool(self.massive_api_key or self.options_api_key)
+
+
+def load_settings(env_file: Path | str | None = None) -> OQPSettings:
+    env_path = Path(env_file) if env_file is not None else REPO_ROOT / ".env"
+    env_values = _read_env_file(env_path)
+    fmp_json_sources = (
+        (MIDDLE_OFFICE_ROOT / "fmp_config.json", ("FMP_API_KEY", "fmp_key")),
+        (MIDDLE_OFFICE_ROOT / "pages" / "api_keys.json", ("fmp_key", "FMP_API_KEY")),
+    )
+    gemini_json_sources = (
+        (MIDDLE_OFFICE_ROOT / "pages" / "api_keys.json", ("gemini_key", "GEMINI_KEY")),
+    )
+
+    return OQPSettings(
+        fmp_api_key=_credential(("FMP_API_KEY", "FMP_KEY"), env_values, fmp_json_sources),
+        polygon_api_key=_credential(
+            ("MASSIVE_API_KEY", "OPTIONS_API_KEY", "POLYGON_API_KEY"),
+            env_values,
+        ),
+        massive_api_key=_credential(("MASSIVE_API_KEY",), env_values),
+        options_api_key=_credential(("OPTIONS_API_KEY",), env_values),
+        rapid_api_key=_credential(("RAPID_API_KEY",), env_values),
+        gemini_api_key=_credential(
+            ("GEMINI_API_KEY", "GEMINI_KEY"), env_values, gemini_json_sources
+        ),
+        anthropic_api_key=_credential(("ANTHROPIC_API_KEY",), env_values),
+        massive_flat_files_access_key_id=_setting(
+            "MASSIVE_FLAT_FILES_ACCESS_KEY_ID", env_values
+        ),
+        massive_flat_files_secret_access_key=_setting(
+            "MASSIVE_FLAT_FILES_SECRET_ACCESS_KEY", env_values
+        ),
+        massive_flat_files_endpoint=_setting(
+            "MASSIVE_FLAT_FILES_ENDPOINT", env_values, "https://files.massive.com"
+        )
+        or "https://files.massive.com",
+        massive_flat_files_bucket=_setting(
+            "MASSIVE_FLAT_FILES_BUCKET", env_values, "flatfiles"
+        )
+        or "flatfiles",
+        ibkr_host=_setting("IBKR_HOST", env_values, "127.0.0.1") or "127.0.0.1",
+        ibkr_paper_port=_setting_int("IBKR_PAPER_PORT", env_values, 7497),
+        ibkr_live_port=_setting_int("IBKR_LIVE_PORT", env_values, 7496),
+        ibkr_client_id=_setting_int("IBKR_CLIENT_ID", env_values, 101),
+        ibkr_paper_client_id=_setting_int(
+            "IBKR_PAPER_CLIENT_ID",
+            env_values,
+            _setting_int("IBKR_CLIENT_ID", env_values, 101),
+        ),
+        ibkr_live_client_id=_setting_int(
+            "IBKR_LIVE_CLIENT_ID",
+            env_values,
+            201,
+        ),
+        ibkr_live_monitor_enabled=_setting_bool(
+            "IBKR_LIVE_MONITOR_ENABLED", env_values, False
+        ),
+        allow_paper_trading=_setting_bool("ALLOW_PAPER_TRADING", env_values, False),
+        paper_max_order_notional=_setting_float_default(
+            "PAPER_MAX_ORDER_NOTIONAL",
+            env_values,
+            10_000.0,
+        ),
+        paper_max_daily_notional=_setting_float_default(
+            "PAPER_MAX_DAILY_NOTIONAL",
+            env_values,
+            50_000.0,
+        ),
+        paper_allowed_symbols=_setting_csv_tuple(
+            "PAPER_ALLOWED_SYMBOLS",
+            env_values,
+        ),
+        paper_allowed_asset_classes=_setting_csv_tuple(
+            "PAPER_ALLOWED_ASSET_CLASSES",
+            env_values,
+            "equity,etf",
+        ),
+        paper_options_enabled=_setting_bool("PAPER_OPTIONS_ENABLED", env_values, False),
+        paper_option_allowed_underlyings=_setting_csv_tuple(
+            "PAPER_OPTION_ALLOWED_UNDERLYINGS",
+            env_values,
+        ),
+        paper_option_allowed_strategies=_setting_csv_tuple(
+            "PAPER_OPTION_ALLOWED_STRATEGIES",
+            env_values,
+        ),
+        paper_option_max_contracts=_setting_float_default(
+            "PAPER_OPTION_MAX_CONTRACTS",
+            env_values,
+            1.0,
+        ),
+        paper_option_max_premium=_setting_float_default(
+            "PAPER_OPTION_MAX_PREMIUM",
+            env_values,
+            500.0,
+        ),
+        paper_option_max_defined_risk=_setting_float_default(
+            "PAPER_OPTION_MAX_DEFINED_RISK",
+            env_values,
+            1_000.0,
+        ),
+        paper_option_max_spread_width=_setting_float_default(
+            "PAPER_OPTION_MAX_SPREAD_WIDTH",
+            env_values,
+            10.0,
+        ),
+        trading_mode=_setting("TRADING_MODE", env_values, "paper") or "paper",
+        allow_live_trading=_setting_bool("ALLOW_LIVE_TRADING", env_values, False),
+        max_daily_loss_pct=_setting_float("MAX_DAILY_LOSS_PCT", env_values),
+        max_gross_exposure=_setting_float("MAX_GROSS_EXPOSURE", env_values),
+        database_url=_setting(
+            "DATABASE_URL", env_values, "sqlite:///runtime/db/oqp.sqlite3"
+        )
+        or "sqlite:///runtime/db/oqp.sqlite3",
+        data_root=REPO_ROOT / (_setting("DATA_ROOT", env_values, "runtime/data") or "runtime/data"),
+        artifact_root=REPO_ROOT
+        / (_setting("ARTIFACT_ROOT", env_values, "runtime/artifacts") or "runtime/artifacts"),
+        log_level=_setting("LOG_LEVEL", env_values, "INFO") or "INFO",
+    )

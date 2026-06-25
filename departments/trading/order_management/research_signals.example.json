@@ -1,0 +1,30 @@
+{
+  "signals": [
+    {
+      "symbol": "SPY",
+      "asset_class": "etf",
+      "direction": "buy",
+      "strength": 0.62,
+      "strategy_id": "demo_factor_strategy",
+      "research_run_id": "research-run-placeholder",
+      "signal_id": "demo-spy-long",
+      "reference_price": 500,
+      "quantity": 1,
+      "target_weight": 0.01,
+      "rationale": "Example research signal converted into a paper-only draft proposal."
+    },
+    {
+      "symbol": "TLT",
+      "asset_class": "etf",
+      "direction": "sell",
+      "strength": 0.58,
+      "strategy_id": "demo_factor_strategy",
+      "research_run_id": "research-run-placeholder",
+      "signal_id": "demo-tlt-short",
+      "reference_price": 90,
+      "quantity": 1,
+      "target_weight": -0.005,
+      "rationale": "Example short-side signal for paper-dashboard review only."
+    }
+  ]
+}
