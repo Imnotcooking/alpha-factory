@@ -36,6 +36,11 @@ from oqp.paper_trading.strategy_registry import (
     review_paper_strategy_gate,
     upsert_paper_strategy_from_candidate,
 )
+from oqp.paper_trading.strategy_runner import (
+    PaperStrategyRunnerItem,
+    PaperStrategyRunnerResult,
+    run_paper_strategy_runner,
+)
 from oqp.paper_trading.ledger import (
     DEFAULT_PAPER_TRADING_DB_PATH,
     PaperExecutionReviewWriteResult,
@@ -79,6 +84,8 @@ __all__ = [
     "PaperStrategyGateCheck",
     "PaperStrategyGateResult",
     "PaperStrategyRegistryWriteResult",
+    "PaperStrategyRunnerItem",
+    "PaperStrategyRunnerResult",
     "PaperStrategyStatus",
     "create_dry_run_order_tickets",
     "default_paper_trading_ledger_path",
@@ -96,6 +103,7 @@ __all__ = [
     "review_paper_execution_proposal",
     "review_paper_order_submission",
     "review_paper_strategy_gate",
+    "run_paper_strategy_runner",
     "set_paper_order_ticket_approval",
     "update_paper_order_ticket_status",
     "upsert_paper_strategy_from_candidate",
