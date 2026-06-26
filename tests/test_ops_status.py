@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from oqp.accounts import (
@@ -16,11 +17,14 @@ from oqp.accounts import (
     write_account_snapshot,
     write_account_trade_event,
 )
+from oqp.brokers import BrokerConnectionStatus
+from oqp.config import load_settings
 from oqp.ops.status import (
     account_event_items,
     command_status,
     discord_status_items,
     host_health_items,
+    ibkr_api_heartbeat_item,
     latest_account_event_rows,
     latest_account_rows,
     socket_status_item,
@@ -118,6 +122,95 @@ class OpsStatusTests(unittest.TestCase):
 
         self.assertEqual(item.status, "pass")
         create_connection.assert_called_once()
+
+    def test_ibkr_api_heartbeat_passes_with_connected_readonly_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "IBKR_HOST=127.0.0.1",
+                        "IBKR_LIVE_PORT=4001",
+                        "IBKR_LIVE_CLIENT_ID=201",
+                        "IBKR_LIVE_MONITOR_ENABLED=true",
+                        "ALLOW_LIVE_TRADING=false",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            settings = load_settings(env_file)
+
+        def fake_fetch(config, *, adapter):
+            self.assertEqual(config.client_id, 9243)
+            return SimpleNamespace(
+                health=SimpleNamespace(
+                    status=BrokerConnectionStatus.CONNECTED,
+                    account_id="U123456",
+                    message="Connected",
+                ),
+                position_rows=({"Ticker": "AAPL"},),
+                metrics={"Available_Cash_USD": 12.34, "Total_NAV_USD": 567.89},
+                error=None,
+            )
+
+        with patch("oqp.ops.status.os.getpid", return_value=42), patch(
+            "oqp.ops.status.get_broker_adapter", return_value=object()
+        ), patch(
+            "oqp.ops.status.fetch_ibkr_readonly_portfolio_snapshot",
+            side_effect=fake_fetch,
+        ):
+            item = ibkr_api_heartbeat_item(
+                "Live IBKR API heartbeat",
+                "ibkr_live_readonly",
+                settings,
+            )
+
+        self.assertEqual(item.status, "pass")
+        self.assertIn("Connected read-only", item.detail)
+        self.assertEqual(item.metadata["Client ID"], 9243)
+
+    def test_ibkr_api_heartbeat_fails_when_adapter_snapshot_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text("IBKR_LIVE_MONITOR_ENABLED=true\n", encoding="utf-8")
+            settings = load_settings(env_file)
+
+        with patch("oqp.ops.status.get_broker_adapter", return_value=object()), patch(
+            "oqp.ops.status.fetch_ibkr_readonly_portfolio_snapshot",
+            return_value=SimpleNamespace(
+                health=SimpleNamespace(
+                    status=BrokerConnectionStatus.ERROR,
+                    account_id=None,
+                    message="Could not connect",
+                ),
+                position_rows=(),
+                metrics={},
+                error="Could not connect",
+            ),
+        ):
+            item = ibkr_api_heartbeat_item(
+                "Live IBKR API heartbeat",
+                "ibkr_live_readonly",
+                settings,
+            )
+
+        self.assertEqual(item.status, "fail")
+        self.assertIn("Could not connect", item.detail)
+
+    def test_ibkr_api_heartbeat_warns_when_live_monitor_gate_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text("IBKR_LIVE_MONITOR_ENABLED=false\n", encoding="utf-8")
+            settings = load_settings(env_file)
+
+        item = ibkr_api_heartbeat_item(
+            "Live IBKR API heartbeat",
+            "ibkr_live_readonly",
+            settings,
+        )
+
+        self.assertEqual(item.status, "warn")
+        self.assertIn("Skipped", item.detail)
 
     def test_discord_status_items_detect_configured_webhook(self) -> None:
         with patch.dict(

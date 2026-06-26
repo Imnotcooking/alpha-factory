@@ -18,12 +18,14 @@ from oqp.paper_trading.order_router import (
     set_paper_order_ticket_approval,
 )
 from oqp.paper_trading.submitter import (
+    PaperOrderSubmissionResult,
     PaperSubmissionCheck,
     PaperSubmissionDecision,
     PaperSubmissionPreflight,
     PaperSubmissionPreflightRecordResult,
     record_paper_submission_preflight,
     review_paper_order_submission,
+    submit_approved_paper_order_ticket,
 )
 from oqp.paper_trading.strategy_registry import (
     PaperStrategyGateCheck,
@@ -76,6 +78,7 @@ __all__ = [
     "PaperOrderTicketStatus",
     "PaperOrderTicketWriteResult",
     "PaperOptionsPolicy",
+    "PaperOrderSubmissionResult",
     "PaperSubmissionCheck",
     "PaperSubmissionDecision",
     "PaperSubmissionPreflight",
@@ -105,6 +108,7 @@ __all__ = [
     "review_paper_strategy_gate",
     "run_paper_strategy_runner",
     "set_paper_order_ticket_approval",
+    "submit_approved_paper_order_ticket",
     "update_paper_order_ticket_status",
     "upsert_paper_strategy_from_candidate",
     "write_paper_order_tickets",

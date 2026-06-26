@@ -63,6 +63,13 @@ alpha_research_lab/execution_logs/
 alpha_research_lab/ui_v2/execution_logs/
 alpha_research_lab/archive/
 alpha_research_lab/ml_engine/*model*.json
+alpha_research_lab/regime_engine/*.pkl
+alpha_research_lab/run_fac_*.py
+alpha_research_lab/*sweep*.py
+alpha_research_lab/*backtest*.py
+alpha_research_lab/*diagnostic*.py
+alpha_research_lab/*probe*.py
+alpha_research_lab/ic_decay_*.png
 alpha_research_lab/**/*candidate*
 alpha_research_lab/**/*trial*
 alpha_research_lab/**/*promotion*

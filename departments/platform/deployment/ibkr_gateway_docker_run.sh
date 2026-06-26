@@ -19,7 +19,6 @@ required_for_start=(
   IBKR_LIVE_PASSWORD
   IBKR_PAPER_USER
   IBKR_PAPER_PASSWORD
-  IBKR_VNC_PASSWORD
 )
 
 usage() {
@@ -29,6 +28,8 @@ Usage:
   ibkr_gateway_docker_run.sh check
   ibkr_gateway_docker_run.sh start
   ibkr_gateway_docker_run.sh recreate
+  ibkr_gateway_docker_run.sh recreate-live
+  ibkr_gateway_docker_run.sh recreate-paper
   ibkr_gateway_docker_run.sh stop
 
 Commands:
@@ -36,6 +37,10 @@ Commands:
   check     Validate required server env values without starting containers.
   start     Create missing containers, or start existing stopped containers.
   recreate  Remove and recreate both containers from the current env file.
+  recreate-live
+            Remove and recreate only the live container from the current env file.
+  recreate-paper
+            Remove and recreate only the paper container from the current env file.
   stop      Stop both containers without deleting them.
 
 This script is the Docker CLI fallback for servers without `docker compose`.
@@ -77,6 +82,11 @@ select_docker() {
 }
 
 run_live() {
+  local vnc_env=()
+  if [[ -n "${IBKR_VNC_PASSWORD:-}" ]]; then
+    vnc_env=(-e VNC_SERVER_PASSWORD="$IBKR_VNC_PASSWORD")
+  fi
+
   "${DOCKER[@]}" run -d \
     --name ib-gateway-live \
     --restart unless-stopped \
@@ -89,11 +99,16 @@ run_live() {
     -e READ_ONLY_API=yes \
     -e TWS_ACCEPT_INCOMING=accept \
     -e EXISTING_SESSION_DETECTED_ACTION="$EXISTING_SESSION_ACTION" \
-    -e VNC_SERVER_PASSWORD="$IBKR_VNC_PASSWORD" \
+    "${vnc_env[@]}" \
     "$IMAGE"
 }
 
 run_paper() {
+  local vnc_env=()
+  if [[ -n "${IBKR_VNC_PASSWORD:-}" ]]; then
+    vnc_env=(-e VNC_SERVER_PASSWORD="$IBKR_VNC_PASSWORD")
+  fi
+
   "${DOCKER[@]}" run -d \
     --name ib-gateway-paper \
     --restart unless-stopped \
@@ -106,7 +121,7 @@ run_paper() {
     -e READ_ONLY_API="$PAPER_READ_ONLY_API" \
     -e TWS_ACCEPT_INCOMING=accept \
     -e EXISTING_SESSION_DETECTED_ACTION="$EXISTING_SESSION_ACTION" \
-    -e VNC_SERVER_PASSWORD="$IBKR_VNC_PASSWORD" \
+    "${vnc_env[@]}" \
     "$IMAGE"
 }
 
@@ -146,6 +161,20 @@ case "$COMMAND" in
     run_live >/dev/null
     run_paper >/dev/null
     printf 'ib-gateway-live and ib-gateway-paper recreated.\n'
+    ;;
+  recreate-live)
+    select_docker
+    require_env
+    "${DOCKER[@]}" rm -f ib-gateway-live >/dev/null 2>&1 || true
+    run_live >/dev/null
+    printf 'ib-gateway-live recreated.\n'
+    ;;
+  recreate-paper)
+    select_docker
+    require_env
+    "${DOCKER[@]}" rm -f ib-gateway-paper >/dev/null 2>&1 || true
+    run_paper >/dev/null
+    printf 'ib-gateway-paper recreated.\n'
     ;;
   stop)
     select_docker

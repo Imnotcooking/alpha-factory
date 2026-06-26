@@ -672,6 +672,42 @@ def load_latest_account_positions(
         )
 
 
+def load_account_position_history(
+    db_path: str | Path,
+    *,
+    account_key: str | None = None,
+    environment: str | None = None,
+    profile: str | None = None,
+    limit: int | None = None,
+) -> pd.DataFrame:
+    path = Path(db_path)
+    if not path.exists():
+        return pd.DataFrame()
+
+    ensure_account_ledger_schema(path)
+    where, params = _filters(
+        account_key=account_key,
+        environment=environment,
+        profile=profile,
+        table_alias="p",
+    )
+    limit_clause = "" if limit is None else "LIMIT ?"
+    query = f"""
+        SELECT p.*
+        FROM account_positions p
+        {where}
+        ORDER BY p.snapshot_date DESC, p.as_of DESC, ABS(COALESCE(p.market_value, 0)) DESC
+        {limit_clause}
+    """
+    query_params = params if limit is None else (*params, int(limit))
+    with closing(sqlite3.connect(path)) as conn:
+        frame = pd.read_sql(query, conn, params=query_params)
+
+    if frame.empty:
+        return frame
+    return frame.sort_values(["snapshot_date", "as_of", "symbol"]).reset_index(drop=True)
+
+
 def _daily_pnl_from_previous_nav(
     conn: sqlite3.Connection,
     *,

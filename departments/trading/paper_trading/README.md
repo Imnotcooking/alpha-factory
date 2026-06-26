@@ -2,23 +2,28 @@
 
 ## Status
 
-The current paper trading lane is monitoring plus safety review only. It does
-not submit broker orders.
+The current paper trading lane supports monitoring, safety review, dry-run
+tickets, human approval, submission preflight, and a guarded IBKR paper broker
+submission path. Broker submission is not enabled by default.
 
 Implemented:
 
 - read-only IBKR paper account monitoring
 - separate paper SQLite ledger
+- unified account ledger snapshots for paper NAV, holdings, returns, and events
 - daily Discord paper NAV/P&L report
 - proposal safety review and audit logging
 - Discord-ready paper execution review messages
 - research export and Options Desk draft proposal intake
+- automated paper strategy runner that safety-reviews eligible proposals and
+  writes dry-run order tickets
+- guarded paper broker submitter for approved tickets when
+  `ALLOW_PAPER_ORDER_SUBMIT=true`
 
 Not implemented yet:
 
-- actual broker order placement
 - fill reconciliation from submitted paper orders
-- strategy scheduler that creates live paper proposals
+- live-money promotion from paper results
 
 ## Active Contracts
 
@@ -46,12 +51,22 @@ Table:
 paper_execution_reviews
 ```
 
+Paper account snapshots also write to the unified account ledger:
+
+```text
+runtime/db/accounts/account_ledger.db
+```
+
+The Paper Dashboard and daily Discord report use this ledger for paper NAV,
+cash, daily P&L, returns, drawdown, holdings, exposure, and account events.
+
 ## Safety Switches
 
 Defaults are conservative:
 
 ```bash
 ALLOW_PAPER_TRADING=false
+ALLOW_PAPER_ORDER_SUBMIT=false
 ALLOW_LIVE_TRADING=false
 PAPER_MAX_ORDER_NOTIONAL=10000
 PAPER_MAX_DAILY_NOTIONAL=50000
@@ -69,6 +84,7 @@ PAPER_OPTION_MAX_SPREAD_WIDTH=10
 Meaning:
 
 - paper execution reviews are blocked until `ALLOW_PAPER_TRADING=true`
+- paper broker submission is blocked until `ALLOW_PAPER_ORDER_SUBMIT=true`
 - live trading must stay disabled
 - proposals must use the IBKR paper profile
 - proposals must be marked `paper_only=true`
@@ -87,9 +103,40 @@ symbol, not the generated option contract symbol. `PAPER_OPTION_ALLOWED_STRATEGI
 accepts normalized strategy ids such as `iron_condor`, `long_call`,
 `bear_put_spread`, or `options_iron_condor`.
 
+## Paper Order Submitter
+
+Submission preflight, no broker order:
+
+```bash
+PYTHONPATH=src:. python scripts/run_paper_order_submitter.py --record-events
+```
+
+Guarded broker submission for tickets already marked `approved_for_submit`:
+
+```bash
+PYTHONPATH=src:. python scripts/run_paper_order_submitter.py --submit-approved --notify
+```
+
+This path requires all of the following:
+
+- `ALLOW_PAPER_ORDER_SUBMIT=true`
+- `ALLOW_LIVE_TRADING=false`
+- broker profile `ibkr_paper_submit`
+- IBKR paper Gateway connected locally
+- ticket status `approved_for_submit`
+- strategy registry status `running`
+- broker profile is paper and write-enabled
+- current implementation supports only equity/ETF limit orders
+
+Use a dedicated submit client id:
+
+```bash
+IBKR_PAPER_SUBMIT_CLIENT_ID=121
+```
+
 ## Next Phase
 
-Before broker order placement is added, define:
+Before routine broker order placement is scheduled, define and test:
 
 - whether market orders remain blocked or limited to tiny smoke tests
 - first symbol allowlist
@@ -97,3 +144,5 @@ Before broker order placement is added, define:
 - Discord pre-trade approval behavior
 - kill switch procedure
 - fill reconciliation process
+- broker order id reconciliation
+- paper-vs-dashboard P&L reconciliation

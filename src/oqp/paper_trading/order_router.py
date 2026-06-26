@@ -34,6 +34,7 @@ class PaperOrderTicketStatus(str, Enum):
     BLOCKED = "blocked"
     APPROVED_FOR_SUBMIT = "approved_for_submit"
     REJECTED = "rejected"
+    SUBMITTED_TO_BROKER = "submitted_to_broker"
 
 
 @dataclass(frozen=True, slots=True)

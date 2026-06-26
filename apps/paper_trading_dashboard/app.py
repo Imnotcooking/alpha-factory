@@ -17,13 +17,19 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from oqp.accounts import (  # noqa: E402
+    account_asset_exposure_pivot,
     account_asset_summary,
     account_nav_drawdowns,
-    account_positions_display,
-    account_trade_event_summary,
+    account_position_totals,
+    account_position_history_by_asset,
+    account_position_history_by_symbol,
+    account_profit_breakdown,
+    account_symbol_exposure_pivot,
+    account_top_positions,
     account_trade_events_display,
     default_account_ledger_path,
     load_account_nav_history,
+    load_account_position_history,
     load_account_trade_events,
     load_latest_account_nav,
     load_latest_account_positions,
@@ -469,7 +475,10 @@ def latest_log_line(path: Path) -> str:
 def paper_pipeline_rows(
     *,
     candidate_count: int,
+    eligible_candidate_count: int,
     running_strategy_count: int,
+    paused_strategy_count: int,
+    retired_strategy_count: int,
     proposal_count: int,
     unreviewed_count: int,
     review_count: int,
@@ -478,67 +487,138 @@ def paper_pipeline_rows(
     dry_run_ticket_count: int,
     approved_ticket_count: int,
     rejected_ticket_count: int,
+    submitted_ticket_count: int,
+    paper_nav_value: float | None,
+    paper_daily_pnl: float | None,
+    paper_position_count: int,
+    paper_account_as_of: str,
     runner_log_line: str,
     paper_trading_allowed: bool,
     order_submit_allowed: bool,
     broker_readonly: bool,
 ) -> list[dict[str, Any]]:
+    review_state = "active" if paper_trading_allowed else "locked"
+    strategy_state = "running" if running_strategy_count else "waiting"
+    proposal_state = "queued" if unreviewed_count else ("loaded" if proposal_count else "waiting")
+    if ready_review_count and blocked_review_count:
+        safety_state = "mixed"
+    elif ready_review_count:
+        safety_state = "ready"
+    elif blocked_review_count:
+        safety_state = "blocked"
+    else:
+        safety_state = "waiting"
+
+    if submitted_ticket_count:
+        ticket_state = "submitted"
+    elif approved_ticket_count:
+        ticket_state = "approved"
+    elif dry_run_ticket_count:
+        ticket_state = "waiting decision"
+    elif rejected_ticket_count:
+        ticket_state = "rejected"
+    else:
+        ticket_state = "waiting"
+
+    submit_state = (
+        "armed"
+        if order_submit_allowed and not broker_readonly
+        else "locked"
+    )
+    performance_state = "recording" if paper_nav_value is not None else "waiting"
+
     return [
         {
-            "Layer": "Research exports",
-            "State": "present" if candidate_count else "waiting",
-            "Count": candidate_count,
-            "Current Detail": "strategy candidate artifacts",
-            "Next Gate": "paper queue eligibility",
+            "Stage": "Candidate Intake",
+            "State": "ready" if eligible_candidate_count else ("loaded" if candidate_count else "waiting"),
+            "Count": str(candidate_count),
+            "Current Signal": f"eligible={eligible_candidate_count}, total={candidate_count}",
+            "Next Action": (
+                "approve eligible candidate"
+                if eligible_candidate_count
+                else "export a market-scoped paper candidate"
+            ),
         },
         {
-            "Layer": "Paper strategy registry",
-            "State": "armed" if running_strategy_count else "waiting",
-            "Count": running_strategy_count,
-            "Current Detail": "paper_running strategies",
-            "Next Gate": "proposal strategy gate",
+            "Stage": "Strategy Armed",
+            "State": strategy_state,
+            "Count": str(running_strategy_count),
+            "Current Signal": (
+                f"running={running_strategy_count}, paused={paused_strategy_count}, "
+                f"retired={retired_strategy_count}"
+            ),
+            "Next Action": (
+                "watch proposal intake"
+                if running_strategy_count
+                else "approve one strategy for paper_running"
+            ),
         },
         {
-            "Layer": "Trade proposals",
-            "State": "pending" if unreviewed_count else ("present" if proposal_count else "waiting"),
-            "Count": proposal_count,
-            "Current Detail": f"{unreviewed_count} not reviewed",
-            "Next Gate": "runner scan",
+            "Stage": "Proposal Queued",
+            "State": proposal_state,
+            "Count": str(proposal_count),
+            "Current Signal": f"unreviewed={unreviewed_count}",
+            "Next Action": "runner review" if unreviewed_count else "wait for next signal artifact",
         },
         {
-            "Layer": "Paper strategy runner",
-            "State": "scheduled",
+            "Stage": "Runner Scan",
+            "State": review_state,
             "Count": "",
-            "Current Detail": runner_log_line,
-            "Next Gate": "safety review",
+            "Current Signal": runner_log_line,
+            "Next Action": "safety review" if paper_trading_allowed else "enable paper review switch",
         },
         {
-            "Layer": "Safety reviews",
-            "State": "ready" if ready_review_count else ("blocked" if blocked_review_count else "waiting"),
-            "Count": review_count,
-            "Current Detail": f"ready={ready_review_count}, blocked={blocked_review_count}",
-            "Next Gate": "dry-run ticket creation",
+            "Stage": "Safety Reviewed",
+            "State": safety_state,
+            "Count": str(review_count),
+            "Current Signal": f"ready={ready_review_count}, blocked={blocked_review_count}",
+            "Next Action": (
+                "create or inspect dry-run tickets"
+                if ready_review_count
+                else "fix blocker or wait for reviewed proposal"
+            ),
         },
         {
-            "Layer": "Dry-run tickets",
-            "State": "waiting approval" if dry_run_ticket_count else ("approved" if approved_ticket_count else "waiting"),
-            "Count": dry_run_ticket_count + approved_ticket_count + rejected_ticket_count,
-            "Current Detail": (
+            "Stage": "Human Decision",
+            "State": ticket_state,
+            "Count": str(
+                dry_run_ticket_count
+                + approved_ticket_count
+                + rejected_ticket_count
+                + submitted_ticket_count
+            ),
+            "Current Signal": (
                 f"dry_run={dry_run_ticket_count}, "
-                f"approved={approved_ticket_count}, rejected={rejected_ticket_count}"
+                f"approved={approved_ticket_count}, "
+                f"submitted={submitted_ticket_count}, rejected={rejected_ticket_count}"
             ),
-            "Next Gate": "submission preflight",
+            "Next Action": (
+                "approve or reject dry-run ticket"
+                if dry_run_ticket_count
+                else "submission preflight for approved tickets"
+                if approved_ticket_count
+                else "monitor broker status and fills"
+                if submitted_ticket_count
+                else "wait for dry-run ticket"
+            ),
         },
         {
-            "Layer": "Broker submission",
-            "State": "locked",
+            "Stage": "Broker Submission",
+            "State": submit_state,
             "Count": "",
-            "Current Detail": (
-                f"paper_trading={yes_no(paper_trading_allowed)}, "
-                f"paper_submit={yes_no(order_submit_allowed)}, "
-                f"broker_readonly={yes_no(broker_readonly)}"
+            "Current Signal": f"submit={yes_no(order_submit_allowed)}, broker_readonly={yes_no(broker_readonly)}",
+            "Next Action": "paper IBKR sender" if submit_state == "armed" else "keep simulation-only",
+        },
+        {
+            "Stage": "Paper Performance",
+            "State": performance_state,
+            "Count": str(paper_position_count),
+            "Current Signal": (
+                f"NAV={format_money(paper_nav_value) or 'missing'}, "
+                f"daily_pnl={format_signed_money(paper_daily_pnl) or 'missing'}, "
+                f"as_of={paper_account_as_of or 'missing'}"
             ),
-            "Next Gate": "future IBKR paper order sender",
+            "Next Action": "monitor NAV and drawdown",
         },
     ]
 
@@ -558,31 +638,39 @@ def proposal_automation_row(
     ticket_count = int((ticket_summary or {}).get("count", 0))
 
     if ticket_count:
-        current_stage = "ticketed"
-        next_action = "human approval or rejection"
+        status_text = summarize_ticket_statuses(ticket_summary)
+        if PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value in status_text:
+            current_stage = "approved ticket"
+            next_action = "submission preflight"
+        elif PaperOrderTicketStatus.REJECTED.value in status_text:
+            current_stage = "rejected ticket"
+            next_action = "no action"
+        else:
+            current_stage = "dry-run ticket"
+            next_action = "approve or reject"
     elif review is not None:
-        current_stage = f"reviewed: {review_decision}"
+        current_stage = f"safety {review_decision}"
         next_action = (
-            "inspect blocked reasons"
+            "inspect blocker"
             if review_decision == "blocked"
-            else "waiting for ticket creation"
+            else "wait for ticket creation"
         )
     elif strategy_gate.passed:
-        current_stage = "waiting for runner"
-        next_action = "runner will safety-review"
+        current_stage = "queued"
+        next_action = "runner review"
     else:
-        current_stage = "skipped by strategy gate"
-        next_action = "register, unpause, or change strategy"
+        current_stage = "strategy blocked"
+        next_action = "register or unpause strategy"
 
     return {
         "Proposal": proposal.proposal_id,
         "Strategy": proposal.strategy_id or "",
-        "Current Stage": current_stage,
+        "Lifecycle Stage": current_stage,
         "Strategy Gate": "pass" if strategy_gate.passed else "blocked",
-        "Safety Review": review_decision or "pending",
+        "Review": review_decision or "pending",
         "Tickets": summarize_ticket_statuses(ticket_summary),
         "Next Action": next_action,
-        "Reason": (
+        "Why": (
             str(review.get("message", ""))
             if review is not None
             else strategy_gate.message
@@ -652,6 +740,96 @@ def strategy_candidate_row(loaded: LoadedStrategyCandidate) -> dict[str, Any]:
     }
 
 
+def broker_positions_frame(positions: list[Any]) -> pd.DataFrame:
+    rows = []
+    for position in positions:
+        metadata = dict(position.metadata or {})
+        rows.append(
+            {
+                "symbol": position.instrument.symbol,
+                "asset_class": position.instrument.asset_class.value,
+                "quantity": position.quantity,
+                "average_cost": position.average_cost,
+                "market_price": position.market_price,
+                "market_value": metadata.get("market_value", position.market_value),
+                "unrealized_pnl": metadata.get("unrealized_pnl", position.unrealized_pnl),
+                "realized_pnl": metadata.get("realized_pnl"),
+                "currency": position.instrument.currency,
+                "as_of": position.as_of.isoformat(timespec="seconds"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def display_position_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "symbol",
+        "asset_class",
+        "quantity",
+        "average_cost",
+        "market_price",
+        "market_value",
+        "unrealized_pnl",
+        "realized_pnl",
+        "currency",
+        "as_of",
+    ]
+    if frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "Symbol",
+                "Asset",
+                "Quantity",
+                "Average Cost",
+                "Market Price",
+                "Market Value",
+                "Unrealized P&L",
+                "Realized P&L",
+                "Currency",
+                "As Of",
+            ]
+        )
+    display = frame.reindex(columns=columns).copy()
+    return display.rename(
+        columns={
+            "symbol": "Symbol",
+            "asset_class": "Asset",
+            "quantity": "Quantity",
+            "average_cost": "Average Cost",
+            "market_price": "Market Price",
+            "market_value": "Market Value",
+            "unrealized_pnl": "Unrealized P&L",
+            "realized_pnl": "Realized P&L",
+            "currency": "Currency",
+            "as_of": "As Of",
+        }
+    )
+
+
+def active_position_frame(
+    account_positions: pd.DataFrame,
+    broker_positions: list[Any],
+) -> tuple[pd.DataFrame, str]:
+    if not account_positions.empty:
+        return account_positions.copy(), "unified account ledger"
+    broker_frame = broker_positions_frame(broker_positions)
+    if not broker_frame.empty:
+        return broker_frame, "read-only IBKR snapshot"
+    return pd.DataFrame(), "no position source"
+
+
+def event_count_frame(events: pd.DataFrame) -> pd.DataFrame:
+    if events.empty or "event_type" not in events.columns:
+        return pd.DataFrame(columns=["event_type", "count"])
+    return (
+        events["event_type"]
+        .astype(str)
+        .value_counts()
+        .rename_axis("event_type")
+        .reset_index(name="count")
+    )
+
+
 settings = load_settings()
 
 market_adapter = get_market_data_adapter("yahoo", settings=settings)
@@ -674,6 +852,9 @@ candidate_result = load_strategy_candidate_artifacts(
     strategy_candidate_directory(settings),
     max_files=50,
 )
+eligible_candidate_count = sum(
+    1 for loaded in candidate_result.loaded if loaded.candidate.can_enter_paper_queue
+)
 paper_ledger_path = default_paper_trading_ledger_path()
 account_ledger_path = default_account_ledger_path()
 paper_account_nav_df = load_latest_account_nav(account_ledger_path, environment="paper")
@@ -683,6 +864,11 @@ paper_account_nav_history = account_nav_drawdowns(
 paper_account_positions_df = load_latest_account_positions(
     account_ledger_path,
     environment="paper",
+)
+paper_account_position_history_df = load_account_position_history(
+    account_ledger_path,
+    environment="paper",
+    limit=2_500,
 )
 paper_account_events_df = load_account_trade_events(
     account_ledger_path,
@@ -739,6 +925,11 @@ rejected_ticket_count = count_status(
     "status",
     PaperOrderTicketStatus.REJECTED.value,
 )
+submitted_ticket_count = count_status(
+    paper_orders_df,
+    "status",
+    PaperOrderTicketStatus.SUBMITTED_TO_BROKER.value,
+)
 runner_log_line = latest_log_line(paper_strategy_runner_log)
 
 preflight_proposal = TradeProposal(
@@ -787,7 +978,8 @@ gate_rows = [
     gate_row("Order placement", False, "disabled by read-only adapter"),
 ]
 gate_df = pd.DataFrame(gate_rows)
-execution_ready = bool(gate_df["Status"].eq("pass").all())
+paper_review_ready = bool(paper_mode and live_disabled and settings.allow_paper_trading)
+paper_submit_ready = bool(settings.allow_paper_order_submit and not broker_config.readonly)
 latest_paper_account_nav = (
     None if paper_account_nav_df.empty else paper_account_nav_df.iloc[0]
 )
@@ -854,843 +1046,1071 @@ paper_nav_source = (
     if latest_paper_account_nav is not None
     else "paper trading ledger"
 )
+active_positions_df, active_position_source = active_position_frame(
+    paper_account_positions_df,
+    positions,
+)
+active_position_totals = account_position_totals(active_positions_df)
+dashboard_unrealized_pnl = coerce_float(active_position_totals["unrealized_pnl"])
+dashboard_realized_pnl = coerce_float(active_position_totals["realized_pnl"])
+dashboard_total_position_pnl = coerce_float(active_position_totals["total_pnl"])
+dashboard_gross_exposure = coerce_float(active_position_totals["gross_exposure"])
+snapshot_nav_value = (
+    None if account_summary is None else coerce_float(account_summary.net_liquidation)
+)
+snapshot_cash_value = None if account_summary is None else coerce_float(account_summary.cash)
+snapshot_buying_power = (
+    None if account_summary is None else coerce_float(account_summary.buying_power)
+)
+snapshot_as_of = (
+    ""
+    if account_summary is None
+    else account_summary.as_of.isoformat(timespec="seconds")
+)
+dashboard_nav_value = paper_nav_value if paper_nav_value is not None else snapshot_nav_value
+dashboard_cash_value = (
+    paper_cash_value if paper_cash_value is not None else snapshot_cash_value
+)
+dashboard_buying_power = snapshot_buying_power
+dashboard_daily_pnl = paper_daily_pnl
+dashboard_position_count = (
+    paper_position_count
+    if latest_paper_account_nav is not None or latest_paper_nav is not None
+    else len(active_positions_df)
+)
+dashboard_as_of = paper_account_as_of or snapshot_as_of
+dashboard_nav_source = (
+    paper_nav_source if paper_nav_value is not None else "read-only IBKR snapshot"
+)
 
 
 st.title("Paper Trading")
 st.caption("IBKR paper execution cockpit")
 
 summary_cols = st.columns(6)
-summary_cols[0].metric("Execution Gate", "unlocked" if execution_ready else "locked")
-summary_cols[1].metric("Snapshot", "ready" if account_summary else "offline")
+summary_cols[0].metric("Review Gate", "active" if paper_review_ready else "locked")
+summary_cols[1].metric("Submit Gate", "armed" if paper_submit_ready else "locked")
 summary_cols[2].metric("IBKR", broker_health.status.value)
-summary_cols[3].metric("Paper NAV", format_money(paper_nav_value) or "missing")
-summary_cols[4].metric("Review Queue", str(unreviewed_proposal_count))
-summary_cols[5].metric("Account Events", str(len(paper_account_events_df)))
+summary_cols[3].metric("Paper NAV", format_money(dashboard_nav_value) or "missing")
+summary_cols[4].metric("Daily P&L", format_signed_money(dashboard_daily_pnl) or "missing")
+summary_cols[5].metric("Open Proposals", str(unreviewed_proposal_count))
 
-st.error("Execution locked. Order placement remains unavailable.")
+if paper_submit_ready:
+    st.warning("Paper broker submission is armed. Live trading remains disabled.")
+else:
+    st.warning("Paper broker submission is locked. Reviews, tickets, NAV, and P&L remain active.")
 
-st.subheader("Paper Automation Control Center")
-automation_metric_cols = st.columns(6)
-automation_metric_cols[0].metric("Paper Running", str(paper_running_strategy_count))
-automation_metric_cols[1].metric("Paused", str(paper_paused_strategy_count))
-automation_metric_cols[2].metric("Retired", str(paper_retired_strategy_count))
-automation_metric_cols[3].metric("Pending Proposals", str(unreviewed_proposal_count))
-automation_metric_cols[4].metric("Dry-Run Tickets", str(dry_run_ticket_count))
-automation_metric_cols[5].metric(
-    "Broker Submit",
-    "enabled" if settings.allow_paper_order_submit and not broker_config.readonly else "locked",
+command_tab, account_tab, orders_tab, strategy_tab, system_tab = st.tabs(
+    [
+        "Command Center",
+        "Account & Risk",
+        "Orders & Tickets",
+        "Strategy Pipeline",
+        "System",
+    ]
 )
 
-pipeline_tab, proposal_board_tab, locks_tab = st.tabs(
-    ["Pipeline", "Proposal Board", "Safety Locks"]
-)
-
-with pipeline_tab:
-    pipeline_df = pd.DataFrame(
-        paper_pipeline_rows(
-            candidate_count=len(candidate_result.loaded),
-            running_strategy_count=paper_running_strategy_count,
-            proposal_count=len(proposal_result.loaded),
-            unreviewed_count=unreviewed_proposal_count,
-            review_count=len(paper_reviews_df),
-            ready_review_count=ready_review_count,
-            blocked_review_count=blocked_review_count,
-            dry_run_ticket_count=dry_run_ticket_count,
-            approved_ticket_count=approved_ticket_count,
-            rejected_ticket_count=rejected_ticket_count,
-            runner_log_line=runner_log_line,
-            paper_trading_allowed=settings.allow_paper_trading,
-            order_submit_allowed=settings.allow_paper_order_submit,
-            broker_readonly=broker_config.readonly,
-        )
+with command_tab:
+    st.subheader("Paper Strategy Lifecycle")
+    automation_metric_cols = st.columns(6)
+    automation_metric_cols[0].metric("Paper Running", str(paper_running_strategy_count))
+    automation_metric_cols[1].metric("Paused", str(paper_paused_strategy_count))
+    automation_metric_cols[2].metric("Retired", str(paper_retired_strategy_count))
+    automation_metric_cols[3].metric("Pending Proposals", str(unreviewed_proposal_count))
+    automation_metric_cols[4].metric("Dry-Run Tickets", str(dry_run_ticket_count))
+    automation_metric_cols[5].metric(
+        "Broker Submit",
+        "enabled" if paper_submit_ready else "locked",
     )
-    st.dataframe(pipeline_df, use_container_width=True, hide_index=True)
 
-with proposal_board_tab:
-    proposal_automation_df = pd.DataFrame(
-        [
-            proposal_automation_row(
-                loaded,
-                reviews_by_proposal=reviews_by_proposal,
-                tickets_by_proposal=tickets_by_proposal,
-                paper_ledger_path=paper_ledger_path,
+    pipeline_tab, proposal_board_tab, locks_tab = st.tabs(
+        ["Lifecycle", "Proposal Timelines", "Switches"]
+    )
+
+    with pipeline_tab:
+        pipeline_df = pd.DataFrame(
+            paper_pipeline_rows(
+                candidate_count=len(candidate_result.loaded),
+                eligible_candidate_count=eligible_candidate_count,
+                running_strategy_count=paper_running_strategy_count,
+                paused_strategy_count=paper_paused_strategy_count,
+                retired_strategy_count=paper_retired_strategy_count,
+                proposal_count=len(proposal_result.loaded),
+                unreviewed_count=unreviewed_proposal_count,
+                review_count=len(paper_reviews_df),
+                ready_review_count=ready_review_count,
+                blocked_review_count=blocked_review_count,
+                dry_run_ticket_count=dry_run_ticket_count,
+                approved_ticket_count=approved_ticket_count,
+                rejected_ticket_count=rejected_ticket_count,
+                submitted_ticket_count=submitted_ticket_count,
+                paper_nav_value=dashboard_nav_value,
+                paper_daily_pnl=dashboard_daily_pnl,
+                paper_position_count=dashboard_position_count,
+                paper_account_as_of=dashboard_as_of,
+                runner_log_line=runner_log_line,
+                paper_trading_allowed=settings.allow_paper_trading,
+                order_submit_allowed=settings.allow_paper_order_submit,
+                broker_readonly=broker_config.readonly,
             )
-            for loaded in proposal_result.loaded
-        ]
-    )
-    if proposal_automation_df.empty:
+        )
+        st.dataframe(
+            pipeline_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "State": st.column_config.TextColumn("State", width="small"),
+                "Count": st.column_config.TextColumn("Count", width="small"),
+                "Current Signal": st.column_config.TextColumn("Current Signal", width="large"),
+                "Next Action": st.column_config.TextColumn("Next Action", width="medium"),
+            },
+        )
+
+    with proposal_board_tab:
         proposal_automation_df = pd.DataFrame(
-            columns=[
-                "Proposal",
-                "Strategy",
-                "Current Stage",
-                "Strategy Gate",
-                "Safety Review",
-                "Tickets",
-                "Next Action",
-                "Reason",
-            ]
-        )
-        st.info("No trade proposal artifacts are currently loaded.")
-    else:
-        st.dataframe(
-            proposal_automation_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-with locks_tab:
-    locks_df = pd.DataFrame(
-        [
-            {
-                "Gate": "Live trading",
-                "State": "locked" if not settings.allow_live_trading else "open",
-                "Detail": f"ALLOW_LIVE_TRADING={str(settings.allow_live_trading).lower()}",
-            },
-            {
-                "Gate": "Paper proposal review",
-                "State": "open" if settings.allow_paper_trading else "locked",
-                "Detail": f"ALLOW_PAPER_TRADING={str(settings.allow_paper_trading).lower()}",
-            },
-            {
-                "Gate": "Paper broker profile",
-                "State": "read-only" if broker_config.readonly else "write-enabled",
-                "Detail": str(broker_config.metadata.get("profile") or "ibkr_paper_readonly"),
-            },
-            {
-                "Gate": "Paper order submit",
-                "State": "locked" if not settings.allow_paper_order_submit else "armed",
-                "Detail": (
-                    f"ALLOW_PAPER_ORDER_SUBMIT={str(settings.allow_paper_order_submit).lower()}"
-                ),
-            },
-            {
-                "Gate": "Runner log",
-                "State": "present" if paper_strategy_runner_log.exists() else "missing",
-                "Detail": runner_log_line,
-            },
-        ]
-    )
-    st.dataframe(locks_df, use_container_width=True, hide_index=True)
-
-if account_summary:
-    render_account_metrics(account_summary)
-elif snapshot_error:
-    st.warning(f"Connected to IBKR, but snapshot fetch failed: {snapshot_error}")
-else:
-    st.info(
-        "Log in to TWS or IB Gateway locally, enable API socket access, and keep "
-        "this app pointed at the paper port. Do not store your IBKR username or "
-        "password in this repository."
-    )
-
-st.subheader("Unified Paper Account")
-ledger_metric_cols = st.columns(5)
-ledger_metric_cols[0].metric("Recorded NAV", format_money(paper_nav_value) or "missing")
-ledger_metric_cols[1].metric("Daily P&L", format_signed_money(paper_daily_pnl) or "missing")
-ledger_metric_cols[2].metric("Cash", format_money(paper_cash_value) or "missing")
-ledger_metric_cols[3].metric("Ledger Positions", str(paper_position_count))
-ledger_metric_cols[4].metric(
-    "Snapshot As Of",
-    paper_account_as_of or "missing",
-)
-st.caption(f"Account ledger path: {display_path(account_ledger_path)}")
-
-if paper_account_nav_history.empty:
-    st.info("No unified paper account NAV history has been recorded yet.")
-else:
-    account_chart_left, account_chart_right = st.columns([1.2, 1])
-    with account_chart_left:
-        st.line_chart(
-            paper_account_nav_history.set_index("date")[
-                ["net_liquidation", "equity_peak"]
-            ]
-        )
-    with account_chart_right:
-        st.line_chart(paper_account_nav_history.set_index("date")[["drawdown"]])
-
-account_left, account_right = st.columns([1.2, 1])
-with account_left:
-    st.markdown("#### Unified Account Positions")
-    account_positions_table = account_positions_display(paper_account_positions_df)
-    if account_positions_table.empty:
-        st.info("No unified paper account positions have been recorded yet.")
-    else:
-        st.dataframe(
-            account_positions_table,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-with account_right:
-    st.markdown("#### Unified Asset Mix")
-    st.dataframe(
-        account_asset_summary(paper_account_positions_df),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-st.subheader("Unified Paper Account Events")
-if paper_account_events_df.empty:
-    st.info("No paper account events have been recorded yet.")
-else:
-    event_left, event_right = st.columns([1.4, 1])
-    with event_left:
-        st.dataframe(
-            account_trade_events_display(paper_account_events_df),
-            use_container_width=True,
-            hide_index=True,
-        )
-    with event_right:
-        st.dataframe(
-            account_trade_event_summary(paper_account_events_df),
-            use_container_width=True,
-            hide_index=True,
-        )
-st.caption(f"NAV source: {paper_nav_source}")
-
-st.subheader("Paper Trading Ledger")
-paper_ledger_metric_cols = st.columns(6)
-paper_ledger_metric_cols[0].metric(
-    "Legacy NAV",
-    format_money(legacy_paper_nav_value) or "missing",
-)
-paper_ledger_metric_cols[1].metric(
-    "Legacy Daily P&L",
-    format_signed_money(legacy_paper_daily_pnl) or "missing",
-)
-paper_ledger_metric_cols[2].metric(
-    "Legacy Cash",
-    format_money(legacy_paper_cash_value) or "missing",
-)
-paper_ledger_metric_cols[3].metric(
-    "Legacy Positions",
-    str(legacy_paper_position_count),
-)
-paper_ledger_metric_cols[4].metric(
-    "Daily Notional Used",
-    format_money(paper_daily_notional_used) or "0.00",
-)
-paper_ledger_metric_cols[5].metric(
-    "Dry-Run Tickets",
-    str(len(paper_orders_df[paper_orders_df["status"].eq("dry_run")]))
-    if not paper_orders_df.empty and "status" in paper_orders_df.columns
-    else "0",
-)
-st.caption(f"Paper trading ledger path: {display_path(paper_ledger_path)}")
-
-st.markdown("#### Dry-Run Order Tickets")
-order_ticket_display = paper_order_ticket_display(paper_orders_df)
-if order_ticket_display.empty:
-    st.info("No dry-run paper order tickets have been created yet.")
-else:
-    st.dataframe(order_ticket_display, use_container_width=True, hide_index=True)
-
-pending_ticket_df = (
-    paper_orders_df[paper_orders_df["status"].eq(PaperOrderTicketStatus.DRY_RUN.value)]
-    if not paper_orders_df.empty and "status" in paper_orders_df.columns
-    else pd.DataFrame()
-)
-if pending_ticket_df.empty:
-    st.info("No dry-run ticket is waiting for human approval.")
-else:
-    st.markdown("#### Human Ticket Approval")
-    ticket_lookup = {
-        (
-            f"{row.order_id} | {row.symbol} {row.side} "
-            f"{format_metric(coerce_float(row.quantity), digits=4)} {row.order_type}"
-        ): row
-        for row in pending_ticket_df.itertuples(index=False)
-    }
-    with st.form("paper_ticket_approval_form"):
-        selected_ticket_label = st.selectbox(
-            "Ticket",
-            options=list(ticket_lookup),
-            index=0,
-        )
-        decision = st.selectbox(
-            "Decision",
-            options=[
-                PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value,
-                PaperOrderTicketStatus.REJECTED.value,
-            ],
-            index=0,
-        )
-        decision_by = st.text_input("Decision by", value="dashboard")
-        reason = st.text_input("Reason", value="manual paper ticket review")
-        confirmation = st.text_input(
-            "Confirmation",
-            value="",
-            placeholder="APPROVE or REJECT",
-        )
-        submitted = st.form_submit_button("Record Decision")
-
-    if submitted:
-        expected = (
-            "APPROVE"
-            if decision == PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value
-            else "REJECT"
-        )
-        if confirmation.strip().upper() != expected:
-            st.error(f"Type {expected} to record this decision.")
-        else:
-            selected_ticket = ticket_lookup[selected_ticket_label]
-            paper_account_id = (
-                None
-                if latest_paper_account_nav is None
-                else str(latest_paper_account_nav.get("account_id") or "").strip()
-            )
-            try:
-                result = set_paper_order_ticket_approval(
-                    order_id=str(selected_ticket.order_id),
-                    status=decision,
+            [
+                proposal_automation_row(
+                    loaded,
+                    reviews_by_proposal=reviews_by_proposal,
+                    tickets_by_proposal=tickets_by_proposal,
                     paper_ledger_path=paper_ledger_path,
-                    account_ledger_path=account_ledger_path,
-                    broker_config=broker_config,
-                    account_id=paper_account_id or None,
-                    decided_by=decision_by.strip() or "dashboard",
-                    reason=reason.strip() or None,
                 )
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.success(result.message)
-                st.caption("Broker submit enabled: false")
-                st.rerun()
-
-approved_ticket_df = (
-    paper_orders_df[
-        paper_orders_df["status"].eq(PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value)
-    ]
-    if not paper_orders_df.empty and "status" in paper_orders_df.columns
-    else pd.DataFrame()
-)
-st.markdown("#### Submission Preflight")
-if approved_ticket_df.empty:
-    st.info("No approved paper ticket is waiting for submission preflight.")
-else:
-    approved_ticket_lookup = {
-        (
-            f"{row['order_id']} | {row['symbol']} {row['side']} "
-            f"{format_metric(coerce_float(row['quantity']), digits=4)} "
-            f"{row['order_type']}"
-        ): row
-        for row in approved_ticket_df.to_dict("records")
-    }
-    selected_submit_label = st.selectbox(
-        "Submission preflight ticket",
-        options=list(approved_ticket_lookup),
-        index=0,
-    )
-    submission_preflight = review_paper_order_submission(
-        approved_ticket_lookup[selected_submit_label],
-        settings=settings,
-        broker_config=broker_config,
-        strategy_record=load_paper_strategy_record(
-            paper_ledger_path,
-            str(approved_ticket_lookup[selected_submit_label].get("strategy_id") or ""),
-        ),
-    )
-    submit_cols = st.columns(3)
-    submit_cols[0].metric("Decision", submission_preflight.decision.value)
-    submit_cols[1].metric("Ticket", submission_preflight.order_id)
-    submit_cols[2].metric("Broker Submit", "disabled")
-    st.caption(submission_preflight.message)
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {
-                    "Check": check.name,
-                    "Status": "pass" if check.passed else "blocked",
-                    "Severity": check.severity,
-                    "Detail": check.detail,
-                }
-                for check in submission_preflight.checks
-            ]
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.caption("This preflight does not submit IBKR orders.")
-
-ledger_left, ledger_right = st.columns([1.2, 1])
-with ledger_left:
-    st.markdown("#### Latest Ledger Positions")
-    ledger_positions_display = paper_position_display(paper_positions_df)
-    if ledger_positions_display.empty:
-        st.info("No paper positions have been recorded yet.")
-    else:
-        st.dataframe(
-            ledger_positions_display,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-with ledger_right:
-    st.markdown("#### Safety Review History")
-    review_history_df = pd.DataFrame(
-        [review_history_row(row) for _, row in paper_reviews_df.iterrows()]
-    )
-    if review_history_df.empty:
-        review_history_df = pd.DataFrame(
-            columns=[
-                "Reviewed",
-                "Proposal ID",
-                "Decision",
-                "Estimated Notional",
-                "Orders",
-                "Blocked Reasons",
-                "Message",
+                for loaded in proposal_result.loaded
             ]
         )
-        st.info("No paper execution safety reviews have been recorded yet.")
-    else:
-        st.dataframe(review_history_df, use_container_width=True, hide_index=True)
-
-if not paper_reviews_df.empty:
-    review_labels = [
-        f"{row.proposal_id} ({row.reviewed_at})"
-        for row in paper_reviews_df.itertuples(index=False)
-    ]
-    selected_review_label = st.selectbox(
-        "Safety review detail",
-        options=review_labels,
-        index=0,
-    )
-    selected_review_index = review_labels.index(selected_review_label)
-    selected_review = paper_reviews_df.iloc[selected_review_index]
-    selected_checks = parse_review_checks(selected_review.get("checks_json"))
-    checks_df = pd.DataFrame(review_check_rows(selected_checks))
-    st.dataframe(checks_df, use_container_width=True, hide_index=True)
-
-left, right = st.columns([1.2, 1])
-
-with left:
-    st.subheader("Adapter Health")
-    st.dataframe(
-        data_health_df,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-with right:
-    st.subheader("Runtime Config")
-    config_df = pd.DataFrame(
-        [
-            {"Setting": "IBKR host", "Value": settings.ibkr_host},
-            {"Setting": "IBKR profile", "Value": broker_config.metadata.get("profile", "")},
-            {"Setting": "IBKR paper port", "Value": str(broker_config.port)},
-            {"Setting": "IBKR client id", "Value": str(broker_config.client_id)},
-            {"Setting": "Live trading allowed", "Value": yes_no(settings.allow_live_trading)},
-            {
-                "Setting": "Paper trading allowed",
-                "Value": yes_no(settings.allow_paper_trading),
-            },
-            {
-                "Setting": "Paper order submit allowed",
-                "Value": yes_no(settings.allow_paper_order_submit),
-            },
-            {
-                "Setting": "Paper max order notional",
-                "Value": format_money(settings.paper_max_order_notional),
-            },
-            {
-                "Setting": "Paper daily notional cap",
-                "Value": format_money(settings.paper_max_daily_notional),
-            },
-            {
-                "Setting": "Paper asset classes",
-                "Value": ", ".join(settings.paper_allowed_asset_classes),
-            },
-            {
-                "Setting": "Paper options enabled",
-                "Value": yes_no(settings.paper_options_enabled),
-            },
-            {
-                "Setting": "Option underlyings",
-                "Value": ", ".join(settings.paper_option_allowed_underlyings) or "none",
-            },
-            {
-                "Setting": "Option strategies",
-                "Value": ", ".join(settings.paper_option_allowed_strategies) or "none",
-            },
-            {
-                "Setting": "Option max contracts",
-                "Value": (
-                    "none"
-                    if settings.paper_option_max_contracts is None
-                    else f"{settings.paper_option_max_contracts:g}"
-                ),
-            },
-            {
-                "Setting": "Option max premium",
-                "Value": format_money(settings.paper_option_max_premium),
-            },
-            {
-                "Setting": "Option max defined risk",
-                "Value": format_money(settings.paper_option_max_defined_risk),
-            },
-            {
-                "Setting": "Option max spread width",
-                "Value": (
-                    "none"
-                    if settings.paper_option_max_spread_width is None
-                    else f"{settings.paper_option_max_spread_width:g}"
-                ),
-            },
-            {"Setting": "FMP key", "Value": present(settings.fmp_api_key)},
-            {
-                "Setting": "Massive or options key",
-                "Value": present(settings.massive_api_key or settings.options_api_key),
-            },
-            {
-                "Setting": "Massive / legacy Polygon key",
-                "Value": present(settings.polygon_api_key),
-            },
-            {
-                "Setting": "Massive flat files",
-                "Value": yes_no(
-                    bool(
-                        settings.massive_flat_files_access_key_id
-                        and settings.massive_flat_files_secret_access_key
-                    )
-                ),
-            },
-            {"Setting": "Data root", "Value": display_path(settings.data_root)},
-            {
-                "Setting": "Artifact root",
-                "Value": display_path(settings.artifact_root),
-            },
-        ]
-    )
-    st.dataframe(config_df, use_container_width=True, hide_index=True)
-
-st.subheader("Execution Gate")
-st.dataframe(gate_df, use_container_width=True, hide_index=True)
-
-st.subheader("Strategy Candidate Intake")
-CANDIDATE_COLUMNS = [
-    "Candidate ID",
-    "Strategy",
-    "Intake State",
-    "Status",
-    "Market Status",
-    "Native Market",
-    "Tested Market",
-    "Target Market",
-    "Intended Markets",
-    "Research Run",
-    "Geometry",
-    "Metric",
-    "Holdout IC",
-    "Sharpe",
-    "P-Value",
-    "Mapping",
-    "Paper Queue Eligible",
-    "Queue Detail",
-    "Artifact",
-]
-candidate_df = pd.DataFrame(
-    [strategy_candidate_row(loaded) for loaded in candidate_result.loaded]
-)
-if candidate_df.empty:
-    candidate_df = pd.DataFrame(columns=CANDIDATE_COLUMNS)
-else:
-    candidate_df = candidate_df.reindex(columns=CANDIDATE_COLUMNS)
-
-queue_candidate_df = candidate_df[
-    candidate_df["Paper Queue Eligible"].eq("yes")
-].copy()
-snapshot_candidate_df = candidate_df[
-    ~candidate_df["Paper Queue Eligible"].eq("yes")
-].copy()
-
-intake_cols = st.columns(3)
-intake_cols[0].metric("Candidate Snapshots", str(len(candidate_df)))
-intake_cols[1].metric("Paper Queue Eligible", str(len(queue_candidate_df)))
-intake_cols[2].metric("Review / History", str(len(snapshot_candidate_df)))
-st.caption(
-    "Exported research snapshots are visible here for review. Only rows marked "
-    "Paper Queue Eligible may feed paper-trading proposals."
-)
-
-st.markdown("#### Paper Queue Eligible")
-if queue_candidate_df.empty:
-    st.info("No exported candidate is currently eligible for the paper queue.")
-else:
-    st.dataframe(queue_candidate_df, use_container_width=True, hide_index=True)
-
-st.markdown("#### Paper Strategy Registry")
-registry_display = paper_strategy_registry_display(paper_strategy_registry_df)
-if registry_display.empty:
-    st.info("No strategy has been approved for paper running yet.")
-else:
-    st.dataframe(registry_display, use_container_width=True, hide_index=True)
-
-eligible_candidate_lookup = {
-    f"{loaded.candidate.strategy_id} | {loaded.candidate.candidate_id} | "
-    f"{loaded.candidate.target_market_vertical}": loaded
-    for loaded in candidate_result.loaded
-    if loaded.candidate.can_enter_paper_queue
-}
-if eligible_candidate_lookup:
-    st.markdown("#### Approve Strategy For Paper Running")
-    with st.form("approve_strategy_for_paper_running_form"):
-        selected_candidate_label = st.selectbox(
-            "Candidate",
-            options=list(eligible_candidate_lookup),
-            index=0,
-        )
-        selected_candidate = eligible_candidate_lookup[selected_candidate_label].candidate
-        default_max_order = (
-            selected_candidate.safety_limits.max_order_notional
-            or settings.paper_max_order_notional
-            or 0.0
-        )
-        default_max_daily = settings.paper_max_daily_notional or 0.0
-        max_order_notional = st.number_input(
-            "Max order notional",
-            min_value=0.0,
-            value=float(default_max_order),
-            step=500.0,
-        )
-        max_daily_notional = st.number_input(
-            "Max daily notional",
-            min_value=0.0,
-            value=float(default_max_daily),
-            step=1000.0,
-        )
-        allowed_symbols_text = st.text_input(
-            "Allowed symbols",
-            value=", ".join(settings.paper_allowed_symbols),
-        )
-        rebalance_frequency = st.text_input(
-            "Rebalance frequency",
-            value="manual",
-        )
-        approved_by = st.text_input("Approved by", value="dashboard")
-        notes = st.text_input("Notes", value="paper strategy approval")
-        confirmation = st.text_input(
-            "Confirmation",
-            value="",
-            placeholder="PAPER",
-        )
-        approve_strategy = st.form_submit_button("Approve Strategy")
-
-    if approve_strategy:
-        if confirmation.strip().upper() != "PAPER":
-            st.error("Type PAPER to approve this strategy for paper running.")
-        else:
-            loaded_candidate = eligible_candidate_lookup[selected_candidate_label]
-            try:
-                result = upsert_paper_strategy_from_candidate(
-                    paper_ledger_path,
-                    loaded_candidate.candidate,
-                    status=PaperStrategyStatus.RUNNING,
-                    max_order_notional=max_order_notional or None,
-                    max_daily_notional=max_daily_notional or None,
-                    allowed_symbols=tuple(
-                        symbol.strip()
-                        for symbol in allowed_symbols_text.split(",")
-                        if symbol.strip()
-                    ),
-                    rebalance_frequency=rebalance_frequency.strip() or "manual",
-                    approved_by=approved_by.strip() or "dashboard",
-                    notes=notes.strip() or None,
-                    source_artifact=display_path(loaded_candidate.path),
-                )
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.success(
-                    f"{result.strategy_id} approved as {result.status.value} "
-                    f"for {result.market_vertical}."
-                )
-                st.rerun()
-
-st.markdown("#### Research Candidate Snapshots")
-st.dataframe(snapshot_candidate_df, use_container_width=True, hide_index=True)
-st.caption(f"Artifact directory: {display_path(candidate_result.directory)}")
-
-if candidate_result.issues:
-    with st.expander("Strategy Candidate Artifact Issues", expanded=False):
-        candidate_issue_df = pd.DataFrame(
-            [
-                {
-                    "Artifact": display_path(issue.path),
-                    "Issue": issue.message,
-                }
-                for issue in candidate_result.issues
-            ]
-        )
-        st.dataframe(candidate_issue_df, use_container_width=True, hide_index=True)
-
-proposal_left, proposal_right = st.columns([1.2, 1])
-
-selected_proposal = preflight_proposal
-selected_loaded: LoadedTradeProposal | None = None
-
-with proposal_left:
-    st.subheader("Draft Trade Proposals")
-    proposal_df = pd.DataFrame(
-        [
-            proposal_row(loaded, reviewed_proposal_ids=reviewed_proposal_ids)
-            for loaded in proposal_result.loaded
-        ]
-    )
-    if proposal_df.empty:
-        proposal_df = pd.DataFrame(
-            columns=[
-                "Proposal ID",
-                "Safety Review",
-                "Source",
-                "Status",
-                "Intents",
-                "Estimated Notional",
-                "Paper Only",
-                "Strategy",
-                "Research Run",
-                "Created",
-                "Artifact",
-            ]
-        )
-    st.dataframe(proposal_df, use_container_width=True, hide_index=True)
-    st.caption(f"Artifact directory: {display_path(proposal_result.directory)}")
-
-    if proposal_result.loaded:
-        proposal_lookup = {
-            proposal_label(loaded): loaded for loaded in proposal_result.loaded
-        }
-        selected_label = st.selectbox(
-            "Guardrail target",
-            options=list(proposal_lookup),
-            index=0,
-        )
-        selected_loaded = proposal_lookup[selected_label]
-        selected_proposal = selected_loaded.proposal
-        intent_df = pd.DataFrame(
-            [intent_row(intent) for intent in selected_proposal.intents]
-        )
-        st.dataframe(intent_df, use_container_width=True, hide_index=True)
-    else:
-        st.caption("No draft proposals pending.")
-
-    if proposal_result.issues:
-        with st.expander("Artifact Issues", expanded=False):
-            issue_df = pd.DataFrame(
-                [
-                    {
-                        "Artifact": display_path(issue.path),
-                        "Issue": issue.message,
-                    }
-                    for issue in proposal_result.issues
+        if proposal_automation_df.empty:
+            proposal_automation_df = pd.DataFrame(
+                columns=[
+                    "Proposal",
+                    "Strategy",
+                    "Lifecycle Stage",
+                    "Strategy Gate",
+                    "Review",
+                    "Tickets",
+                    "Next Action",
+                    "Why",
                 ]
             )
-            st.dataframe(issue_df, use_container_width=True, hide_index=True)
+            st.info("No trade proposal artifacts are currently loaded.")
+        else:
+            st.dataframe(
+                proposal_automation_df,
+                use_container_width=True,
+                hide_index=True,
+            )
 
-with proposal_right:
-    st.subheader("Proposal Guardrails")
-    if selected_loaded:
-        st.caption(proposal_label(selected_loaded))
-    else:
-        st.caption("paper-preflight")
-    ui_gate_tab, paper_safety_tab = st.tabs(["UI Gate", "Paper Safety"])
-
-    with ui_gate_tab:
-        guardrail_report = evaluate_trade_proposal(
-            selected_proposal,
-            settings=settings,
-            broker_config=broker_config,
-            account_summary=account_summary,
-            broker_connected=broker_connected,
-            order_placement_enabled=False,
-        )
-        guardrail_df = pd.DataFrame(
+    with locks_tab:
+        locks_df = pd.DataFrame(
             [
                 {
-                    "Check": check.name,
-                    "Status": "pass" if check.passed else "blocked",
-                    "Severity": check.severity.value,
-                    "Detail": check.detail,
-                }
-                for check in guardrail_report.checks
-            ]
-        )
-        st.dataframe(guardrail_df, use_container_width=True, hide_index=True)
-
-    with paper_safety_tab:
-        safety_review = review_paper_execution_proposal(
-            selected_proposal,
-            settings=settings,
-            broker_config=broker_config,
-            daily_notional_used=paper_daily_notional_used,
-        )
-        safety_cols = st.columns(3)
-        safety_cols[0].metric("Decision", safety_review.decision.value)
-        safety_cols[1].metric(
-            "Estimated Notional",
-            format_money(safety_review.estimated_notional) or "unknown",
-        )
-        safety_cols[2].metric("Orders", str(safety_review.order_count))
-        safety_df = pd.DataFrame(
-            [
+                    "Gate": "Live trading",
+                    "State": "locked" if not settings.allow_live_trading else "open",
+                    "Detail": f"ALLOW_LIVE_TRADING={str(settings.allow_live_trading).lower()}",
+                },
                 {
-                    "Check": check.name,
-                    "Status": "pass" if check.passed else "blocked",
-                    "Severity": check.severity.value,
-                    "Detail": check.detail,
-                }
-                for check in safety_review.checks
+                    "Gate": "Paper proposal review",
+                    "State": "open" if settings.allow_paper_trading else "locked",
+                    "Detail": f"ALLOW_PAPER_TRADING={str(settings.allow_paper_trading).lower()}",
+                },
+                {
+                    "Gate": "Paper broker profile",
+                    "State": "read-only" if broker_config.readonly else "write-enabled",
+                    "Detail": str(broker_config.metadata.get("profile") or "ibkr_paper_readonly"),
+                },
+                {
+                    "Gate": "Paper order submit",
+                    "State": "locked" if not settings.allow_paper_order_submit else "armed",
+                    "Detail": (
+                        f"ALLOW_PAPER_ORDER_SUBMIT={str(settings.allow_paper_order_submit).lower()}"
+                    ),
+                },
+                {
+                    "Gate": "Runner log",
+                    "State": "present" if paper_strategy_runner_log.exists() else "missing",
+                    "Detail": runner_log_line,
+                },
             ]
         )
-        st.dataframe(safety_df, use_container_width=True, hide_index=True)
-        strategy_gate = review_paper_strategy_gate(
-            paper_ledger_path,
-            selected_proposal,
-        )
-        st.markdown("##### Paper Strategy Gate")
-        gate_cols = st.columns(3)
-        gate_cols[0].metric(
-            "Strategy Gate",
-            "pass" if strategy_gate.passed else "blocked",
-        )
-        gate_cols[1].metric("Strategy", strategy_gate.strategy_id or "missing")
-        gate_cols[2].metric(
-            "Registry",
+        st.dataframe(locks_df, use_container_width=True, hide_index=True)
+
+with account_tab:
+    st.subheader("Current Paper Account")
+    account_metric_cols = st.columns(6)
+    account_metric_cols[0].metric(
+        "Account",
+        "missing" if account_summary is None else account_summary.account_id,
+    )
+    account_metric_cols[1].metric(
+        "NAV",
+        format_money(dashboard_nav_value) or "missing",
+    )
+    account_metric_cols[2].metric(
+        "Cash",
+        format_money(dashboard_cash_value) or "missing",
+    )
+    account_metric_cols[3].metric(
+        "Buying Power",
+        format_money(dashboard_buying_power) or "missing",
+    )
+    account_metric_cols[4].metric("Positions", str(dashboard_position_count))
+    account_metric_cols[5].metric("Source", dashboard_nav_source)
+
+    profit_cols = st.columns(6)
+    profit_cols[0].metric(
+        "Daily P&L",
+        format_signed_money(dashboard_daily_pnl) or "missing",
+    )
+    profit_cols[1].metric(
+        "Unrealized P&L",
+        format_signed_money(dashboard_unrealized_pnl) or "missing",
+    )
+    profit_cols[2].metric(
+        "Realized P&L",
+        format_signed_money(dashboard_realized_pnl) or "not recorded",
+    )
+    profit_cols[3].metric(
+        "Position P&L",
+        format_signed_money(dashboard_total_position_pnl) or "missing",
+    )
+    profit_cols[4].metric(
+        "Gross Exposure",
+        format_money(dashboard_gross_exposure) or "missing",
+    )
+    profit_cols[5].metric("P&L Source", active_position_source)
+
+    if snapshot_error:
+        st.warning(f"Connected to IBKR, but snapshot fetch failed: {snapshot_error}")
+    elif not broker_connected:
+        st.info("Paper IBKR snapshot is offline. Ledger history will show once jobs record snapshots.")
+    elif paper_nav_value is None:
+        st.info("Showing the current read-only IBKR paper snapshot because ledger history is empty.")
+
+    overview_view, performance_view, holdings_view, events_view = st.tabs(
+        ["Overview", "Performance", "Holdings", "Events"]
+    )
+
+    with overview_view:
+        chart_left, chart_right = st.columns([1.2, 1])
+        with chart_left:
+            st.markdown("#### NAV & Equity Peak")
+            if paper_account_nav_history.empty:
+                balance_frame = pd.DataFrame(
+                    {
+                        "Component": ["Cash", "Positions"],
+                        "Value": [
+                            dashboard_cash_value or 0.0,
+                            dashboard_gross_exposure or 0.0,
+                        ],
+                    }
+                ).set_index("Component")
+                st.bar_chart(balance_frame)
+                st.caption("Snapshot composition is shown until daily NAV history exists.")
+            else:
+                st.line_chart(
+                    paper_account_nav_history.set_index("date")[
+                        ["net_liquidation", "equity_peak"]
+                    ]
+                )
+
+        with chart_right:
+            st.markdown("#### Profit Breakdown")
+            breakdown = account_profit_breakdown(
+                active_positions_df,
+                daily_pnl=dashboard_daily_pnl,
+            ).set_index("Bucket")
+            st.bar_chart(breakdown)
+
+        mix_left, mix_right = st.columns([1, 1])
+        with mix_left:
+            st.markdown("#### Asset Mix")
+            mix = account_asset_summary(active_positions_df)
+            if mix.empty:
+                st.info("No position mix is available yet.")
+            else:
+                st.bar_chart(mix.set_index("Asset Class")[["Market Value"]])
+        with mix_right:
+            st.markdown("#### Drawdown")
+            if paper_account_nav_history.empty:
+                st.info("Drawdown history will appear after snapshots are recorded.")
+            else:
+                st.line_chart(paper_account_nav_history.set_index("date")[["drawdown"]])
+
+    with performance_view:
+        st.markdown("#### Historical Returns")
+        history_metric_cols = st.columns(5)
+        history_metric_cols[0].metric("NAV Observations", str(len(paper_account_nav_history)))
+        history_metric_cols[1].metric("Holding Rows", str(len(paper_account_position_history_df)))
+        history_metric_cols[2].metric(
+            "Latest Return",
             (
-                str(strategy_gate.record.get("status"))
-                if strategy_gate.record
-                else "missing"
+                "missing"
+                if paper_account_nav_history.empty
+                else f"{float(paper_account_nav_history.iloc[-1]['daily_return']) * 100:.2f}%"
             ),
         )
-        st.caption(strategy_gate.message)
+        history_metric_cols[3].metric(
+            "Cumulative Return",
+            (
+                "missing"
+                if paper_account_nav_history.empty
+                else f"{float(paper_account_nav_history.iloc[-1]['cumulative_return']) * 100:.2f}%"
+            ),
+        )
+        history_metric_cols[4].metric(
+            "Max Drawdown",
+            (
+                "missing"
+                if paper_account_nav_history.empty
+                else f"{float(paper_account_nav_history['drawdown_pct'].min()) * 100:.2f}%"
+            ),
+        )
+
+        returns_left, returns_right = st.columns([1.2, 1])
+        with returns_left:
+            st.markdown("#### Daily & Cumulative Returns")
+            if paper_account_nav_history.empty:
+                st.info("Daily return history will appear after paper snapshots are recorded.")
+            else:
+                returns_frame = paper_account_nav_history.set_index("date")[
+                    ["daily_return", "cumulative_return"]
+                ]
+                st.line_chart(returns_frame)
+        with returns_right:
+            st.markdown("#### NAV Drawdown")
+            if paper_account_nav_history.empty:
+                st.info("Drawdown history will appear after at least one NAV snapshot is recorded.")
+            else:
+                st.line_chart(paper_account_nav_history.set_index("date")[["drawdown_pct"]])
+
+    with holdings_view:
+        exposure_left, exposure_right = st.columns([1.2, 1])
+        top_positions = account_top_positions(active_positions_df)
+        with exposure_left:
+            st.markdown("#### Top Position Market Value")
+            if top_positions.empty:
+                st.info("No paper positions are available yet.")
+            else:
+                st.bar_chart(top_positions.set_index("symbol")[["market_value"]])
+        with exposure_right:
+            st.markdown("#### Unrealized P&L")
+            if top_positions.empty:
+                st.info("No paper P&L is available yet.")
+            else:
+                st.bar_chart(top_positions.set_index("symbol")[["unrealized_pnl"]])
+
+        realized_left, realized_right = st.columns([1, 1])
+        with realized_left:
+            st.markdown("#### Realized P&L By Position")
+            if top_positions.empty or top_positions["realized_pnl"].abs().sum() == 0:
+                st.info("No realized paper P&L has been recorded yet.")
+            else:
+                st.bar_chart(top_positions.set_index("symbol")[["realized_pnl"]])
+        with realized_right:
+            st.markdown("#### Current Position Source")
+            source_frame = pd.DataFrame(
+                [
+                    {"Field": "Source", "Value": active_position_source},
+                    {"Field": "Latest Rows", "Value": str(len(active_positions_df))},
+                    {"Field": "History Rows", "Value": str(len(paper_account_position_history_df))},
+                ]
+            )
+            st.dataframe(source_frame, use_container_width=True, hide_index=True)
+
+        st.markdown("#### Positions")
+        position_display = display_position_frame(active_positions_df)
+        if position_display.empty:
+            st.info("No unified or read-only paper positions are available yet.")
+        else:
+            st.dataframe(position_display, use_container_width=True, hide_index=True)
+
+        symbol_history = account_position_history_by_symbol(paper_account_position_history_df)
+        asset_history = account_position_history_by_asset(paper_account_position_history_df)
+        holdings_left, holdings_right = st.columns([1.2, 1])
+        with holdings_left:
+            st.markdown("#### Holdings Over Time")
+            symbol_pivot = account_symbol_exposure_pivot(symbol_history)
+            if symbol_pivot.empty:
+                st.info("Holdings history will appear after account position snapshots are recorded.")
+            else:
+                st.area_chart(symbol_pivot)
+        with holdings_right:
+            st.markdown("#### Asset Exposure Over Time")
+            asset_pivot = account_asset_exposure_pivot(asset_history)
+            if asset_pivot.empty:
+                st.info("Asset exposure history will appear after account position snapshots are recorded.")
+            else:
+                st.area_chart(asset_pivot)
+
+        if not paper_account_position_history_df.empty:
+            with st.expander("Historical Holding Rows", expanded=False):
+                st.dataframe(
+                    display_position_frame(paper_account_position_history_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+    with events_view:
+        events_left, events_right = st.columns([1.3, 1])
+        with events_left:
+            st.markdown("#### Paper Account Events")
+            if paper_account_events_df.empty:
+                st.info("No paper account events have been recorded yet.")
+            else:
+                st.dataframe(
+                    account_trade_events_display(paper_account_events_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        with events_right:
+            st.markdown("#### Event Activity")
+            event_counts = event_count_frame(paper_account_events_df)
+            if event_counts.empty:
+                st.info("No event activity yet.")
+            else:
+                st.bar_chart(event_counts.set_index("event_type")[["count"]])
+
+    st.caption(f"Account ledger path: {display_path(account_ledger_path)}")
+    st.caption(f"NAV source: {dashboard_nav_source}")
+
+with orders_tab:
+    st.subheader("Paper Orders & Reviews")
+    paper_ledger_metric_cols = st.columns(6)
+    paper_ledger_metric_cols[0].metric(
+        "Paper DB NAV",
+        format_money(legacy_paper_nav_value) or "missing",
+    )
+    paper_ledger_metric_cols[1].metric(
+        "Paper DB P&L",
+        format_signed_money(legacy_paper_daily_pnl) or "missing",
+    )
+    paper_ledger_metric_cols[2].metric(
+        "Daily Notional Used",
+        format_money(paper_daily_notional_used) or "0.00",
+    )
+    paper_ledger_metric_cols[3].metric("Ready Reviews", str(ready_review_count))
+    paper_ledger_metric_cols[4].metric("Blocked Reviews", str(blocked_review_count))
+    paper_ledger_metric_cols[5].metric("Dry-Run Tickets", str(dry_run_ticket_count))
+
+    st.caption(f"Paper trading ledger path: {display_path(paper_ledger_path)}")
+
+    st.markdown("#### Dry-Run Order Tickets")
+    order_ticket_display = paper_order_ticket_display(paper_orders_df)
+    if order_ticket_display.empty:
+        st.info("No dry-run paper order tickets have been created yet.")
+    else:
+        st.dataframe(order_ticket_display, use_container_width=True, hide_index=True)
+
+    pending_ticket_df = (
+        paper_orders_df[paper_orders_df["status"].eq(PaperOrderTicketStatus.DRY_RUN.value)]
+        if not paper_orders_df.empty and "status" in paper_orders_df.columns
+        else pd.DataFrame()
+    )
+    if pending_ticket_df.empty:
+        st.info("No dry-run ticket is waiting for human approval.")
+    else:
+        st.markdown("#### Human Ticket Approval")
+        ticket_lookup = {
+            (
+                f"{row.order_id} | {row.symbol} {row.side} "
+                f"{format_metric(coerce_float(row.quantity), digits=4)} {row.order_type}"
+            ): row
+            for row in pending_ticket_df.itertuples(index=False)
+        }
+        with st.form("paper_ticket_approval_form"):
+            selected_ticket_label = st.selectbox(
+                "Ticket",
+                options=list(ticket_lookup),
+                index=0,
+            )
+            decision = st.selectbox(
+                "Decision",
+                options=[
+                    PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value,
+                    PaperOrderTicketStatus.REJECTED.value,
+                ],
+                index=0,
+            )
+            decision_by = st.text_input("Decision by", value="dashboard")
+            reason = st.text_input("Reason", value="manual paper ticket review")
+            confirmation = st.text_input(
+                "Confirmation",
+                value="",
+                placeholder="APPROVE or REJECT",
+            )
+            submitted = st.form_submit_button("Record Decision")
+
+        if submitted:
+            expected = (
+                "APPROVE"
+                if decision == PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value
+                else "REJECT"
+            )
+            if confirmation.strip().upper() != expected:
+                st.error(f"Type {expected} to record this decision.")
+            else:
+                selected_ticket = ticket_lookup[selected_ticket_label]
+                paper_account_id = (
+                    None
+                    if latest_paper_account_nav is None
+                    else str(latest_paper_account_nav.get("account_id") or "").strip()
+                )
+                try:
+                    result = set_paper_order_ticket_approval(
+                        order_id=str(selected_ticket.order_id),
+                        status=decision,
+                        paper_ledger_path=paper_ledger_path,
+                        account_ledger_path=account_ledger_path,
+                        broker_config=broker_config,
+                        account_id=paper_account_id or None,
+                        decided_by=decision_by.strip() or "dashboard",
+                        reason=reason.strip() or None,
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success(result.message)
+                    st.caption("Broker submit enabled: false")
+                    st.rerun()
+
+    approved_ticket_df = (
+        paper_orders_df[
+            paper_orders_df["status"].eq(PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value)
+        ]
+        if not paper_orders_df.empty and "status" in paper_orders_df.columns
+        else pd.DataFrame()
+    )
+    st.markdown("#### Submission Preflight")
+    if approved_ticket_df.empty:
+        st.info("No approved paper ticket is waiting for submission preflight.")
+    else:
+        approved_ticket_lookup = {
+            (
+                f"{row['order_id']} | {row['symbol']} {row['side']} "
+                f"{format_metric(coerce_float(row['quantity']), digits=4)} "
+                f"{row['order_type']}"
+            ): row
+            for row in approved_ticket_df.to_dict("records")
+        }
+        selected_submit_label = st.selectbox(
+            "Submission preflight ticket",
+            options=list(approved_ticket_lookup),
+            index=0,
+        )
+        submission_preflight = review_paper_order_submission(
+            approved_ticket_lookup[selected_submit_label],
+            settings=settings,
+            broker_config=broker_config,
+            strategy_record=load_paper_strategy_record(
+                paper_ledger_path,
+                str(approved_ticket_lookup[selected_submit_label].get("strategy_id") or ""),
+            ),
+        )
+        submit_cols = st.columns(3)
+        submit_cols[0].metric("Decision", submission_preflight.decision.value)
+        submit_cols[1].metric("Ticket", submission_preflight.order_id)
+        submit_cols[2].metric("Broker Submit", "disabled")
+        st.caption(submission_preflight.message)
         st.dataframe(
             pd.DataFrame(
                 [
                     {
                         "Check": check.name,
                         "Status": "pass" if check.passed else "blocked",
+                        "Severity": check.severity,
                         "Detail": check.detail,
                     }
-                    for check in strategy_gate.checks
+                    for check in submission_preflight.checks
                 ]
             ),
             use_container_width=True,
             hide_index=True,
         )
+        st.caption("This preflight does not submit IBKR orders.")
 
-snapshot_left, snapshot_right = st.columns([1.4, 1])
+    ledger_left, ledger_right = st.columns([1.2, 1])
+    with ledger_left:
+        st.markdown("#### Latest Paper DB Positions")
+        ledger_positions_display = paper_position_display(paper_positions_df)
+        if ledger_positions_display.empty:
+            st.info("No paper DB positions have been recorded yet.")
+        else:
+            st.dataframe(
+                ledger_positions_display,
+                use_container_width=True,
+                hide_index=True,
+            )
 
-with snapshot_left:
-    st.subheader("Read-Only Positions")
-    render_positions_table(positions)
+    with ledger_right:
+        st.markdown("#### Safety Review History")
+        review_history_df = pd.DataFrame(
+            [review_history_row(row) for _, row in paper_reviews_df.iterrows()]
+        )
+        if review_history_df.empty:
+            review_history_df = pd.DataFrame(
+                columns=[
+                    "Reviewed",
+                    "Proposal ID",
+                    "Decision",
+                    "Estimated Notional",
+                    "Orders",
+                    "Blocked Reasons",
+                    "Message",
+                ]
+            )
+            st.info("No paper execution safety reviews have been recorded yet.")
+        else:
+            st.dataframe(review_history_df, use_container_width=True, hide_index=True)
 
-with snapshot_right:
-    st.subheader("Cash Balances")
-    render_cash_table(cash_balances)
+    if not paper_reviews_df.empty:
+        review_labels = [
+            f"{row.proposal_id} ({row.reviewed_at})"
+            for row in paper_reviews_df.itertuples(index=False)
+        ]
+        selected_review_label = st.selectbox(
+            "Safety review detail",
+            options=review_labels,
+            index=0,
+        )
+        selected_review_index = review_labels.index(selected_review_label)
+        selected_review = paper_reviews_df.iloc[selected_review_index]
+        selected_checks = parse_review_checks(selected_review.get("checks_json"))
+        checks_df = pd.DataFrame(review_check_rows(selected_checks))
+        st.dataframe(checks_df, use_container_width=True, hide_index=True)
 
-st.subheader("Read-Only Open Orders")
-render_open_orders_table(open_orders)
+with strategy_tab:
+    st.subheader("Strategy Candidate Intake")
+    CANDIDATE_COLUMNS = [
+        "Candidate ID",
+        "Strategy",
+        "Intake State",
+        "Status",
+        "Market Status",
+        "Native Market",
+        "Tested Market",
+        "Target Market",
+        "Intended Markets",
+        "Research Run",
+        "Geometry",
+        "Metric",
+        "Holdout IC",
+        "Sharpe",
+        "P-Value",
+        "Mapping",
+        "Paper Queue Eligible",
+        "Queue Detail",
+        "Artifact",
+    ]
+    candidate_df = pd.DataFrame(
+        [strategy_candidate_row(loaded) for loaded in candidate_result.loaded]
+    )
+    if candidate_df.empty:
+        candidate_df = pd.DataFrame(columns=CANDIDATE_COLUMNS)
+    else:
+        candidate_df = candidate_df.reindex(columns=CANDIDATE_COLUMNS)
 
-with st.expander("Broker Health Payload", expanded=False):
-    render_broker_health_json(broker_health)
+    queue_candidate_df = candidate_df[
+        candidate_df["Paper Queue Eligible"].eq("yes")
+    ].copy()
+    snapshot_candidate_df = candidate_df[
+        ~candidate_df["Paper Queue Eligible"].eq("yes")
+    ].copy()
+
+    intake_cols = st.columns(3)
+    intake_cols[0].metric("Candidate Snapshots", str(len(candidate_df)))
+    intake_cols[1].metric("Paper Queue Eligible", str(len(queue_candidate_df)))
+    intake_cols[2].metric("Review / History", str(len(snapshot_candidate_df)))
+    st.caption(
+        "Exported research snapshots are visible here for review. Only rows marked "
+        "Paper Queue Eligible may feed paper-trading proposals."
+    )
+
+    candidate_view, proposal_view = st.tabs(["Candidate Queue", "Proposal Guardrails"])
+
+    with candidate_view:
+        st.markdown("#### Paper Queue Eligible")
+        if queue_candidate_df.empty:
+            st.info("No exported candidate is currently eligible for the paper queue.")
+        else:
+            st.dataframe(queue_candidate_df, use_container_width=True, hide_index=True)
+
+        st.markdown("#### Paper Strategy Registry")
+        registry_display = paper_strategy_registry_display(paper_strategy_registry_df)
+        if registry_display.empty:
+            st.info("No strategy has been approved for paper running yet.")
+        else:
+            st.dataframe(registry_display, use_container_width=True, hide_index=True)
+
+        eligible_candidate_lookup = {
+            f"{loaded.candidate.strategy_id} | {loaded.candidate.candidate_id} | "
+            f"{loaded.candidate.target_market_vertical}": loaded
+            for loaded in candidate_result.loaded
+            if loaded.candidate.can_enter_paper_queue
+        }
+        if eligible_candidate_lookup:
+            st.markdown("#### Approve Strategy For Paper Running")
+            with st.form("approve_strategy_for_paper_running_form"):
+                selected_candidate_label = st.selectbox(
+                    "Candidate",
+                    options=list(eligible_candidate_lookup),
+                    index=0,
+                )
+                selected_candidate = eligible_candidate_lookup[selected_candidate_label].candidate
+                default_max_order = (
+                    selected_candidate.safety_limits.max_order_notional
+                    or settings.paper_max_order_notional
+                    or 0.0
+                )
+                default_max_daily = settings.paper_max_daily_notional or 0.0
+                max_order_notional = st.number_input(
+                    "Max order notional",
+                    min_value=0.0,
+                    value=float(default_max_order),
+                    step=500.0,
+                )
+                max_daily_notional = st.number_input(
+                    "Max daily notional",
+                    min_value=0.0,
+                    value=float(default_max_daily),
+                    step=1000.0,
+                )
+                allowed_symbols_text = st.text_input(
+                    "Allowed symbols",
+                    value=", ".join(settings.paper_allowed_symbols),
+                )
+                rebalance_frequency = st.text_input(
+                    "Rebalance frequency",
+                    value="manual",
+                )
+                approved_by = st.text_input("Approved by", value="dashboard")
+                notes = st.text_input("Notes", value="paper strategy approval")
+                confirmation = st.text_input(
+                    "Confirmation",
+                    value="",
+                    placeholder="PAPER",
+                )
+                approve_strategy = st.form_submit_button("Approve Strategy")
+
+            if approve_strategy:
+                if confirmation.strip().upper() != "PAPER":
+                    st.error("Type PAPER to approve this strategy for paper running.")
+                else:
+                    loaded_candidate = eligible_candidate_lookup[selected_candidate_label]
+                    try:
+                        result = upsert_paper_strategy_from_candidate(
+                            paper_ledger_path,
+                            loaded_candidate.candidate,
+                            status=PaperStrategyStatus.RUNNING,
+                            max_order_notional=max_order_notional or None,
+                            max_daily_notional=max_daily_notional or None,
+                            allowed_symbols=tuple(
+                                symbol.strip()
+                                for symbol in allowed_symbols_text.split(",")
+                                if symbol.strip()
+                            ),
+                            rebalance_frequency=rebalance_frequency.strip() or "manual",
+                            approved_by=approved_by.strip() or "dashboard",
+                            notes=notes.strip() or None,
+                            source_artifact=display_path(loaded_candidate.path),
+                        )
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success(
+                            f"{result.strategy_id} approved as {result.status.value} "
+                            f"for {result.market_vertical}."
+                        )
+                        st.rerun()
+
+        st.markdown("#### Research Candidate Snapshots")
+        st.dataframe(snapshot_candidate_df, use_container_width=True, hide_index=True)
+        st.caption(f"Artifact directory: {display_path(candidate_result.directory)}")
+
+        if candidate_result.issues:
+            with st.expander("Strategy Candidate Artifact Issues", expanded=False):
+                candidate_issue_df = pd.DataFrame(
+                    [
+                        {
+                            "Artifact": display_path(issue.path),
+                            "Issue": issue.message,
+                        }
+                        for issue in candidate_result.issues
+                    ]
+                )
+                st.dataframe(candidate_issue_df, use_container_width=True, hide_index=True)
+
+    with proposal_view:
+        proposal_left, proposal_right = st.columns([1.2, 1])
+
+        selected_proposal = preflight_proposal
+        selected_loaded: LoadedTradeProposal | None = None
+
+        with proposal_left:
+            st.markdown("#### Draft Trade Proposals")
+            proposal_df = pd.DataFrame(
+                [
+                    proposal_row(loaded, reviewed_proposal_ids=reviewed_proposal_ids)
+                    for loaded in proposal_result.loaded
+                ]
+            )
+            if proposal_df.empty:
+                proposal_df = pd.DataFrame(
+                    columns=[
+                        "Proposal ID",
+                        "Safety Review",
+                        "Source",
+                        "Status",
+                        "Intents",
+                        "Estimated Notional",
+                        "Paper Only",
+                        "Strategy",
+                        "Research Run",
+                        "Created",
+                        "Artifact",
+                    ]
+                )
+            st.dataframe(proposal_df, use_container_width=True, hide_index=True)
+            st.caption(f"Artifact directory: {display_path(proposal_result.directory)}")
+
+            if proposal_result.loaded:
+                proposal_lookup = {
+                    proposal_label(loaded): loaded for loaded in proposal_result.loaded
+                }
+                selected_label = st.selectbox(
+                    "Guardrail target",
+                    options=list(proposal_lookup),
+                    index=0,
+                )
+                selected_loaded = proposal_lookup[selected_label]
+                selected_proposal = selected_loaded.proposal
+                intent_df = pd.DataFrame(
+                    [intent_row(intent) for intent in selected_proposal.intents]
+                )
+                st.dataframe(intent_df, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No draft proposals pending.")
+
+            if proposal_result.issues:
+                with st.expander("Artifact Issues", expanded=False):
+                    issue_df = pd.DataFrame(
+                        [
+                            {
+                                "Artifact": display_path(issue.path),
+                                "Issue": issue.message,
+                            }
+                            for issue in proposal_result.issues
+                        ]
+                    )
+                    st.dataframe(issue_df, use_container_width=True, hide_index=True)
+
+        with proposal_right:
+            st.markdown("#### Proposal Guardrails")
+            if selected_loaded:
+                st.caption(proposal_label(selected_loaded))
+            else:
+                st.caption("paper-preflight")
+            ui_gate_tab, paper_safety_tab = st.tabs(["UI Gate", "Paper Safety"])
+
+            with ui_gate_tab:
+                guardrail_report = evaluate_trade_proposal(
+                    selected_proposal,
+                    settings=settings,
+                    broker_config=broker_config,
+                    account_summary=account_summary,
+                    broker_connected=broker_connected,
+                    order_placement_enabled=False,
+                )
+                guardrail_df = pd.DataFrame(
+                    [
+                        {
+                            "Check": check.name,
+                            "Status": "pass" if check.passed else "blocked",
+                            "Severity": check.severity.value,
+                            "Detail": check.detail,
+                        }
+                        for check in guardrail_report.checks
+                    ]
+                )
+                st.dataframe(guardrail_df, use_container_width=True, hide_index=True)
+
+            with paper_safety_tab:
+                safety_review = review_paper_execution_proposal(
+                    selected_proposal,
+                    settings=settings,
+                    broker_config=broker_config,
+                    daily_notional_used=paper_daily_notional_used,
+                )
+                safety_cols = st.columns(3)
+                safety_cols[0].metric("Decision", safety_review.decision.value)
+                safety_cols[1].metric(
+                    "Estimated Notional",
+                    format_money(safety_review.estimated_notional) or "unknown",
+                )
+                safety_cols[2].metric("Orders", str(safety_review.order_count))
+                safety_df = pd.DataFrame(
+                    [
+                        {
+                            "Check": check.name,
+                            "Status": "pass" if check.passed else "blocked",
+                            "Severity": check.severity.value,
+                            "Detail": check.detail,
+                        }
+                        for check in safety_review.checks
+                    ]
+                )
+                st.dataframe(safety_df, use_container_width=True, hide_index=True)
+                strategy_gate = review_paper_strategy_gate(
+                    paper_ledger_path,
+                    selected_proposal,
+                )
+                st.markdown("##### Paper Strategy Gate")
+                gate_cols = st.columns(3)
+                gate_cols[0].metric(
+                    "Strategy Gate",
+                    "pass" if strategy_gate.passed else "blocked",
+                )
+                gate_cols[1].metric("Strategy", strategy_gate.strategy_id or "missing")
+                gate_cols[2].metric(
+                    "Registry",
+                    (
+                        str(strategy_gate.record.get("status"))
+                        if strategy_gate.record
+                        else "missing"
+                    ),
+                )
+                st.caption(strategy_gate.message)
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Check": check.name,
+                                "Status": "pass" if check.passed else "blocked",
+                                "Detail": check.detail,
+                            }
+                            for check in strategy_gate.checks
+                        ]
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+with system_tab:
+    system_left, system_right = st.columns([1.2, 1])
+
+    with system_left:
+        st.subheader("Adapter Health")
+        st.dataframe(
+            data_health_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.subheader("Execution Gate")
+        st.dataframe(gate_df, use_container_width=True, hide_index=True)
+
+    with system_right:
+        st.subheader("Runtime Config")
+        config_df = pd.DataFrame(
+            [
+                {"Setting": "IBKR host", "Value": settings.ibkr_host},
+                {"Setting": "IBKR profile", "Value": broker_config.metadata.get("profile", "")},
+                {"Setting": "IBKR paper port", "Value": str(broker_config.port)},
+                {"Setting": "IBKR client id", "Value": str(broker_config.client_id)},
+                {"Setting": "Live trading allowed", "Value": yes_no(settings.allow_live_trading)},
+                {
+                    "Setting": "Paper trading allowed",
+                    "Value": yes_no(settings.allow_paper_trading),
+                },
+                {
+                    "Setting": "Paper order submit allowed",
+                    "Value": yes_no(settings.allow_paper_order_submit),
+                },
+                {
+                    "Setting": "Paper max order notional",
+                    "Value": format_money(settings.paper_max_order_notional),
+                },
+                {
+                    "Setting": "Paper daily notional cap",
+                    "Value": format_money(settings.paper_max_daily_notional),
+                },
+                {
+                    "Setting": "Paper asset classes",
+                    "Value": ", ".join(settings.paper_allowed_asset_classes),
+                },
+                {
+                    "Setting": "Paper options enabled",
+                    "Value": yes_no(settings.paper_options_enabled),
+                },
+                {
+                    "Setting": "Option underlyings",
+                    "Value": ", ".join(settings.paper_option_allowed_underlyings) or "none",
+                },
+                {
+                    "Setting": "Option strategies",
+                    "Value": ", ".join(settings.paper_option_allowed_strategies) or "none",
+                },
+                {
+                    "Setting": "Option max contracts",
+                    "Value": (
+                        "none"
+                        if settings.paper_option_max_contracts is None
+                        else f"{settings.paper_option_max_contracts:g}"
+                    ),
+                },
+                {
+                    "Setting": "Option max premium",
+                    "Value": format_money(settings.paper_option_max_premium),
+                },
+                {
+                    "Setting": "Option max defined risk",
+                    "Value": format_money(settings.paper_option_max_defined_risk),
+                },
+                {
+                    "Setting": "Option max spread width",
+                    "Value": (
+                        "none"
+                        if settings.paper_option_max_spread_width is None
+                        else f"{settings.paper_option_max_spread_width:g}"
+                    ),
+                },
+                {"Setting": "FMP key", "Value": present(settings.fmp_api_key)},
+                {
+                    "Setting": "Massive or options key",
+                    "Value": present(settings.massive_api_key or settings.options_api_key),
+                },
+                {
+                    "Setting": "Massive / legacy Polygon key",
+                    "Value": present(settings.polygon_api_key),
+                },
+                {
+                    "Setting": "Massive flat files",
+                    "Value": yes_no(
+                        bool(
+                            settings.massive_flat_files_access_key_id
+                            and settings.massive_flat_files_secret_access_key
+                        )
+                    ),
+                },
+                {"Setting": "Data root", "Value": display_path(settings.data_root)},
+                {
+                    "Setting": "Artifact root",
+                    "Value": display_path(settings.artifact_root),
+                },
+            ]
+        )
+        st.dataframe(config_df, use_container_width=True, hide_index=True)
+
+    snapshot_left, snapshot_right = st.columns([1.4, 1])
+
+    with snapshot_left:
+        st.subheader("Read-Only IBKR Positions")
+        render_positions_table(positions)
+
+    with snapshot_right:
+        st.subheader("Cash Balances")
+        render_cash_table(cash_balances)
+
+    st.subheader("Read-Only Open Orders")
+    render_open_orders_table(open_orders)
+
+    with st.expander("Broker Health Payload", expanded=False):
+        render_broker_health_json(broker_health)

@@ -37,6 +37,8 @@ def connect_readonly_snapshot(broker: Any, broker_config: Any) -> dict[str, Any]
             open_orders = list(broker.get_open_orders())
         except Exception as exc:
             snapshot_error = str(exc)
+        finally:
+            broker.disconnect()
 
     return {
         "health": broker_health,

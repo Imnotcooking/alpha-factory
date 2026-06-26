@@ -75,3 +75,21 @@ we are ready to fully retire them from the root:
 Before committing, stage only the OQP restructuring paths and inspect the
 staged diff. If the alpha lab is still dirty, avoid `git add -A`; use explicit
 path staging instead.
+
+Run the hygiene checker before committing:
+
+```bash
+python scripts/check_public_commit_hygiene.py
+git diff --cached --stat
+git diff --cached --name-only
+```
+
+For a broader audit of everything currently dirty:
+
+```bash
+python scripts/check_public_commit_hygiene.py --all
+```
+
+The `--all` audit may fail while another workstream is actively editing private
+alpha-lab code. That is useful signal, not a reason to hide those changes.
+Public commits should remain explicit-path staged.

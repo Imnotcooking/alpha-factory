@@ -26,6 +26,7 @@ if [[ -d ".venv" ]]; then
 fi
 
 export PYTHONPATH="src:.:${PYTHONPATH:-}"
+export IBKR_PAPER_CLIENT_ID="${IBKR_PAPER_SNAPSHOT_CLIENT_ID:-111}"
 
 echo "[$(date -Is)] paper snapshot job started"
 python scripts/check_ibkr_server_readiness.py --profile paper --adapter-check

@@ -13,16 +13,24 @@ import pandas as pd
 from oqp.accounts import (
     AccountEnvironment,
     TradeEvent,
+    account_asset_exposure_pivot,
     account_snapshot_from_ibkr_readonly,
     account_snapshot_from_live_positions_frame,
     account_asset_summary,
     account_nav_drawdowns,
+    account_position_totals,
+    account_position_history_by_asset,
+    account_position_history_by_symbol,
     account_positions_display,
+    account_profit_breakdown,
+    account_symbol_exposure_pivot,
+    account_top_positions,
     account_trade_event_summary,
     account_trade_events_display,
     account_trade_events_from_proposal_review,
     ensure_account_ledger_schema,
     load_account_nav_history,
+    load_account_position_history,
     load_account_trade_events,
     load_latest_account_nav,
     load_latest_account_positions,
@@ -127,6 +135,7 @@ class AccountLedgerTests(unittest.TestCase):
                 limit=1,
             )
             latest_positions = load_latest_account_positions(db_path, environment="paper")
+            position_history = load_account_position_history(db_path, environment="paper")
 
         self.assertEqual(first_result.daily_pnl, 0.0)
         self.assertEqual(second_result.daily_pnl, 10_000.0)
@@ -137,6 +146,7 @@ class AccountLedgerTests(unittest.TestCase):
         self.assertEqual(list(limited_history["date"]), ["2026-06-25"])
         self.assertEqual(latest_positions.iloc[0]["symbol"], "AAPL")
         self.assertEqual(float(latest_positions.iloc[0]["market_value"]), 1200.0)
+        self.assertEqual(list(position_history["snapshot_date"]), ["2026-06-24", "2026-06-25"])
 
     def test_converts_live_positions_frame_to_account_snapshot(self) -> None:
         frame = pd.DataFrame(
@@ -205,13 +215,35 @@ class AccountLedgerTests(unittest.TestCase):
         drawdowns = account_nav_drawdowns(nav_history)
         display = account_positions_display(positions)
         summary = account_asset_summary(positions)
+        by_symbol = account_position_history_by_symbol(
+            positions.assign(snapshot_date=["2026-06-25"])
+        )
+        by_asset = account_position_history_by_asset(
+            positions.assign(snapshot_date=["2026-06-25"])
+        )
+        totals = account_position_totals(positions)
+        profit = account_profit_breakdown(positions, daily_pnl=-5.0)
+        top_positions = account_top_positions(positions, limit=3)
+        symbol_pivot = account_symbol_exposure_pivot(by_symbol)
+        asset_pivot = account_asset_exposure_pivot(by_asset)
 
         self.assertEqual(float(drawdowns.iloc[-1]["drawdown"]), -10.0)
         self.assertEqual(float(drawdowns.iloc[-1]["drawdown_pct"]), -0.1)
+        self.assertEqual(float(drawdowns.iloc[-1]["daily_return"]), -0.1)
+        self.assertAlmostEqual(float(drawdowns.iloc[-1]["cumulative_return"]), -0.1)
         self.assertIn("Market Value", display.columns)
         self.assertEqual(display.iloc[0]["Symbol"], "SPY")
         self.assertEqual(summary.iloc[0]["Asset Class"], "etf")
         self.assertEqual(float(summary.iloc[0]["Market Value"]), 1000.0)
+        self.assertEqual(by_symbol.iloc[0]["symbol"], "SPY")
+        self.assertEqual(by_asset.iloc[0]["asset_class"], "etf")
+        self.assertEqual(totals["position_rows"], 1)
+        self.assertEqual(totals["gross_exposure"], 1000.0)
+        self.assertEqual(totals["unrealized_pnl"], 25.0)
+        self.assertEqual(float(profit.loc[profit["Bucket"].eq("Daily P&L"), "Value"].iloc[0]), -5.0)
+        self.assertEqual(top_positions.iloc[0]["symbol"], "SPY")
+        self.assertEqual(float(symbol_pivot.iloc[0]["SPY"]), 1000.0)
+        self.assertEqual(float(asset_pivot.iloc[0]["etf"]), 1000.0)
 
     def test_writes_and_loads_account_trade_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

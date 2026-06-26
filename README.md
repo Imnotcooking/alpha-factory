@@ -12,7 +12,7 @@ is still changing and while live research edge remains local/private.
 
 ## Current Shape
 
-The repo is organized around three dashboard surfaces:
+The repo is organized around four dashboard surfaces:
 
 - **Research Dashboard**: factor research, strategy comparison, promotion
   pipeline, data artifact checks, and alpha governance.
@@ -20,6 +20,7 @@ The repo is organized around three dashboard surfaces:
   and options analysis.
 - **Paper Trading Dashboard**: IBKR paper monitoring, paper NAV/P&L, proposal
   review, execution safety gates, and Discord health alerts.
+- **Ops Dashboard**: server, gateway, scheduler, Discord, and dashboard health.
 
 The core shared logic lives under `src/oqp/`. The `departments/` tree is the
 organizational map for platform, research, data, investing, risk, trading, and
@@ -89,8 +90,8 @@ The platform is deliberately conservative:
 - Paper trading is separated from live trading through broker profiles and
   environment gates.
 - `ALLOW_LIVE_TRADING=false` is the default expectation.
-- Paper proposals are reviewed through a safety layer before any future broker
-  execution path.
+- Paper proposals are reviewed through a safety layer before the guarded broker
+  submission path can touch IBKR paper.
 - Secrets, broker credentials, ledgers, runtime artifacts, raw data, logs,
   model checkpoints, and local Streamlit secrets are ignored by Git.
 - Live alpha factor implementations are private by default.
@@ -195,17 +196,18 @@ research surface needs another review. The current policy is:
 
 See:
 
+- `ARCHITECTURE.md`
 - `departments/research/alpha_lab/public_private_boundary.md`
 - `departments/research/alpha_lab/public_allowlist.md`
 - `departments/platform/deployment/repo_commit_readiness.md`
 
 ## Status
 
-This is not a finished product. The repo is in active restructuring, with the
-near-term focus on:
+This is not a finished product. The big restructuring skeleton is in place, with
+the near-term focus on:
 
-1. syncing the committed structure to the Ubuntu server
-2. improving paper dashboard monitoring and Discord reporting
-3. polishing the money dashboard around portfolio history, drawdown, and risk
-4. tightening the research-to-paper candidate bridge
-5. upgrading notebooks and public-facing documentation later
+1. keeping server deployment reproducible and synced
+2. polishing dashboards into useful daily command centers
+3. keeping private alpha edge out of public commits
+4. running paper strategies long enough to evaluate stability
+5. leaving live trading future-gated until paper evidence and controls mature

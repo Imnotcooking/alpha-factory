@@ -105,6 +105,7 @@ class OQPSettings:
     ibkr_live_port: int
     ibkr_client_id: int
     ibkr_paper_client_id: int
+    ibkr_paper_submit_client_id: int
     ibkr_live_client_id: int
     ibkr_live_monitor_enabled: bool
     allow_paper_trading: bool
@@ -186,6 +187,11 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
             "IBKR_PAPER_CLIENT_ID",
             env_values,
             _setting_int("IBKR_CLIENT_ID", env_values, 101),
+        ),
+        ibkr_paper_submit_client_id=_setting_int(
+            "IBKR_PAPER_SUBMIT_CLIENT_ID",
+            env_values,
+            121,
         ),
         ibkr_live_client_id=_setting_int(
             "IBKR_LIVE_CLIENT_ID",

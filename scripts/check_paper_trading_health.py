@@ -21,6 +21,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from oqp.accounts import default_account_ledger_path  # noqa: E402
 from oqp.paper_trading import default_paper_trading_ledger_path  # noqa: E402
 
 
@@ -42,6 +43,11 @@ def parse_args() -> argparse.Namespace:
         "--db-path",
         default=str(default_paper_trading_ledger_path()),
         help="SQLite paper trading ledger path.",
+    )
+    parser.add_argument(
+        "--account-ledger-path",
+        default=str(default_account_ledger_path()),
+        help="SQLite unified account ledger path.",
     )
     parser.add_argument(
         "--max-age-hours",
@@ -80,6 +86,7 @@ def main() -> int:
     args = parse_args()
     checks, summary = run_checks(
         db_path=Path(args.db_path),
+        account_ledger_path=Path(args.account_ledger_path),
         max_age_hours=args.max_age_hours,
     )
     failed = any(check.failed() for check in checks)
@@ -109,6 +116,7 @@ def main() -> int:
 def run_checks(
     *,
     db_path: Path,
+    account_ledger_path: Path | None = None,
     max_age_hours: float,
 ) -> tuple[list[HealthCheck], dict[str, Any]]:
     checks: list[HealthCheck] = []
@@ -150,6 +158,14 @@ def run_checks(
                 checks.append(_paper_activity_check(conn, summary))
     except sqlite3.Error as exc:
         checks.append(HealthCheck("sqlite read", "fail", str(exc)))
+
+    if account_ledger_path is not None:
+        account_checks, account_summary = _account_ledger_checks(
+            account_ledger_path,
+            max_age_hours=max_age_hours,
+        )
+        checks.extend(account_checks)
+        summary.update(account_summary)
 
     return checks, summary
 
@@ -276,6 +292,210 @@ def _paper_activity_check(
     )
 
 
+def _account_ledger_checks(
+    db_path: Path,
+    *,
+    max_age_hours: float,
+) -> tuple[list[HealthCheck], dict[str, Any]]:
+    checks: list[HealthCheck] = [
+        HealthCheck(
+            "account ledger",
+            "pass" if db_path.exists() else "warn",
+            f"Found {db_path}." if db_path.exists() else f"Missing {db_path}.",
+        )
+    ]
+    summary: dict[str, Any] = {}
+    if not db_path.exists():
+        return checks, summary
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            tables = _tables(conn)
+            for table in ("account_nav", "account_positions", "account_trade_events"):
+                checks.append(_table_check(tables, table))
+
+            if "account_nav" in tables:
+                nav_checks, nav_summary = _account_nav_checks(
+                    conn,
+                    max_age_hours=max_age_hours,
+                )
+                checks.extend(nav_checks)
+                summary.update(nav_summary)
+
+            if "account_positions" in tables:
+                checks.append(_account_positions_check(conn, summary))
+
+            if "account_trade_events" in tables:
+                checks.append(_account_events_check(conn, summary))
+    except sqlite3.Error as exc:
+        checks.append(HealthCheck("account sqlite read", "warn", str(exc)))
+
+    return checks, summary
+
+
+def _account_nav_checks(
+    conn: sqlite3.Connection,
+    *,
+    max_age_hours: float,
+) -> tuple[list[HealthCheck], dict[str, Any]]:
+    latest = conn.execute(
+        """
+        SELECT date, account_id, as_of, net_liquidation, cash, daily_pnl,
+               position_count, snapshot_id
+        FROM account_nav
+        WHERE environment = 'paper'
+        ORDER BY as_of DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    nav_rows = conn.execute(
+        "SELECT COUNT(*) FROM account_nav WHERE environment = 'paper'"
+    ).fetchone()[0]
+    if latest is None:
+        return [
+            HealthCheck("latest account NAV", "warn", "No paper rows in account_nav.")
+        ], {"account_nav_rows": int(nav_rows)}
+
+    daily_pnl = _float(latest[5])
+    nav = _float(latest[3])
+    summary = {
+        "account_id": _redact_account(latest[1]),
+        "account_nav_rows": int(nav_rows),
+        "account_latest_date": latest[0],
+        "account_latest_as_of": latest[2],
+        "account_as_of": latest[2],
+        "account_latest_snapshot_id": latest[7],
+        "account_nav": nav,
+        "account_net_liquidation": nav,
+        "account_cash": _float(latest[4]),
+        "account_daily_pnl": daily_pnl,
+        "account_position_count": int(latest[6] or 0),
+    }
+    previous = conn.execute(
+        """
+        SELECT net_liquidation
+        FROM account_nav
+        WHERE environment = 'paper' AND as_of < ?
+        ORDER BY as_of DESC
+        LIMIT 1
+        """,
+        (latest[2],),
+    ).fetchone()
+    if previous is not None and _float(previous[0]) != 0:
+        summary["account_daily_return"] = daily_pnl / _float(previous[0])
+    first = conn.execute(
+        """
+        SELECT net_liquidation
+        FROM account_nav
+        WHERE environment = 'paper'
+        ORDER BY as_of ASC
+        LIMIT 1
+        """
+    ).fetchone()
+    if first is not None and _float(first[0]) != 0:
+        summary["account_cumulative_return"] = nav / _float(first[0]) - 1.0
+
+    age_hours = _datetime_age_hours(str(latest[2]))
+    checks = [
+        HealthCheck(
+            "latest account NAV",
+            "pass",
+            (
+                f"date={latest[0]} nav={nav:,.2f} "
+                f"cash={summary['account_cash']:,.2f} "
+                f"daily_pnl={daily_pnl:,.2f}"
+            ),
+        ),
+        HealthCheck(
+            "account NAV freshness",
+            "pass" if age_hours is not None and age_hours <= max_age_hours else "warn",
+            (
+                f"Latest account NAV is {age_hours:.1f} hours old "
+                f"(limit {max_age_hours:.1f})."
+                if age_hours is not None
+                else f"Could not parse as_of: {latest[2]}."
+            ),
+        ),
+    ]
+    return checks, summary
+
+
+def _account_positions_check(
+    conn: sqlite3.Connection,
+    summary: dict[str, Any],
+) -> HealthCheck:
+    row = conn.execute(
+        """
+        SELECT snapshot_id
+        FROM account_nav
+        WHERE environment = 'paper'
+        ORDER BY as_of DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    history_rows = conn.execute(
+        "SELECT COUNT(*) FROM account_positions WHERE environment = 'paper'"
+    ).fetchone()[0]
+    summary["account_position_history_rows"] = int(history_rows)
+    if row is None:
+        return HealthCheck("account positions", "warn", "No latest paper account snapshot.")
+
+    snapshot_id = row[0]
+    latest = conn.execute(
+        """
+        SELECT
+            COUNT(*),
+            COALESCE(SUM(ABS(COALESCE(market_value, quantity * COALESCE(market_price, 0) * multiplier))), 0),
+            COALESCE(SUM(COALESCE(unrealized_pnl, 0)), 0)
+        FROM account_positions
+        WHERE snapshot_id = ?
+        """,
+        (snapshot_id,),
+    ).fetchone()
+    realized = conn.execute(
+        """
+        SELECT COALESCE(SUM(CAST(json_extract(metadata_json, '$.realized_pnl') AS REAL)), 0)
+        FROM account_positions
+        WHERE snapshot_id = ?
+        """,
+        (snapshot_id,),
+    ).fetchone()[0]
+    summary["account_latest_position_rows"] = int(latest[0] or 0)
+    summary["account_gross_exposure"] = _float(latest[1])
+    summary["account_unrealized_pnl"] = _float(latest[2])
+    summary["account_realized_pnl"] = _float(realized)
+    return HealthCheck(
+        "account positions",
+        "pass" if int(latest[0] or 0) > 0 else "warn",
+        (
+            f"snapshot_id={snapshot_id} rows={int(latest[0] or 0)} "
+            f"history_rows={int(history_rows)} gross={_float(latest[1]):,.2f} "
+            f"unrealized={_float(latest[2]):,.2f}"
+        ),
+    )
+
+
+def _account_events_check(
+    conn: sqlite3.Connection,
+    summary: dict[str, Any],
+) -> HealthCheck:
+    today = date.today().isoformat()
+    count = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM account_trade_events
+        WHERE environment = 'paper' AND occurred_at >= ?
+        """,
+        (today,),
+    ).fetchone()[0]
+    summary["account_events_today"] = int(count)
+    return HealthCheck(
+        "account events",
+        "pass",
+        f"paper account events today={count}.",
+    )
+
+
 def _post_webhook(url: str, payload: dict[str, Any]) -> None:
     body = json.dumps(_discord_payload(payload), sort_keys=True).encode("utf-8")
     request = urllib.request.Request(
@@ -311,21 +531,66 @@ def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
         checks = []
 
     failed = [check for check in checks if check.get("status") == "fail"]
+    warnings = [check for check in checks if check.get("status") == "warn"]
     fields = [
         _discord_field("Paper Account", str(summary.get("account_id", "n/a"))),
-        _discord_field("Paper NAV", _money(summary.get("net_liquidation"))),
-        _discord_field("Daily P&L", _money(summary.get("daily_pnl"))),
-        _discord_field("Cash", _money(summary.get("cash"))),
-        _discord_field("Positions", str(summary.get("position_rows", summary.get("position_count", "n/a")))),
+        _discord_field(
+            "NAV / Cash",
+            (
+                f"NAV {_money(summary.get('account_net_liquidation', summary.get('net_liquidation')))}\n"
+                f"Cash {_money(summary.get('account_cash', summary.get('cash')))}"
+            ),
+        ),
+        _discord_field(
+            "P&L",
+            (
+                f"Daily {_money(summary.get('account_daily_pnl', summary.get('daily_pnl')))}\n"
+                f"Unrealized {_money(summary.get('account_unrealized_pnl'))}\n"
+                f"Realized {_money(summary.get('account_realized_pnl'))}"
+            ),
+        ),
+        _discord_field(
+            "Returns",
+            (
+                f"Daily {_pct(summary.get('account_daily_return'))}\n"
+                f"Cumulative {_pct(summary.get('account_cumulative_return'))}"
+            ),
+        ),
+        _discord_field(
+            "Exposure / Holdings",
+            (
+                f"Gross {_money(summary.get('account_gross_exposure'))}\n"
+                f"Latest rows {summary.get('account_latest_position_rows', summary.get('position_rows', 'n/a'))}\n"
+                f"History rows {summary.get('account_position_history_rows', 'n/a')}"
+            ),
+        ),
         _discord_field(
             "Activity",
-            f"orders_today={summary.get('orders_today', 0)} fills_today={summary.get('fills_today', 0)}",
+            (
+                f"orders_today={summary.get('orders_today', 0)} "
+                f"fills_today={summary.get('fills_today', 0)} "
+                f"events_today={summary.get('account_events_today', 0)}"
+            ),
+        ),
+        _discord_field(
+            "Freshness",
+            (
+                f"paper_as_of={summary.get('as_of', 'n/a')}\n"
+                f"account_as_of={summary.get('account_as_of', summary.get('account_latest_as_of', 'n/a'))}"
+            ),
         ),
     ]
     for check in failed[:4]:
         fields.append(
             _discord_field(
                 f"FAIL: {check.get('name', 'check')}",
+                str(check.get("detail", "")),
+            )
+        )
+    for check in warnings[:2]:
+        fields.append(
+            _discord_field(
+                f"WARN: {check.get('name', 'check')}",
                 str(check.get("detail", "")),
             )
         )
@@ -373,7 +638,15 @@ def _float(value: Any) -> float:
 
 
 def _money(value: Any) -> str:
+    if value in (None, "n/a", ""):
+        return "n/a"
     return f"${_float(value):,.2f}"
+
+
+def _pct(value: Any) -> str:
+    if value in (None, "n/a", ""):
+        return "n/a"
+    return f"{_float(value) * 100:.2f}%"
 
 
 def _redact_account(account_id: Any) -> str:

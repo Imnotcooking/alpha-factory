@@ -669,6 +669,7 @@ def update_paper_order_ticket_status(
     decided_at: str | datetime | None = None,
     decided_by: str | None = None,
     reason: str | None = None,
+    metadata_updates: Mapping[str, Any] | None = None,
 ) -> PaperOrderTicketStatusUpdateResult:
     path = ensure_paper_trading_schema(db_path)
     new_status = str(status).strip()
@@ -712,6 +713,8 @@ def update_paper_order_ticket_status(
             metadata["rejected_at"] = timestamp
             if decided_by:
                 metadata["rejected_by"] = str(decided_by)
+        if metadata_updates:
+            metadata.update(dict(metadata_updates))
 
         conn.execute(
             """

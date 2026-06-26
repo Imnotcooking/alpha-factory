@@ -85,6 +85,26 @@ def get_broker_profile_config(
             metadata={"profile": "ibkr_paper_readonly"},
         )
 
+    if key in {"ibkr_paper_submit", "paper_submit"}:
+        if not active_settings.allow_paper_order_submit:
+            raise BrokerProfileError(
+                "IBKR paper submit profile is disabled. Set "
+                "ALLOW_PAPER_ORDER_SUBMIT=true only for guarded paper execution."
+            )
+        if active_settings.allow_live_trading:
+            raise BrokerProfileError(
+                "Paper submit profile requires ALLOW_LIVE_TRADING=false."
+            )
+        return BrokerConnectionConfig(
+            broker="ibkr",
+            host=active_settings.ibkr_host,
+            port=active_settings.ibkr_paper_port,
+            client_id=active_settings.ibkr_paper_submit_client_id,
+            environment=BrokerEnvironment.PAPER,
+            readonly=False,
+            metadata={"profile": "ibkr_paper_submit"},
+        )
+
     if key in {"ibkr_live_readonly", "live_readonly", "live_monitor"}:
         if not active_settings.ibkr_live_monitor_enabled:
             raise BrokerProfileError(

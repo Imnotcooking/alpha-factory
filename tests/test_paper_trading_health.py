@@ -83,9 +83,16 @@ class PaperTradingHealthTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "paper.db"
-            write_paper_snapshot(db_path, sample_snapshot(), snapshot_date="2026-06-25")
+            account_db = Path(tmp) / "account.db"
+            write_paper_snapshot(
+                db_path,
+                sample_snapshot(),
+                snapshot_date="2026-06-25",
+                account_ledger_path=account_db,
+            )
             checks, summary = health.run_checks(
                 db_path=db_path,
+                account_ledger_path=account_db,
                 max_age_hours=36,
             )
 
@@ -94,6 +101,10 @@ class PaperTradingHealthTests(unittest.TestCase):
         self.assertEqual(summary["position_rows"], 2)
         self.assertEqual(summary["orders_today"], 0)
         self.assertEqual(summary["fills_today"], 0)
+        self.assertEqual(summary["account_nav_rows"], 1)
+        self.assertEqual(summary["account_latest_position_rows"], 2)
+        self.assertEqual(summary["account_position_history_rows"], 2)
+        self.assertEqual(summary["account_unrealized_pnl"], 250.0)
 
     def test_discord_payload_has_content_and_embed(self) -> None:
         health = load_health_module()
@@ -108,6 +119,10 @@ class PaperTradingHealthTests(unittest.TestCase):
                     "cash": 750_000,
                     "daily_pnl": 1234,
                     "position_rows": 2,
+                    "account_unrealized_pnl": 250,
+                    "account_realized_pnl": 0,
+                    "account_gross_exposure": 2250,
+                    "account_position_history_rows": 2,
                     "orders_today": 0,
                     "fills_today": 0,
                 },
@@ -118,6 +133,9 @@ class PaperTradingHealthTests(unittest.TestCase):
         self.assertTrue(payload["content"])
         self.assertIn("embeds", payload)
         self.assertEqual(payload["allowed_mentions"], {"parse": []})
+        field_names = {field["name"] for field in payload["embeds"][0]["fields"]}
+        self.assertIn("P&L", field_names)
+        self.assertIn("Exposure / Holdings", field_names)
 
 
 if __name__ == "__main__":

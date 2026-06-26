@@ -11,6 +11,7 @@ from oqp.brokers.base import BrokerAdapter, BrokerAdapterError
 from oqp.brokers.models import (
     AccountSummary,
     BrokerConnectionConfig,
+    BrokerEnvironment,
     BrokerConnectionStatus,
     BrokerHealth,
     CashBalance,
@@ -275,8 +276,85 @@ class IBKRBrokerAdapter(BrokerAdapter):
         return receipts
 
     def place_order(self, order: Order) -> OrderReceipt:
-        raise BrokerAdapterError(
-            "Order placement is disabled in the read-only IBKR adapter path."
+        self._require_connection()
+        if self.config is None:
+            raise BrokerAdapterError("IBKR order placement requires a broker config.")
+        if self.config.environment != BrokerEnvironment.PAPER:
+            raise BrokerAdapterError("IBKR order placement is only enabled for paper profiles.")
+        if self.config.readonly:
+            raise BrokerAdapterError("IBKR order placement is blocked for read-only profiles.")
+        if order.instrument.asset_class not in {AssetClass.EQUITY, AssetClass.ETF}:
+            raise BrokerAdapterError("IBKR paper order placement currently supports equities and ETFs only.")
+        if order.order_type != OrderType.LIMIT:
+            raise BrokerAdapterError("IBKR paper order placement currently requires limit orders.")
+        if order.limit_price is None or order.limit_price <= 0:
+            raise BrokerAdapterError("IBKR paper limit orders require a positive limit price.")
+
+        try:
+            from ib_insync import LimitOrder, Stock
+        except ImportError as exc:
+            raise BrokerAdapterError("ib_insync is required for IBKR paper order placement.") from exc
+
+        symbol = order.instrument.broker_symbol or order.instrument.symbol
+        contract = Stock(
+            symbol,
+            order.instrument.exchange or "SMART",
+            order.instrument.currency,
+        )
+        try:
+            qualified = self._ib.qualifyContracts(contract)
+            if qualified:
+                contract = qualified[0]
+        except Exception:
+            # IBKR can still accept a SMART stock contract without qualification.
+            pass
+
+        ib_order = LimitOrder(
+            order.side.value.upper(),
+            float(order.quantity),
+            float(order.limit_price),
+            tif=order.time_in_force or "DAY",
+        )
+        account_id = self.config.account_id or order.account_id
+        if account_id:
+            ib_order.account = account_id
+        if order.client_order_id:
+            ib_order.orderRef = order.client_order_id
+        elif order.strategy_id:
+            ib_order.orderRef = f"oqp:{order.strategy_id}"
+
+        try:
+            trade = self._ib.placeOrder(contract, ib_order)
+            try:
+                self._ib.sleep(0.5)
+            except Exception:
+                pass
+        except Exception as exc:
+            raise BrokerAdapterError(f"IBKR paper order placement failed: {exc}") from exc
+
+        status = getattr(trade, "orderStatus", None)
+        broker_order = getattr(trade, "order", ib_order)
+        broker_order_id = str(getattr(broker_order, "orderId", "")) or None
+        status_text = getattr(status, "status", None)
+        receipt_status = self._order_status(status_text)
+        if receipt_status == OrderStatus.DRAFT:
+            receipt_status = OrderStatus.SUBMITTED
+
+        return OrderReceipt(
+            order=order,
+            status=receipt_status,
+            broker_order_id=broker_order_id,
+            client_order_id=order.client_order_id,
+            message=status_text or "submitted",
+            metadata={
+                "profile": self.config.metadata.get("profile"),
+                "environment": self.config.environment.value,
+                "readonly": self.config.readonly,
+                "contract_symbol": getattr(contract, "localSymbol", None)
+                or getattr(contract, "symbol", None),
+                "order_ref": getattr(broker_order, "orderRef", None),
+                "perm_id": getattr(status, "permId", None),
+            },
         )
 
     def cancel_order(self, broker_order_id: str) -> CancelResult:

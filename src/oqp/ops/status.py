@@ -12,7 +12,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,11 +24,22 @@ from oqp.accounts import (
     ensure_account_ledger_schema,
     load_account_trade_events,
 )
+from oqp.brokers import (
+    BrokerConnectionConfig,
+    BrokerConnectionStatus,
+    fetch_ibkr_readonly_portfolio_snapshot,
+    get_broker_adapter,
+    get_broker_profile_config,
+)
 from oqp.config import REPO_ROOT, OQPSettings, load_settings
 
 
 DEFAULT_PORTFOLIO_HEALTH_PATH = REPO_ROOT / "logs" / "portfolio_snapshot_health.json"
 DEFAULT_PAPER_HEALTH_PATH = REPO_ROOT / "logs" / "paper_trading_health.json"
+DEFAULT_IBKR_HEARTBEAT_HEALTH_PATH = (
+    REPO_ROOT / "logs" / "ibkr_adapter_heartbeat_health.json"
+)
+IBKR_HEARTBEAT_CLIENT_ID_OFFSET = 9_000
 SYSTEMD_UNITS = (
     "oqp-money-dashboard.service",
     "oqp-paper-dashboard.service",
@@ -93,6 +104,7 @@ def collect_ops_status(
     account_ledger_path: str | Path | None = None,
     portfolio_health_path: str | Path = DEFAULT_PORTFOLIO_HEALTH_PATH,
     paper_health_path: str | Path = DEFAULT_PAPER_HEALTH_PATH,
+    ibkr_heartbeat_health_path: str | Path = DEFAULT_IBKR_HEARTBEAT_HEALTH_PATH,
     max_age_hours: float = 36.0,
     repo_root: str | Path = REPO_ROOT,
 ) -> OpsStatusSnapshot:
@@ -119,6 +131,7 @@ def collect_ops_status(
             ),
         ]
     )
+    items.extend(ibkr_api_heartbeat_items(active_settings))
     items.extend(account_freshness_items(account_rows, max_age_hours=max_age_hours))
     items.extend(account_event_items(event_rows))
     items.extend(
@@ -133,6 +146,14 @@ def collect_ops_status(
         health_file_items(
             Path(paper_health_path),
             label="Paper Snapshot",
+            category="Jobs",
+            max_age_hours=max_age_hours,
+        )
+    )
+    items.extend(
+        health_file_items(
+            Path(ibkr_heartbeat_health_path),
+            label="IBKR Adapter Heartbeat",
             category="Jobs",
             max_age_hours=max_age_hours,
         )
@@ -332,6 +353,105 @@ def socket_status_item(
         f"{host}:{port} accepted TCP connection.",
         {"Host": host, "Port": int(port)},
     )
+
+
+def ibkr_api_heartbeat_items(settings: OQPSettings) -> list[OpsStatusItem]:
+    """Perform read-only IBKR API handshakes, beyond the raw socket probes."""
+
+    return [
+        ibkr_api_heartbeat_item(
+            "Live IBKR API heartbeat",
+            "ibkr_live_readonly",
+            settings,
+        ),
+        ibkr_api_heartbeat_item(
+            "Paper IBKR API heartbeat",
+            "ibkr_paper_readonly",
+            settings,
+        ),
+    ]
+
+
+def ibkr_api_heartbeat_item(
+    name: str,
+    profile: str,
+    settings: OQPSettings,
+) -> OpsStatusItem:
+    try:
+        config = get_broker_profile_config(profile, settings=settings)
+    except Exception as exc:
+        return OpsStatusItem(
+            "Broker Heartbeat",
+            name,
+            "warn",
+            f"Skipped: {exc}",
+            {"Profile": profile},
+        )
+
+    heartbeat_config = _heartbeat_config(config)
+    try:
+        broker = get_broker_adapter("ibkr", settings=settings)
+        snapshot = fetch_ibkr_readonly_portfolio_snapshot(
+            heartbeat_config,
+            adapter=broker,
+        )
+    except Exception as exc:
+        return OpsStatusItem(
+            "Broker Heartbeat",
+            name,
+            "fail",
+            f"Adapter exception: {exc}",
+            _heartbeat_metadata(heartbeat_config),
+        )
+
+    metadata = _heartbeat_metadata(heartbeat_config)
+    metadata["Account"] = _redact_account(snapshot.health.account_id)
+    metadata["Positions"] = len(snapshot.position_rows)
+
+    if snapshot.health.status != BrokerConnectionStatus.CONNECTED or snapshot.error:
+        return OpsStatusItem(
+            "Broker Heartbeat",
+            name,
+            "fail",
+            snapshot.error or snapshot.health.message or "Adapter did not connect.",
+            metadata,
+        )
+
+    cash = _money(snapshot.metrics.get("Available_Cash_USD"))
+    nav = _money(snapshot.metrics.get("Total_NAV_USD"))
+    return OpsStatusItem(
+        "Broker Heartbeat",
+        name,
+        "pass",
+        (
+            f"Connected read-only. account={metadata['Account']} "
+            f"positions={metadata['Positions']} cash={cash} nav={nav}"
+        ),
+        metadata,
+    )
+
+
+def _heartbeat_config(
+    config: BrokerConnectionConfig,
+    *,
+    process_id: int | None = None,
+) -> BrokerConnectionConfig:
+    pid_component = (os.getpid() if process_id is None else process_id) % 100_000
+    return replace(
+        config,
+        client_id=int(config.client_id) + IBKR_HEARTBEAT_CLIENT_ID_OFFSET + pid_component,
+    )
+
+
+def _heartbeat_metadata(config: BrokerConnectionConfig) -> dict[str, Any]:
+    return {
+        "Profile": str(config.metadata.get("profile") or ""),
+        "Host": config.host,
+        "Port": config.port,
+        "Client ID": config.client_id,
+        "Environment": config.environment.value,
+        "Read Only": config.readonly,
+    }
 
 
 def health_file_items(

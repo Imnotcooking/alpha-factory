@@ -83,8 +83,9 @@ python3 departments/platform/deployment/create_server_env_from_existing_state.py
 
 If the helper cannot recover the VNC password, it writes
 `IBKR_VNC_PASSWORD="REPLACE_ME_BEFORE_CONTAINER_RECREATE"`. This is acceptable
-for dashboard and snapshot timer operation, but must be replaced before using
-`ibkr_gateway_docker_run.sh recreate`.
+for dashboard and snapshot timer operation. The Docker CLI helper treats the
+VNC password as optional; if it is blank, use a temporary `x11vnc` session over
+SSH only when MFA is required.
 
 Fill in:
 
@@ -92,7 +93,7 @@ Fill in:
 - `IBKR_LIVE_PASSWORD`
 - `IBKR_PAPER_USER`
 - `IBKR_PAPER_PASSWORD`
-- `IBKR_VNC_PASSWORD`
+- `IBKR_VNC_PASSWORD` if you want the container to own VNC authentication
 - vendor API keys if dashboards/jobs need them
 - Discord webhook URLs if alerts should post
 
@@ -182,8 +183,9 @@ Open:
 vnc://127.0.0.1:5902
 ```
 
-Use the `IBKR_VNC_PASSWORD` value from `/home/ubuntu/.oqp_server_env` when the
-VNC client asks for a password.
+Use the `IBKR_VNC_PASSWORD` value from `/home/ubuntu/.oqp_server_env` if the
+container is configured with one. If not, start a temporary `x11vnc` session
+inside the container and keep access behind SSH localhost forwarding only.
 
 ## 5. Verify IBKR Readiness
 
@@ -207,7 +209,49 @@ Expected result:
 - `ALLOW_LIVE_TRADING=false`
 - socket host is local
 
-## 6. Install Dashboard Services
+## 6. Rotate The Live IBKR API Username
+
+Use a dedicated IBKR username for the Ubuntu live Gateway. Do not use that
+username casually in Client Portal, phone apps, or desktop TWS sessions.
+
+In IBKR Client Portal, create or enable the dedicated API user first. Then
+update only the live credentials on the server:
+
+```bash
+cd /home/ubuntu/oqp_new
+cp /home/ubuntu/.oqp_server_env "/home/ubuntu/.oqp_server_env.backup.$(date -u +%Y%m%dT%H%M%SZ)"
+chmod 600 /home/ubuntu/.oqp_server_env
+nano /home/ubuntu/.oqp_server_env
+```
+
+Change only:
+
+```bash
+IBKR_LIVE_USER=
+IBKR_LIVE_PASSWORD=
+```
+
+Then recreate only the live Gateway:
+
+```bash
+departments/platform/deployment/ibkr_gateway_docker_run.sh recreate-live
+```
+
+Complete live MFA over tunneled VNC, then verify:
+
+```bash
+source .venv/bin/activate
+set -a
+source /home/ubuntu/.oqp_server_env
+set +a
+
+PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile live --adapter-check
+PYTHONPATH=src:. python scripts/check_ibkr_adapter_heartbeat.py --profile live
+```
+
+The paper Gateway does not need to be restarted for a live username rotation.
+
+## 7. Install Dashboard Services
 
 Copy systemd service templates:
 
@@ -244,7 +288,7 @@ research dashboard  127.0.0.1:8524
 Prefer SSH tunnels or a reverse proxy with authentication. Do not expose these
 ports directly to the internet.
 
-## 7. Install Snapshot Timers
+## 8. Install Snapshot Timers
 
 Enable scheduled jobs:
 
@@ -252,6 +296,7 @@ Enable scheduled jobs:
 sudo systemctl enable --now oqp-portfolio-snapshot.timer
 sudo systemctl enable --now oqp-paper-snapshot.timer
 sudo systemctl enable --now oqp-paper-strategy-runner.timer
+sudo systemctl enable --now oqp-ibkr-heartbeat.timer
 ```
 
 Timer schedule:
@@ -261,6 +306,7 @@ oqp-portfolio-snapshot.timer  Mon-Fri 21:30 server time
 oqp-paper-snapshot.timer      Mon-Fri 21:45 server time
 oqp-paper-strategy-runner.timer
                                Mon-Fri every 15 minutes, 13:00-22:45 server time
+oqp-ibkr-heartbeat.timer       Every 15 minutes after boot
 ```
 
 Check the server timezone:
@@ -276,6 +322,7 @@ Manual one-shot runs:
 sudo systemctl start oqp-portfolio-snapshot.service
 sudo systemctl start oqp-paper-snapshot.service
 sudo systemctl start oqp-paper-strategy-runner.service
+sudo systemctl start oqp-ibkr-heartbeat.service
 ```
 
 Logs:
@@ -284,11 +331,13 @@ Logs:
 tail -100 /home/ubuntu/oqp_new/logs/portfolio_snapshot_job.log
 tail -100 /home/ubuntu/oqp_new/logs/paper_strategy_runner.log
 tail -100 /home/ubuntu/oqp_new/logs/paper_snapshot_job.log
+tail -100 /home/ubuntu/oqp_new/logs/ibkr_adapter_heartbeat.log
 journalctl -u oqp-portfolio-snapshot.service -n 100 --no-pager
 journalctl -u oqp-paper-snapshot.service -n 100 --no-pager
+journalctl -u oqp-ibkr-heartbeat.service -n 100 --no-pager
 ```
 
-## 8. Health Checks
+## 9. Health Checks
 
 Run directly:
 
@@ -301,6 +350,7 @@ set +a
 
 PYTHONPATH=src:. python scripts/check_portfolio_snapshot_health.py --notify-always
 PYTHONPATH=src:. python scripts/check_paper_trading_health.py --notify-always
+PYTHONPATH=src:. python scripts/check_ibkr_adapter_heartbeat.py --notify-always
 ```
 
 Expected status files:
@@ -308,9 +358,10 @@ Expected status files:
 ```text
 logs/portfolio_snapshot_health.json
 logs/paper_trading_health.json
+logs/ibkr_adapter_heartbeat_health.json
 ```
 
-## 9. Firewall Posture
+## 10. Firewall Posture
 
 IBKR API and VNC ports should bind to `127.0.0.1` only. Even then, keep the
 host firewall restrictive:
@@ -328,7 +379,7 @@ sudo ufw status verbose
 If dashboards are exposed later, use a reverse proxy with authentication and
 TLS instead of opening raw Streamlit ports.
 
-## 10. Rebuild Checklist
+## 11. Rebuild Checklist
 
 Use this when replacing the server:
 

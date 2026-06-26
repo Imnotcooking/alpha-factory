@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run paper order submission preflight checks without placing orders."""
+"""Run paper order submission preflight checks or guarded paper submissions."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from oqp.accounts import default_account_ledger_path, load_latest_account_nav  # noqa: E402
-from oqp.brokers import get_broker_profile_config  # noqa: E402
+from oqp.brokers import get_broker_adapter, get_broker_profile_config  # noqa: E402
 from oqp.config import load_settings  # noqa: E402
 from oqp.paper_trading import (  # noqa: E402
     PaperOrderTicketStatus,
@@ -28,6 +28,7 @@ from oqp.paper_trading import (  # noqa: E402
     load_paper_strategy_record,
     record_paper_submission_preflight,
     review_paper_order_submission,
+    submit_approved_paper_order_ticket,
 )
 
 
@@ -35,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Review approved paper order tickets for submission readiness. "
-            "This command never places IBKR orders."
+            "Use --submit-approved to place guarded IBKR paper orders."
         ),
     )
     parser.add_argument(
@@ -65,6 +66,14 @@ def parse_args() -> argparse.Namespace:
         help="Write preflight results to the unified account event ledger.",
     )
     parser.add_argument(
+        "--submit-approved",
+        action="store_true",
+        help=(
+            "Submit approved, preflight-ready tickets to the IBKR paper profile. "
+            "Requires ALLOW_PAPER_ORDER_SUBMIT=true and the paper submit profile."
+        ),
+    )
+    parser.add_argument(
         "--notify",
         action="store_true",
         help="Post a preflight summary to the configured Discord webhook.",
@@ -85,7 +94,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     settings = load_settings(args.env_file)
-    broker_config = get_broker_profile_config("ibkr_paper_readonly", settings=settings)
+    broker_config = get_broker_profile_config(
+        "ibkr_paper_submit" if args.submit_approved else "ibkr_paper_readonly",
+        settings=settings,
+    )
     account_ledger_path = Path(args.account_ledger_path)
     account_id = broker_config.account_id or _latest_account_id(
         account_ledger_path,
@@ -100,31 +112,52 @@ def main() -> int:
     )
 
     preflights: list[dict[str, Any]] = []
+    submissions: list[dict[str, Any]] = []
     for row in approved.to_dict("records"):
         strategy_record = load_paper_strategy_record(
             Path(args.db_path),
             str(row.get("strategy_id") or ""),
         )
-        preflight = review_paper_order_submission(
-            row,
-            settings=settings,
-            broker_config=broker_config,
-            strategy_record=strategy_record,
-        )
-        record = None
-        if args.record_events:
-            record = record_paper_submission_preflight(
-                account_ledger_path,
-                preflight,
+        if args.submit_approved:
+            submission = submit_approved_paper_order_ticket(
+                order_id=str(row.get("order_id") or ""),
+                paper_ledger_path=Path(args.db_path),
+                account_ledger_path=account_ledger_path,
+                settings=settings,
                 broker_config=broker_config,
+                broker=get_broker_adapter("ibkr", settings=settings),
+                strategy_record=strategy_record,
                 account_id=account_id,
             )
-        preflights.append(
-            {
-                "preflight": preflight.to_dict(),
-                "record": None if record is None else record.to_dict(),
-            }
-        )
+            submissions.append(submission.to_dict())
+            preflights.append(
+                {
+                    "preflight": submission.preflight.to_dict(),
+                    "record": None,
+                    "submission": submission.to_dict(),
+                }
+            )
+        else:
+            preflight = review_paper_order_submission(
+                row,
+                settings=settings,
+                broker_config=broker_config,
+                strategy_record=strategy_record,
+            )
+            record = None
+            if args.record_events:
+                record = record_paper_submission_preflight(
+                    account_ledger_path,
+                    preflight,
+                    broker_config=broker_config,
+                    account_id=account_id,
+                )
+            preflights.append(
+                {
+                    "preflight": preflight.to_dict(),
+                    "record": None if record is None else record.to_dict(),
+                }
+            )
 
     result = {
         "status": "reviewed",
@@ -132,8 +165,9 @@ def main() -> int:
         "account_ledger_path": str(account_ledger_path),
         "approved_ticket_count": len(approved),
         "record_events": bool(args.record_events),
-        "broker_submit_enabled": False,
+        "broker_submit_enabled": bool(args.submit_approved),
         "preflights": preflights,
+        "submissions": submissions,
     }
     if args.notify:
         _post_discord(result, env_file=Path(args.env_file))
@@ -189,7 +223,7 @@ def _print_result(result: dict[str, Any]) -> None:
                 f"        {status:4} {check['severity']:<7} "
                 f"{check['name']}: {check['detail']}"
             )
-    print("broker_submit_enabled=false")
+    print(f"broker_submit_enabled={str(result.get('broker_submit_enabled', False)).lower()}")
 
 
 def _post_discord(result: dict[str, Any], *, env_file: Path) -> None:
@@ -226,12 +260,14 @@ def _post_discord(result: dict[str, Any], *, env_file: Path) -> None:
 
 def _discord_payload(result: dict[str, Any]) -> dict[str, Any]:
     preflights = [item["preflight"] for item in result["preflights"]]
+    submissions = result.get("submissions", [])
     blocked = [item for item in preflights if item["decision"] != "ready"]
     fields = [
         _discord_field("Approved Tickets", result["approved_ticket_count"]),
         _discord_field("Blocked", len(blocked)),
         _discord_field("Recorded Events", result["record_events"]),
-        _discord_field("Broker Submit Enabled", "false"),
+        _discord_field("Broker Submit Enabled", result["broker_submit_enabled"]),
+        _discord_field("Submitted", len(submissions)),
     ]
     for preflight in preflights[:4]:
         fields.append(
@@ -248,7 +284,7 @@ def _discord_payload(result: dict[str, Any]) -> dict[str, Any]:
             {
                 "title": "Paper Order Submission Preflight",
                 "description": (
-                    "No IBKR orders were submitted. This is a readiness check only."
+                    "IBKR paper orders submitted only when --submit-approved is used."
                 ),
                 "color": 0xE67E22 if blocked else 0x2ECC71,
                 "fields": fields[:10],
