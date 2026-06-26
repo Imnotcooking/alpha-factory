@@ -35,6 +35,7 @@ SYSTEMD_UNITS = (
     "oqp-ops-dashboard.service",
     "oqp-portfolio-snapshot.timer",
     "oqp-paper-snapshot.timer",
+    "oqp-paper-strategy-runner.timer",
 )
 
 

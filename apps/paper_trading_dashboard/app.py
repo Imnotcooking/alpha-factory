@@ -402,6 +402,194 @@ def paper_strategy_registry_display(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+def count_status(df: pd.DataFrame, column: str, value: str) -> int:
+    if df.empty or column not in df.columns:
+        return 0
+    return int(df[column].astype(str).eq(value).sum())
+
+
+def metadata_json_from_row(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(row, pd.Series):
+        return parse_metadata(row.get("metadata_json"))
+    return parse_metadata(row.get("metadata_json"))
+
+
+def latest_review_by_proposal(df: pd.DataFrame) -> dict[str, pd.Series]:
+    if df.empty or "proposal_id" not in df.columns:
+        return {}
+    lookup: dict[str, pd.Series] = {}
+    for _, row in df.iterrows():
+        proposal_id = str(row.get("proposal_id") or "").strip()
+        if proposal_id and proposal_id not in lookup:
+            lookup[proposal_id] = row
+    return lookup
+
+
+def ticket_summary_by_proposal(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    if df.empty:
+        return summary
+    for row in df.to_dict("records"):
+        metadata = metadata_json_from_row(row)
+        proposal_id = str(metadata.get("proposal_id") or "").strip()
+        if not proposal_id:
+            continue
+        status = str(row.get("status") or "unknown")
+        entry = summary.setdefault(
+            proposal_id,
+            {
+                "count": 0,
+                "statuses": {},
+                "order_ids": [],
+            },
+        )
+        entry["count"] += 1
+        entry["statuses"][status] = int(entry["statuses"].get(status, 0)) + 1
+        entry["order_ids"].append(str(row.get("order_id") or ""))
+    return summary
+
+
+def summarize_ticket_statuses(summary: dict[str, Any] | None) -> str:
+    if not summary:
+        return "0"
+    statuses = summary.get("statuses", {})
+    return ", ".join(f"{status}={count}" for status, count in statuses.items()) or "0"
+
+
+def latest_log_line(path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    try:
+        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    except OSError as exc:
+        return f"unreadable: {exc}"
+    return next((line for line in reversed(lines) if line), "empty")
+
+
+def paper_pipeline_rows(
+    *,
+    candidate_count: int,
+    running_strategy_count: int,
+    proposal_count: int,
+    unreviewed_count: int,
+    review_count: int,
+    ready_review_count: int,
+    blocked_review_count: int,
+    dry_run_ticket_count: int,
+    approved_ticket_count: int,
+    rejected_ticket_count: int,
+    runner_log_line: str,
+    paper_trading_allowed: bool,
+    order_submit_allowed: bool,
+    broker_readonly: bool,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "Layer": "Research exports",
+            "State": "present" if candidate_count else "waiting",
+            "Count": candidate_count,
+            "Current Detail": "strategy candidate artifacts",
+            "Next Gate": "paper queue eligibility",
+        },
+        {
+            "Layer": "Paper strategy registry",
+            "State": "armed" if running_strategy_count else "waiting",
+            "Count": running_strategy_count,
+            "Current Detail": "paper_running strategies",
+            "Next Gate": "proposal strategy gate",
+        },
+        {
+            "Layer": "Trade proposals",
+            "State": "pending" if unreviewed_count else ("present" if proposal_count else "waiting"),
+            "Count": proposal_count,
+            "Current Detail": f"{unreviewed_count} not reviewed",
+            "Next Gate": "runner scan",
+        },
+        {
+            "Layer": "Paper strategy runner",
+            "State": "scheduled",
+            "Count": "",
+            "Current Detail": runner_log_line,
+            "Next Gate": "safety review",
+        },
+        {
+            "Layer": "Safety reviews",
+            "State": "ready" if ready_review_count else ("blocked" if blocked_review_count else "waiting"),
+            "Count": review_count,
+            "Current Detail": f"ready={ready_review_count}, blocked={blocked_review_count}",
+            "Next Gate": "dry-run ticket creation",
+        },
+        {
+            "Layer": "Dry-run tickets",
+            "State": "waiting approval" if dry_run_ticket_count else ("approved" if approved_ticket_count else "waiting"),
+            "Count": dry_run_ticket_count + approved_ticket_count + rejected_ticket_count,
+            "Current Detail": (
+                f"dry_run={dry_run_ticket_count}, "
+                f"approved={approved_ticket_count}, rejected={rejected_ticket_count}"
+            ),
+            "Next Gate": "submission preflight",
+        },
+        {
+            "Layer": "Broker submission",
+            "State": "locked",
+            "Count": "",
+            "Current Detail": (
+                f"paper_trading={yes_no(paper_trading_allowed)}, "
+                f"paper_submit={yes_no(order_submit_allowed)}, "
+                f"broker_readonly={yes_no(broker_readonly)}"
+            ),
+            "Next Gate": "future IBKR paper order sender",
+        },
+    ]
+
+
+def proposal_automation_row(
+    loaded: LoadedTradeProposal,
+    *,
+    reviews_by_proposal: dict[str, pd.Series],
+    tickets_by_proposal: dict[str, dict[str, Any]],
+    paper_ledger_path: Path,
+) -> dict[str, Any]:
+    proposal = loaded.proposal
+    review = reviews_by_proposal.get(proposal.proposal_id)
+    ticket_summary = tickets_by_proposal.get(proposal.proposal_id)
+    strategy_gate = review_paper_strategy_gate(paper_ledger_path, proposal)
+    review_decision = "" if review is None else str(review.get("decision", ""))
+    ticket_count = int((ticket_summary or {}).get("count", 0))
+
+    if ticket_count:
+        current_stage = "ticketed"
+        next_action = "human approval or rejection"
+    elif review is not None:
+        current_stage = f"reviewed: {review_decision}"
+        next_action = (
+            "inspect blocked reasons"
+            if review_decision == "blocked"
+            else "waiting for ticket creation"
+        )
+    elif strategy_gate.passed:
+        current_stage = "waiting for runner"
+        next_action = "runner will safety-review"
+    else:
+        current_stage = "skipped by strategy gate"
+        next_action = "register, unpause, or change strategy"
+
+    return {
+        "Proposal": proposal.proposal_id,
+        "Strategy": proposal.strategy_id or "",
+        "Current Stage": current_stage,
+        "Strategy Gate": "pass" if strategy_gate.passed else "blocked",
+        "Safety Review": review_decision or "pending",
+        "Tickets": summarize_ticket_statuses(ticket_summary),
+        "Next Action": next_action,
+        "Reason": (
+            str(review.get("message", ""))
+            if review is not None
+            else strategy_gate.message
+        ),
+    }
+
+
 def intent_row(intent: Any) -> dict[str, Any]:
     return {
         "Symbol": intent.instrument.symbol,
@@ -507,6 +695,7 @@ paper_reviews_df = load_latest_paper_execution_reviews(paper_ledger_path, limit=
 paper_orders_df = load_latest_paper_orders(paper_ledger_path, limit=50)
 paper_strategy_registry_df = load_paper_strategy_registry(paper_ledger_path, limit=100)
 paper_daily_notional_used = paper_order_notional_today(paper_ledger_path)
+paper_strategy_runner_log = REPO_ROOT / "logs" / "paper_strategy_runner.log"
 reviewed_proposal_ids = (
     set(paper_reviews_df["proposal_id"].dropna().astype(str))
     if "proposal_id" in paper_reviews_df.columns
@@ -516,6 +705,41 @@ unreviewed_proposal_count = sum(
     loaded.proposal.proposal_id not in reviewed_proposal_ids
     for loaded in proposal_result.loaded
 )
+reviews_by_proposal = latest_review_by_proposal(paper_reviews_df)
+tickets_by_proposal = ticket_summary_by_proposal(paper_orders_df)
+paper_running_strategy_count = count_status(
+    paper_strategy_registry_df,
+    "status",
+    PaperStrategyStatus.RUNNING.value,
+)
+paper_paused_strategy_count = count_status(
+    paper_strategy_registry_df,
+    "status",
+    PaperStrategyStatus.PAUSED.value,
+)
+paper_retired_strategy_count = count_status(
+    paper_strategy_registry_df,
+    "status",
+    PaperStrategyStatus.RETIRED.value,
+)
+ready_review_count = count_status(paper_reviews_df, "decision", "ready")
+blocked_review_count = count_status(paper_reviews_df, "decision", "blocked")
+dry_run_ticket_count = count_status(
+    paper_orders_df,
+    "status",
+    PaperOrderTicketStatus.DRY_RUN.value,
+)
+approved_ticket_count = count_status(
+    paper_orders_df,
+    "status",
+    PaperOrderTicketStatus.APPROVED_FOR_SUBMIT.value,
+)
+rejected_ticket_count = count_status(
+    paper_orders_df,
+    "status",
+    PaperOrderTicketStatus.REJECTED.value,
+)
+runner_log_line = latest_log_line(paper_strategy_runner_log)
 
 preflight_proposal = TradeProposal(
     proposal_id="paper-preflight",
@@ -644,6 +868,110 @@ summary_cols[4].metric("Review Queue", str(unreviewed_proposal_count))
 summary_cols[5].metric("Account Events", str(len(paper_account_events_df)))
 
 st.error("Execution locked. Order placement remains unavailable.")
+
+st.subheader("Paper Automation Control Center")
+automation_metric_cols = st.columns(6)
+automation_metric_cols[0].metric("Paper Running", str(paper_running_strategy_count))
+automation_metric_cols[1].metric("Paused", str(paper_paused_strategy_count))
+automation_metric_cols[2].metric("Retired", str(paper_retired_strategy_count))
+automation_metric_cols[3].metric("Pending Proposals", str(unreviewed_proposal_count))
+automation_metric_cols[4].metric("Dry-Run Tickets", str(dry_run_ticket_count))
+automation_metric_cols[5].metric(
+    "Broker Submit",
+    "enabled" if settings.allow_paper_order_submit and not broker_config.readonly else "locked",
+)
+
+pipeline_tab, proposal_board_tab, locks_tab = st.tabs(
+    ["Pipeline", "Proposal Board", "Safety Locks"]
+)
+
+with pipeline_tab:
+    pipeline_df = pd.DataFrame(
+        paper_pipeline_rows(
+            candidate_count=len(candidate_result.loaded),
+            running_strategy_count=paper_running_strategy_count,
+            proposal_count=len(proposal_result.loaded),
+            unreviewed_count=unreviewed_proposal_count,
+            review_count=len(paper_reviews_df),
+            ready_review_count=ready_review_count,
+            blocked_review_count=blocked_review_count,
+            dry_run_ticket_count=dry_run_ticket_count,
+            approved_ticket_count=approved_ticket_count,
+            rejected_ticket_count=rejected_ticket_count,
+            runner_log_line=runner_log_line,
+            paper_trading_allowed=settings.allow_paper_trading,
+            order_submit_allowed=settings.allow_paper_order_submit,
+            broker_readonly=broker_config.readonly,
+        )
+    )
+    st.dataframe(pipeline_df, use_container_width=True, hide_index=True)
+
+with proposal_board_tab:
+    proposal_automation_df = pd.DataFrame(
+        [
+            proposal_automation_row(
+                loaded,
+                reviews_by_proposal=reviews_by_proposal,
+                tickets_by_proposal=tickets_by_proposal,
+                paper_ledger_path=paper_ledger_path,
+            )
+            for loaded in proposal_result.loaded
+        ]
+    )
+    if proposal_automation_df.empty:
+        proposal_automation_df = pd.DataFrame(
+            columns=[
+                "Proposal",
+                "Strategy",
+                "Current Stage",
+                "Strategy Gate",
+                "Safety Review",
+                "Tickets",
+                "Next Action",
+                "Reason",
+            ]
+        )
+        st.info("No trade proposal artifacts are currently loaded.")
+    else:
+        st.dataframe(
+            proposal_automation_df,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+with locks_tab:
+    locks_df = pd.DataFrame(
+        [
+            {
+                "Gate": "Live trading",
+                "State": "locked" if not settings.allow_live_trading else "open",
+                "Detail": f"ALLOW_LIVE_TRADING={str(settings.allow_live_trading).lower()}",
+            },
+            {
+                "Gate": "Paper proposal review",
+                "State": "open" if settings.allow_paper_trading else "locked",
+                "Detail": f"ALLOW_PAPER_TRADING={str(settings.allow_paper_trading).lower()}",
+            },
+            {
+                "Gate": "Paper broker profile",
+                "State": "read-only" if broker_config.readonly else "write-enabled",
+                "Detail": str(broker_config.metadata.get("profile") or "ibkr_paper_readonly"),
+            },
+            {
+                "Gate": "Paper order submit",
+                "State": "locked" if not settings.allow_paper_order_submit else "armed",
+                "Detail": (
+                    f"ALLOW_PAPER_ORDER_SUBMIT={str(settings.allow_paper_order_submit).lower()}"
+                ),
+            },
+            {
+                "Gate": "Runner log",
+                "State": "present" if paper_strategy_runner_log.exists() else "missing",
+                "Detail": runner_log_line,
+            },
+        ]
+    )
+    st.dataframe(locks_df, use_container_width=True, hide_index=True)
 
 if account_summary:
     render_account_metrics(account_summary)
