@@ -73,6 +73,14 @@ def parse_args() -> argparse.Namespace:
         help="Post a runner summary to the configured Discord webhook.",
     )
     parser.add_argument(
+        "--notify-on-action",
+        action="store_true",
+        help=(
+            "Post only when at least one proposal is reviewed. Useful for timers "
+            "that should stay quiet when no proposal artifacts are present."
+        ),
+    )
+    parser.add_argument(
         "--require-tickets",
         action="store_true",
         help="Exit nonzero when no dry-run tickets are created.",
@@ -119,7 +127,10 @@ def main() -> int:
         "broker_profile": profile,
         "broker_submit_enabled": False,
     }
-    if args.notify:
+    should_notify = args.notify or (
+        args.notify_on_action and result.reviewed_count > 0
+    )
+    if should_notify:
         _post_discord(payload, env_file=Path(args.env_file))
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))

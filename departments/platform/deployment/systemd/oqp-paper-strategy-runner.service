@@ -1,0 +1,14 @@
+[Unit]
+Description=Alpha Factory Paper Strategy Runner Job
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/oqp_new
+EnvironmentFile=-/home/ubuntu/.oqp_server_env
+ExecStart=/home/ubuntu/oqp_new/scripts/run_paper_strategy_runner_job.sh
+StandardOutput=append:/home/ubuntu/oqp_new/logs/paper_strategy_runner.log
+StandardError=append:/home/ubuntu/oqp_new/logs/paper_strategy_runner.log

@@ -57,6 +57,37 @@ PYTHONPATH=src:. python scripts/review_paper_trade_proposal.py runtime/artifacts
 This evaluates proposal artifacts against the paper safety policy and writes
 `paper_execution_reviews`. It does not place orders.
 
+## Paper Strategy Runner
+
+`scripts/run_paper_strategy_runner.py` is the automated proposal scanner for
+strategies that are already approved as `paper_running` in
+`paper_strategy_registry`.
+
+Pipeline:
+
+1. Load JSON proposal artifacts from `runtime/artifacts/trade_proposals`.
+2. Skip proposals whose strategy is missing, paused, retired, or kill-switched.
+3. Run the paper execution safety review for eligible proposals.
+4. Write `paper_execution_reviews` and unified `paper_review` account events.
+5. Create `dry_run` paper order tickets when safety passes.
+
+It does not place broker orders.
+
+Manual run:
+
+```bash
+./scripts/run_paper_strategy_runner_job.sh
+```
+
+Direct Python run:
+
+```bash
+PYTHONPATH=src:. python scripts/run_paper_strategy_runner.py runtime/artifacts/trade_proposals --notify-on-action
+```
+
+`--notify-on-action` stays quiet when no proposals are reviewed, which keeps
+the timer from spamming Discord.
+
 ## Discord
 
 The paper health checker reads `OQP_PAPER_DISCORD_WEBHOOK_URL` first, then falls
@@ -83,8 +114,11 @@ Preferred reproducible deployment uses the tracked systemd units:
 ```bash
 sudo cp departments/platform/deployment/systemd/oqp-paper-snapshot.service /etc/systemd/system/
 sudo cp departments/platform/deployment/systemd/oqp-paper-snapshot.timer /etc/systemd/system/
+sudo cp departments/platform/deployment/systemd/oqp-paper-strategy-runner.service /etc/systemd/system/
+sudo cp departments/platform/deployment/systemd/oqp-paper-strategy-runner.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now oqp-paper-snapshot.timer
+sudo systemctl enable --now oqp-paper-strategy-runner.timer
 ```
 
 Cron remains a simple fallback.
@@ -94,10 +128,11 @@ trial cadence:
 
 ```cron
 45 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_snapshot_job.sh >> logs/paper_snapshot_job.log 2>&1
+*/15 13-22 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_strategy_runner_job.sh >> logs/paper_strategy_runner.log 2>&1
 ```
 
 ## Safety Boundary
 
 This lane remains non-executing. `ALLOW_PAPER_TRADING=false` blocks proposal
-reviews by default, and there is still no broker order submission path in the
-paper runner.
+reviews by default, the paper strategy runner writes dry-run tickets only, and
+there is still no broker order submission path in the paper runner.

@@ -251,6 +251,7 @@ Enable scheduled jobs:
 ```bash
 sudo systemctl enable --now oqp-portfolio-snapshot.timer
 sudo systemctl enable --now oqp-paper-snapshot.timer
+sudo systemctl enable --now oqp-paper-strategy-runner.timer
 ```
 
 Timer schedule:
@@ -258,6 +259,8 @@ Timer schedule:
 ```text
 oqp-portfolio-snapshot.timer  Mon-Fri 21:30 server time
 oqp-paper-snapshot.timer      Mon-Fri 21:45 server time
+oqp-paper-strategy-runner.timer
+                               Mon-Fri every 15 minutes, 13:00-22:45 server time
 ```
 
 Check the server timezone:
@@ -272,12 +275,14 @@ Manual one-shot runs:
 ```bash
 sudo systemctl start oqp-portfolio-snapshot.service
 sudo systemctl start oqp-paper-snapshot.service
+sudo systemctl start oqp-paper-strategy-runner.service
 ```
 
 Logs:
 
 ```bash
 tail -100 /home/ubuntu/oqp_new/logs/portfolio_snapshot_job.log
+tail -100 /home/ubuntu/oqp_new/logs/paper_strategy_runner.log
 tail -100 /home/ubuntu/oqp_new/logs/paper_snapshot_job.log
 journalctl -u oqp-portfolio-snapshot.service -n 100 --no-pager
 journalctl -u oqp-paper-snapshot.service -n 100 --no-pager

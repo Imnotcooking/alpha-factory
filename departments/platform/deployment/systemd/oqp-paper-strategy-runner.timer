@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Alpha Factory Paper Strategy Runner on Market Weekdays
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13..22:00:00
+OnCalendar=Mon..Fri *-*-* 13..22:15:00
+OnCalendar=Mon..Fri *-*-* 13..22:30:00
+OnCalendar=Mon..Fri *-*-* 13..22:45:00
+Persistent=true
+Unit=oqp-paper-strategy-runner.service
+
+[Install]
+WantedBy=timers.target
