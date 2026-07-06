@@ -32,9 +32,36 @@ from oqp.options.analytics import (
     time_to_expiry,
     volatility_snapshot,
 )
+from oqp.options.spread_recognition import (
+    infer_spread_structure,
+    option_leg_report,
+    parse_option_contract,
+    recognize_option_spreads,
+    underlying_exposure_report,
+)
+from oqp.options.payoff import (
+    PortfolioOptionLeg,
+    extract_portfolio_option_legs,
+    option_greeks_frame,
+    option_payoff_curve,
+    option_payoff_surface,
+    option_risk_summary,
+)
+from oqp.options.book import (
+    option_book_summary,
+    option_position_diagnostics,
+)
+from oqp.options.pricing import (
+    fetch_massive_option_quote,
+    fetch_option_mark,
+    fetch_option_spread_mark,
+    fetch_yahoo_option_price,
+    option_quote_mark,
+)
 
 __all__ = [
     "OptionCandidate",
+    "PortfolioOptionLeg",
     "OptionLeg",
     "STRATEGY_CATALOG",
     "StrategyScore",
@@ -64,4 +91,21 @@ __all__ = [
     "summarize_simulation",
     "time_to_expiry",
     "volatility_snapshot",
+    "extract_portfolio_option_legs",
+    "fetch_massive_option_quote",
+    "fetch_option_mark",
+    "fetch_option_spread_mark",
+    "fetch_yahoo_option_price",
+    "infer_spread_structure",
+    "option_greeks_frame",
+    "option_book_summary",
+    "option_leg_report",
+    "option_payoff_curve",
+    "option_payoff_surface",
+    "option_position_diagnostics",
+    "option_quote_mark",
+    "option_risk_summary",
+    "parse_option_contract",
+    "recognize_option_spreads",
+    "underlying_exposure_report",
 ]

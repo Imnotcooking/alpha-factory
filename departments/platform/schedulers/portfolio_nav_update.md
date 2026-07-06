@@ -60,7 +60,7 @@ Cron remains a simple fallback:
 Run the combined broker-ingestion and NAV update job:
 
 ```cron
-30 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_portfolio_snapshot_job.sh >> logs/portfolio_snapshot_job.log 2>&1
+30 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_portfolio_snapshot_job.sh >> runtime/logs/portfolio_snapshot_job.log 2>&1
 ```
 
 For live IBKR data, the server still needs TWS or IB Gateway running and logged
@@ -77,7 +77,7 @@ The ordering matters:
 4. `scripts/update_portfolio_nav.py` values the latest snapshot and writes
    `historical_nav`.
 5. `scripts/check_portfolio_snapshot_health.py` verifies that the SQLite ledger
-   has a fresh positive NAV row and writes `logs/portfolio_snapshot_health.json`.
+   has a fresh positive NAV row and writes `runtime/logs/portfolio_snapshot_health.json`.
 6. The Ops/Money dashboards read SQLite and JSON outputs; they should not be the
    only place where NAV history gets updated on the server.
 

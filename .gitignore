@@ -40,6 +40,8 @@ research_memory.db
 
 # 3. The Data Lake (Too heavy for Git, keep local)
 data/
+!src/oqp/data/
+!src/oqp/data/**
 offline_quant_lab/data/
 runtime/
 logs/
@@ -73,6 +75,14 @@ alpha_research_lab/ic_decay_*.png
 alpha_research_lab/**/*candidate*
 alpha_research_lab/**/*trial*
 alpha_research_lab/**/*promotion*
+!alpha_research_lab/evaluation/research_trial_ledger.py
+!alpha_research_lab/tests/test_research_trial_ledger.py
+!alpha_research_lab/tests/test_vertical_trial_storage.py
+departments/research/factors/**
+!departments/research/factors/
+!departments/research/factors/README.md
+!departments/research/factors/factor_template_private.py
+!departments/research/factors/*/
 
 # Legacy alpha archive private edge
 departments/archive/legacy_alpha_factory/**/factor_library/fac_*.py

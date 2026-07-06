@@ -1,0 +1,113 @@
+"""Reusable research backtesting interfaces."""
+
+from oqp.research.backtesting.benchmarks import (
+    ACTIVE_WEIGHT_COLUMNS,
+    BENCHMARK_ABSOLUTE,
+    BENCHMARK_BUY_AND_HOLD,
+    BENCHMARK_CSI300,
+    BENCHMARK_INDEX,
+    BENCHMARK_RISK_FREE,
+    BENCHMARK_RETURN_COL,
+    BENCHMARK_SECTOR_NEUTRAL,
+    BENCHMARK_SPY,
+    DEFAULT_CSI300_TICKERS,
+    DEFAULT_SPY_TICKERS,
+    AbsoluteReturnBenchmark,
+    BaseBenchmark,
+    BenchmarkFactory,
+    BuyAndHoldBenchmark,
+    CSI300Benchmark,
+    RiskFreeRateBenchmark,
+    SPYBenchmark,
+    SectorNeutralBenchmark,
+    TickerBenchmark,
+    dynamic_equal_weight_benchmark,
+)
+from oqp.research.backtesting.capital_policy import (
+    DEFAULT_CAPITAL_PROFILES,
+    ExecutionCapitalProfile,
+    attach_capital_attrs,
+    resolve_execution_capital,
+)
+from oqp.research.backtesting.engine import BacktestEngine
+from oqp.research.backtesting.evaluator import AlphaEvaluator, ExecutionDesk, infer_frame_frequency
+from oqp.research.backtesting.execution_modes import (
+    BaseExecutionMode,
+    DirectExecutionMode,
+    ExecutionModeConfig,
+    ExecutionModeFactory,
+    ExecutionModeResult,
+    RiskDeskExecutionMode,
+    StatArbExecutionMode,
+)
+from oqp.research.backtesting.models import (
+    BacktestBackendMetadata,
+    ExecutionBacktestRequest,
+    ExecutionBacktestResult,
+)
+from oqp.research.backtesting.native_backend import NativeBacktestBackend
+from oqp.research.backtesting.portfolio_optimizer import (
+    CasinoCapEnforcer,
+    HierarchicalRiskParity,
+    KellySizer,
+    PortfolioOptimizer,
+)
+from oqp.research.backtesting.python_backend import PythonBacktestBackend
+from oqp.research.backtesting.trade_policy import (
+    DEFAULT_MIN_TRADE_WEIGHT_DELTA,
+    ExecutionTradePolicy,
+    attach_trade_policy_attrs,
+    resolve_execution_trade_policy,
+)
+
+__all__ = [
+    "ACTIVE_WEIGHT_COLUMNS",
+    "BENCHMARK_ABSOLUTE",
+    "BENCHMARK_BUY_AND_HOLD",
+    "BENCHMARK_CSI300",
+    "BENCHMARK_INDEX",
+    "BENCHMARK_RISK_FREE",
+    "BENCHMARK_RETURN_COL",
+    "BENCHMARK_SECTOR_NEUTRAL",
+    "BENCHMARK_SPY",
+    "AbsoluteReturnBenchmark",
+    "AlphaEvaluator",
+    "BacktestBackendMetadata",
+    "BacktestEngine",
+    "BaseExecutionMode",
+    "BaseBenchmark",
+    "BenchmarkFactory",
+    "BuyAndHoldBenchmark",
+    "CasinoCapEnforcer",
+    "CSI300Benchmark",
+    "DEFAULT_CAPITAL_PROFILES",
+    "DEFAULT_CSI300_TICKERS",
+    "DEFAULT_MIN_TRADE_WEIGHT_DELTA",
+    "DEFAULT_SPY_TICKERS",
+    "DirectExecutionMode",
+    "ExecutionCapitalProfile",
+    "ExecutionModeConfig",
+    "ExecutionModeFactory",
+    "ExecutionModeResult",
+    "ExecutionBacktestRequest",
+    "ExecutionBacktestResult",
+    "ExecutionTradePolicy",
+    "ExecutionDesk",
+    "HierarchicalRiskParity",
+    "KellySizer",
+    "NativeBacktestBackend",
+    "PortfolioOptimizer",
+    "PythonBacktestBackend",
+    "RiskDeskExecutionMode",
+    "RiskFreeRateBenchmark",
+    "SPYBenchmark",
+    "SectorNeutralBenchmark",
+    "StatArbExecutionMode",
+    "TickerBenchmark",
+    "attach_capital_attrs",
+    "attach_trade_policy_attrs",
+    "dynamic_equal_weight_benchmark",
+    "infer_frame_frequency",
+    "resolve_execution_capital",
+    "resolve_execution_trade_policy",
+]

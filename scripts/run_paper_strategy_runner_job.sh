@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 REPO_ROOT="${OQP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO_ROOT"
-mkdir -p logs
+mkdir -p runtime/logs
 
 if [[ -f "$HOME/.oqp_server_env" ]]; then
   # shellcheck disable=SC1090

@@ -56,7 +56,7 @@ runtime/db/accounts/account_ledger.db
 The paper snapshot job writes both:
 
 ```text
-data/paper_trading/paper_trading.db
+runtime/db/paper_trading/paper_trading.db
 runtime/db/accounts/account_ledger.db
 ```
 
@@ -69,7 +69,6 @@ ledger.
 The next good consumers are:
 
 - Ops Dashboard: show live/paper account freshness from one table
-- Money Dashboard: read live account NAV/positions from the account layer
-- Paper Dashboard: show paper NAV, positions, and future fills from the same
-  account shape
+- Ops Dashboard Intelligence page: manage approved strategy runtime posture
+  from account state, risk, regime, and allocation context
 - Reconciliation: compare broker-specific ledgers against unified snapshots

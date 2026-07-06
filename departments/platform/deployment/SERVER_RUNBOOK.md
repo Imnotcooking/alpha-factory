@@ -53,7 +53,7 @@ cd /home/ubuntu/oqp_new
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-mkdir -p logs runtime data/paper_trading
+mkdir -p runtime/logs runtime/db/paper_trading
 ```
 
 For an existing server:
@@ -142,7 +142,7 @@ departments/platform/deployment/ibkr_gateway_docker_run.sh recreate
 Expected bindings:
 
 ```text
-ib-gateway-live   127.0.0.1:4001 -> container API
+ib-gateway-live   127.0.0.1:4001 -> container 4003 -> Gateway API 4001
 ib-gateway-live   127.0.0.1:5901 -> VNC
 ib-gateway-paper  127.0.0.1:7497 -> container API
 ib-gateway-paper  127.0.0.1:5902 -> VNC
@@ -262,27 +262,18 @@ sudo cp departments/platform/deployment/systemd/oqp-*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
-Enable dashboards:
+Enable the primary dashboards:
 
 ```bash
-sudo systemctl enable --now oqp-money-dashboard.service
-sudo systemctl enable --now oqp-paper-dashboard.service
 sudo systemctl enable --now oqp-ops-dashboard.service
-```
-
-Optional research dashboard:
-
-```bash
 sudo systemctl enable --now oqp-research-dashboard.service
 ```
 
 Dashboard ports:
 
 ```text
-money dashboard     127.0.0.1:8531
-paper dashboard     127.0.0.1:8527
-ops dashboard       127.0.0.1:8529
-research dashboard  127.0.0.1:8524
+ops dashboard       127.0.0.1:8529  primary live/paper/risk/ops cockpit
+research dashboard  127.0.0.1:8524  primary research cockpit
 ```
 
 Prefer SSH tunnels or a reverse proxy with authentication. Do not expose these
@@ -328,10 +319,10 @@ sudo systemctl start oqp-ibkr-heartbeat.service
 Logs:
 
 ```bash
-tail -100 /home/ubuntu/oqp_new/logs/portfolio_snapshot_job.log
-tail -100 /home/ubuntu/oqp_new/logs/paper_strategy_runner.log
-tail -100 /home/ubuntu/oqp_new/logs/paper_snapshot_job.log
-tail -100 /home/ubuntu/oqp_new/logs/ibkr_adapter_heartbeat.log
+tail -100 /home/ubuntu/oqp_new/runtime/logs/portfolio_snapshot_job.log
+tail -100 /home/ubuntu/oqp_new/runtime/logs/paper_strategy_runner.log
+tail -100 /home/ubuntu/oqp_new/runtime/logs/paper_snapshot_job.log
+tail -100 /home/ubuntu/oqp_new/runtime/logs/ibkr_adapter_heartbeat.log
 journalctl -u oqp-portfolio-snapshot.service -n 100 --no-pager
 journalctl -u oqp-paper-snapshot.service -n 100 --no-pager
 journalctl -u oqp-ibkr-heartbeat.service -n 100 --no-pager
@@ -356,9 +347,9 @@ PYTHONPATH=src:. python scripts/check_ibkr_adapter_heartbeat.py --notify-always
 Expected status files:
 
 ```text
-logs/portfolio_snapshot_health.json
-logs/paper_trading_health.json
-logs/ibkr_adapter_heartbeat_health.json
+runtime/logs/portfolio_snapshot_health.json
+runtime/logs/paper_trading_health.json
+runtime/logs/ibkr_adapter_heartbeat_health.json
 ```
 
 ## 10. Firewall Posture

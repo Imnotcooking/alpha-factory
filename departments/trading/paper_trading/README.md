@@ -42,7 +42,7 @@ PYTHONPATH=src:. python scripts/review_paper_trade_proposal.py runtime/artifacts
 The review writes audit rows to:
 
 ```text
-data/paper_trading/paper_trading.db
+runtime/db/paper_trading/paper_trading.db
 ```
 
 Table:

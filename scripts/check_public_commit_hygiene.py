@@ -22,8 +22,15 @@ class Rule:
 
 PRIVATE_RULES = (
     Rule("alpha_research_lab/factors/fac_*.py", "live alpha factor implementation"),
-    Rule("alpha_research_lab/factors/factor_metadata_private*.py", "private factor metadata"),
+    Rule(
+        "alpha_research_lab/factors/factor_metadata_private*.py",
+        "private factor metadata",
+    ),
     Rule("alpha_research_lab/factors/*private_metadata*.py", "private factor metadata"),
+    Rule(
+        "departments/research/factors/**",
+        "private alpha factor registry",
+    ),
     Rule("alpha_research_lab/**/*candidate*", "research candidate artifact"),
     Rule("alpha_research_lab/**/*trial*", "research trial artifact"),
     Rule("alpha_research_lab/**/*promotion*", "research promotion artifact"),
@@ -41,9 +48,6 @@ PRIVATE_RULES = (
     Rule("alpha_research_lab/*diagnostic*.py", "research diagnostic script"),
     Rule("alpha_research_lab/*probe*.py", "research probe script"),
     Rule("alpha_research_lab/ic_decay_*.png", "research performance image"),
-    Rule("departments/archive/legacy_alpha_factory/**/factor_library/fac_*.py", "legacy live factor"),
-    Rule("departments/archive/legacy_alpha_factory/**/models/**", "legacy model artifact"),
-    Rule("departments/archive/legacy_alpha_factory/strategy_agents/agent_*.py", "legacy strategy agent"),
     Rule("runtime/**", "runtime state"),
     Rule("logs/**", "local logs"),
     Rule("data/**", "local data lake"),
@@ -56,6 +60,11 @@ PRIVATE_RULES = (
     Rule("*.pkl", "pickle/model artifact"),
     Rule("*.joblib", "model artifact"),
 )
+
+PUBLIC_BOUNDARY_EXCEPTIONS = {
+    "departments/research/factors/README.md",
+    "departments/research/factors/factor_template_private.py",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,15 +93,17 @@ def git_paths(*args: str) -> list[str]:
 
 def candidate_paths(*, check_all: bool) -> list[str]:
     if check_all:
-        tracked_dirty = git_paths("diff", "--name-only")
-        staged = git_paths("diff", "--cached", "--name-only")
+        tracked_dirty = git_paths("diff", "--name-only", "--diff-filter=ACMRTUXB")
+        staged = git_paths("diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB")
         untracked = git_paths("ls-files", "--others", "--exclude-standard")
         return sorted(set(tracked_dirty + staged + untracked))
-    return sorted(set(git_paths("diff", "--cached", "--name-only")))
+    return sorted(set(git_paths("diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB")))
 
 
 def match_rule(path: str) -> Rule | None:
     normalized = path.replace("\\", "/")
+    if normalized in PUBLIC_BOUNDARY_EXCEPTIONS:
+        return None
     for rule in PRIVATE_RULES:
         if fnmatch.fnmatch(normalized, rule.pattern):
             return rule
@@ -109,7 +120,9 @@ def main() -> int:
         print(f"PASS public commit hygiene: no private paths in {scope}.")
         return 0
 
-    print(f"FAIL public commit hygiene: private paths found in {scope}.", file=sys.stderr)
+    print(
+        f"FAIL public commit hygiene: private paths found in {scope}.", file=sys.stderr
+    )
     for path, rule in violations:
         print(f"- {path}: {rule.reason}", file=sys.stderr)
     print(

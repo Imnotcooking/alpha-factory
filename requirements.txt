@@ -1,13 +1,57 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-pandas
+
+# Core data and numerics
 numpy
+pandas
 polars
-yfinance
+pyarrow
+scipy
+
+# Visualization and apps
+matplotlib
+plotly
+seaborn
+streamlit
+streamlit-aggrid
+kaleido
+
+# Notebook tooling
+jupyter
+nbclient
+nbconvert
+nbformat
+
+# Data sources and infrastructure
 requests
+yfinance
 python-dotenv
 ib_insync
-stable-baselines3[extra]
+clickhouse-driver
+SQLAlchemy
+PyYAML
+
+# Statistical learning and research
+arch
+cvxpy
+hmmlearn
+joblib
+lightgbm
+numba
+optuna
+pandas-ta
+scikit-learn
+shap
+statsmodels
+xgboost
+
+# Deep learning and reinforcement learning
 torch
-streamlit
-plotly
-scipy
+tensorflow
+keras
+stable-baselines3[extra]
+
+# Build and test support
+pybind11
+pytest
+setuptools
+wheel

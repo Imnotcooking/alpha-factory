@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 REPO_ROOT="${OQP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO_ROOT"
-mkdir -p logs
+mkdir -p runtime/logs
 
 if [[ -f "$HOME/.oqp_server_env" ]]; then
   # shellcheck disable=SC1090
@@ -33,6 +33,6 @@ python scripts/check_ibkr_server_readiness.py --profile paper --adapter-check
 python scripts/update_paper_trading_snapshot.py
 python scripts/check_paper_trading_health.py \
   --max-age-hours "${OQP_PAPER_HEALTH_MAX_AGE_HOURS:-36}" \
-  --status-path logs/paper_trading_health.json \
+  --status-path runtime/logs/paper_trading_health.json \
   --notify-always
 echo "[$(date -Is)] paper snapshot job completed"

@@ -15,9 +15,9 @@ changes to alpha research work supervised elsewhere.
 - Docker build context is also shielded through `.dockerignore`, including
   local envs, secrets, runtime state, broker exports, model checkpoints, and
   `watchlist.json`.
-- The archived Middle Office folder only exposes source code and Streamlit
-  theme/config files to Git. Its local secrets, watchlists, databases, and raw
-  portfolio data are ignored.
+- The archived Middle Office folder remains only as a compatibility fallback
+  for old local portfolio files. Its local secrets, watchlists, databases, and
+  raw portfolio data are ignored.
 - No active OQP app should import the retired root `Middle_Office/` path.
   Compatibility lookups now prefer `departments/archive/legacy_middle_office/`
   when legacy local files are needed.
@@ -44,9 +44,14 @@ we are ready to fully retire them from the root:
 - `master_daily_cron.py`
 - `portfolio_optimizer.py`
 - root `models/`
+- root `cpp_engine/`
+
+Already retired during cleanup:
+
 - root `offline_quant_lab/`
 - root `strategy_agents/`
-- root `cpp_engine/`
+- `departments/archive/legacy_alpha_factory/`
+- `departments/archive/legacy_dashboards/`
 
 ## Do Not Mix Into This Commit
 
@@ -62,7 +67,7 @@ we are ready to fully retire them from the root:
   logs, mark the factor as retired/deprecated, and move or copy it into a
   public examples or retired-factors path before staging.
 - The fuller policy lives in
-  `departments/research/alpha_lab/public_private_boundary.md`.
+  `departments/research/public_private_boundary.md`.
 - Existing staged churn in `Photos/`, `backtest_1/`, old notebooks, compiled
   objects, and old model artifacts should be reviewed separately before any
   final Git commit.

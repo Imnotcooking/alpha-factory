@@ -83,6 +83,7 @@ alpha_research_lab/ic_decay_*.png
 alpha_research_lab/**/*candidate*
 alpha_research_lab/**/*trial*
 alpha_research_lab/**/*promotion*
+departments/research/strategy_registry/alpha_lab/private_factors/
 
 # Legacy alpha archive private edge
 departments/archive/legacy_alpha_factory/**/factor_library/fac_*.py

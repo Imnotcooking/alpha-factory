@@ -90,7 +90,7 @@ run_live() {
   "${DOCKER[@]}" run -d \
     --name ib-gateway-live \
     --restart unless-stopped \
-    -p "127.0.0.1:${IBKR_LIVE_API_PORT:-4001}:${IBKR_LIVE_CONTAINER_API_PORT:-4001}" \
+    -p "127.0.0.1:${IBKR_LIVE_API_PORT:-4001}:${IBKR_LIVE_CONTAINER_API_PORT:-4003}" \
     -p "127.0.0.1:${IBKR_LIVE_VNC_PORT:-5901}:5900" \
     -e TWS_USERID="$IBKR_LIVE_USER" \
     -e TWS_PASSWORD="$IBKR_LIVE_PASSWORD" \

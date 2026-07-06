@@ -17,7 +17,7 @@ reconcile, report, and raise control warnings, but it should not place trades.
 The old side project now lives in `departments/archive/legacy_middle_office/`.
 Treat it as a legacy source system. Its useful operational parts have been
 extracted into shared modules and native dashboards; remaining files are
-reference material, migration fallbacks, or private ignored local data.
+reference material or private ignored local data.
 
 Do not restore it to the repo root. New code should use runtime paths and shared
 modules under `src/oqp/`.
@@ -26,14 +26,12 @@ modules under `src/oqp/`.
 
 | Legacy path | Current role | Target home |
 | --- | --- | --- |
-| Legacy path under `departments/archive/legacy_middle_office/` | Current role | Target home |
-| --- | --- | --- |
-| `app.py` | Legacy Streamlit command center for portfolio overview, macro pulse, allocation, risk metrics, and reporting | Main command center replaced by `apps/money_dashboard/app.py` |
+| `app.py` | Legacy Streamlit command center for portfolio overview, macro pulse, allocation, risk metrics, and reporting | Main command center replaced by `apps/ops_dashboard/Homepage.py` |
 | `Portfolio/etl_engine.py` | Compatibility wrapper for broker ingestion | Canonical implementation is now `src/oqp/portfolio/ingestion_job.py` plus `scripts/update_live_portfolio_snapshot.py` |
 | `db_setup.py` | SQLite schema bootstrap for `historical_nav` and `live_positions` | Shared storage migrations under `src/oqp/storage/` |
-| `pages/2_Risk_Management.py` | Legacy macro oracle, hedging, FMP features, beta hedge calculator | Operational risk and hedge sizing now live in `apps/money_dashboard/pages/02_Risk_Management.py` and `src/oqp/risk/`; the ML macro oracle remains a later extraction |
-| `pages/3_Options_Desk.py` | Legacy options scanner, volatility models, strategy simulation | Native page now lives in `apps/money_dashboard/pages/03_Options_Desk.py`; shared analytics live in `src/oqp/options/` |
-| `pages/5_Stock_Valuation.py` | Legacy FMP-backed DCF, peer valuation, watchlist, AI analyst | Native page now lives in `apps/money_dashboard/pages/01_Stock_Valuation.py`; shared investing logic lives in `src/oqp/investing/` |
+| `pages/2_Risk_Management.py` | Legacy macro oracle, hedging, FMP features, beta hedge calculator | Operational risk now surfaces through `apps/ops_dashboard/Homepage.py` and `src/oqp/risk/`; the ML macro oracle remains a later extraction |
+| `pages/3_Options_Desk.py` | Legacy options scanner, volatility models, strategy simulation | Analytics live in `src/oqp/options/`; the old native page archive has been deleted after extraction |
+| `pages/5_Stock_Valuation.py` | Legacy FMP-backed DCF, peer valuation, watchlist, AI analyst | Shared investing logic lives in `src/oqp/investing/`; the old native page archive has been deleted after extraction |
 | `GARCH_model.py` | GARCH volatility helper | Optional future model under `src/oqp/risk/` or `src/oqp/data/features/` |
 | `HAR_model.py` | HAR volatility helper | Optional future model under `src/oqp/risk/` or `src/oqp/data/features/` |
 | `Historical_Distribution.py` | Historical return distribution helper | Mostly replaced by `src/oqp/options/analytics.py`; keep as reference |
@@ -129,28 +127,29 @@ Safe extraction order:
    `runtime/db/portfolio/` and `runtime/state/portfolio/`.
 9. Keep the old ETL path as a wrapper until server cron, docs, and dashboards
    are fully migrated.
-10. Replace the Money dashboard entrypoint with a native page over the runtime
-   ledger. Done: `apps/money_dashboard/app.py`.
+10. Replace the Money dashboard entrypoint with the unified Ops dashboard over
+   the runtime ledger. Done: `apps/ops_dashboard/Homepage.py`; the old Money
+   dashboard archive has been deleted after extraction.
 11. Extract the Stock Valuation page. Done:
-   `apps/money_dashboard/pages/01_Stock_Valuation.py` now renders natively,
    `src/oqp/investing/stock_valuation.py` owns FMP/Yahoo/DCF helpers, and
-   `src/oqp/investing/watchlist.py` owns runtime watchlist storage.
+   `src/oqp/investing/watchlist.py` owns runtime watchlist storage. The old
+   Streamlit page is archived.
 12. Extract the operational Risk Management page. Done:
-   `apps/money_dashboard/pages/02_Risk_Management.py` now renders natively over
-   the runtime ledger, and `src/oqp/risk/portfolio.py` owns concentration,
-   exposure, drawdown, VaR/CVaR, beta-hedge, Black-Scholes, and manual hedge
-   diagnostics. The legacy ML macro oracle remains in
+   `apps/ops_dashboard/Homepage.py` now renders native risk/account/intelligence
+   views over the runtime ledger, and `src/oqp/risk/portfolio.py` owns
+   concentration, exposure, drawdown, VaR/CVaR, beta-hedge, Black-Scholes, and
+   manual hedge diagnostics. The legacy ML macro oracle remains in
    `departments/archive/legacy_middle_office/pages/2_Risk_Management.py` until
    it is redesigned as a separate research/risk model workflow.
 13. Extract the Options Desk page. Done:
-   `apps/money_dashboard/pages/03_Options_Desk.py` now renders natively,
-   and `src/oqp/options/analytics.py` owns Black-Scholes pricing, implied
+   `src/oqp/options/analytics.py` owns Black-Scholes pricing, implied
    volatility, volatility snapshots, historical holding-period odds, Monte
    Carlo payoff simulation, and first-pass long option / cash-secured put scans.
-   The old 2,151-line scanner remains as reference for gradually porting
+   The old native Options page is archived as reference for gradually porting
    specialized structures like calendars, condors, butterflies, and ratio
    spreads.
-14. Only after that, retire or archive the legacy Streamlit pages.
+14. Retire or archive the legacy Streamlit pages. Done: extracted reusable
+   logic into active modules and deleted the stale dashboard archive.
 
 ## Private Data Guardrail
 

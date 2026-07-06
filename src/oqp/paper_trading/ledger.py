@@ -7,6 +7,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
@@ -18,8 +19,9 @@ from oqp.brokers import IBKRReadOnlyPortfolioSnapshot
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+PAPER_TRADING_DB_PATH_ENV = "PAPER_TRADING_DB_PATH"
 DEFAULT_PAPER_TRADING_DB_PATH = (
-    REPO_ROOT / "data" / "paper_trading" / "paper_trading.db"
+    REPO_ROOT / "runtime" / "db" / "paper_trading" / "paper_trading.db"
 )
 
 
@@ -228,6 +230,10 @@ class PaperOrderTicketStatusUpdateResult:
 
 
 def default_paper_trading_ledger_path() -> Path:
+    override = os.getenv(PAPER_TRADING_DB_PATH_ENV)
+    if override:
+        path = Path(override).expanduser()
+        return path if path.is_absolute() else REPO_ROOT / path
     return DEFAULT_PAPER_TRADING_DB_PATH
 
 

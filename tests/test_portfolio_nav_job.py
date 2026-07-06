@@ -237,6 +237,8 @@ class PortfolioNavJobTests(unittest.TestCase):
                     "BRK.B",
                     "QQQ260331P570000",
                     "AAPL",
+                    "VWCE",
+                    "XEON",
                 ]
             }
         )
@@ -245,6 +247,8 @@ class PortfolioNavJobTests(unittest.TestCase):
 
         self.assertIn("BRK-B", tickers)
         self.assertIn("AAPL", tickers)
+        self.assertIn("VWCE.DE", tickers)
+        self.assertIn("XEON.DE", tickers)
         self.assertIn("IWM", tickers)
         self.assertIn("EURUSD=X", tickers)
         self.assertIn("GC=F", tickers)

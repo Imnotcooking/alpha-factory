@@ -21,6 +21,7 @@ from oqp.brokers import BrokerConnectionStatus
 from oqp.config import load_settings
 from oqp.ops.status import (
     account_event_items,
+    collect_ops_status,
     command_status,
     discord_status_items,
     host_health_items,
@@ -246,6 +247,52 @@ class OpsStatusTests(unittest.TestCase):
 
         self.assertEqual(items[0].status, "warn")
         self.assertEqual(items[1].status, "warn")
+
+    def test_snapshot_mode_does_not_warn_on_local_only_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "OQP_OPS_STATUS_SOURCE=snapshot",
+                        "ALLOW_LIVE_TRADING=false",
+                        "ALLOW_PAPER_TRADING=false",
+                        "ALLOW_PAPER_ORDER_SUBMIT=false",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            settings = load_settings(env_file)
+            root = Path(tmp)
+            for name in (
+                "portfolio_snapshot_health.json",
+                "paper_trading_health.json",
+                "ibkr_adapter_heartbeat_health.json",
+            ):
+                (root / name).write_text(
+                    '{"status":"pass","checked_at":"2026-07-01T00:00:00+00:00"}',
+                    encoding="utf-8",
+                )
+
+            snapshot = collect_ops_status(
+                settings=settings,
+                account_ledger_path=root / "accounts.db",
+                portfolio_health_path=root / "portfolio_snapshot_health.json",
+                paper_health_path=root / "paper_trading_health.json",
+                ibkr_heartbeat_health_path=root / "ibkr_adapter_heartbeat_health.json",
+                repo_root=root,
+            )
+
+        rows = snapshot.item_rows
+        self.assertTrue(
+            any(row["Check"] == "Server-owned scheduling" and row["Status"] == "pass" for row in rows)
+        )
+        self.assertTrue(
+            any(row["Check"] == "Server-side webhooks" and row["Status"] == "pass" for row in rows)
+        )
+        self.assertTrue(
+            any(row["Check"] == "Live monitor evidence" and row["Status"] == "pass" for row in rows)
+        )
 
 
 if __name__ == "__main__":

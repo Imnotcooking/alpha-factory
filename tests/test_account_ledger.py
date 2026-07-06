@@ -18,6 +18,7 @@ from oqp.accounts import (
     account_snapshot_from_live_positions_frame,
     account_asset_summary,
     account_nav_drawdowns,
+    account_performance_summary,
     account_position_totals,
     account_position_history_by_asset,
     account_position_history_by_symbol,
@@ -28,6 +29,7 @@ from oqp.accounts import (
     account_trade_event_summary,
     account_trade_events_display,
     account_trade_events_from_proposal_review,
+    blended_live_nav_history,
     ensure_account_ledger_schema,
     load_account_nav_history,
     load_account_position_history,
@@ -223,6 +225,7 @@ class AccountLedgerTests(unittest.TestCase):
         )
         totals = account_position_totals(positions)
         profit = account_profit_breakdown(positions, daily_pnl=-5.0)
+        performance = account_performance_summary(nav_history, positions)
         top_positions = account_top_positions(positions, limit=3)
         symbol_pivot = account_symbol_exposure_pivot(by_symbol)
         asset_pivot = account_asset_exposure_pivot(by_asset)
@@ -241,9 +244,81 @@ class AccountLedgerTests(unittest.TestCase):
         self.assertEqual(totals["gross_exposure"], 1000.0)
         self.assertEqual(totals["unrealized_pnl"], 25.0)
         self.assertEqual(float(profit.loc[profit["Bucket"].eq("Daily P&L"), "Value"].iloc[0]), -5.0)
+        self.assertEqual(performance["nav_observations"], 2)
+        self.assertEqual(performance["latest_nav"], 90.0)
+        self.assertEqual(performance["latest_cash"], 12.0)
+        self.assertEqual(performance["daily_pnl"], -10.0)
+        self.assertAlmostEqual(float(performance["cash_pct"]), 12.0 / 90.0)
+        self.assertAlmostEqual(float(performance["gross_exposure_pct"]), 1000.0 / 90.0)
+        self.assertAlmostEqual(float(performance["max_drawdown_pct"]), -0.1)
         self.assertEqual(top_positions.iloc[0]["symbol"], "SPY")
         self.assertEqual(float(symbol_pivot.iloc[0]["SPY"]), 1000.0)
         self.assertEqual(float(asset_pivot.iloc[0]["etf"]), 1000.0)
+
+    def test_blended_live_nav_history_uses_broker_history_before_unified_rows(self) -> None:
+        broker_nav = pd.DataFrame(
+            [
+                {
+                    "date": "2026-06-25",
+                    "account_key": "live:ibkr:ibkr_live_readonly:U123",
+                    "account_id": "U123",
+                    "broker": "ibkr",
+                    "profile": "ibkr_live_readonly",
+                    "environment": "live",
+                    "as_of": "2026-06-25T21:30:00+00:00",
+                    "net_liquidation": 36_000.0,
+                    "cash": 500.0,
+                    "daily_pnl": 0.0,
+                    "position_count": 10,
+                    "snapshot_id": "broker-1",
+                },
+                {
+                    "date": "2026-06-26",
+                    "account_key": "live:ibkr:ibkr_live_readonly:U123",
+                    "account_id": "U123",
+                    "broker": "ibkr",
+                    "profile": "ibkr_live_readonly",
+                    "environment": "live",
+                    "as_of": "2026-06-26T21:30:00+00:00",
+                    "net_liquidation": 36_100.0,
+                    "cash": 600.0,
+                    "daily_pnl": 100.0,
+                    "position_count": 10,
+                    "snapshot_id": "broker-2",
+                },
+            ]
+        )
+        unified_nav = pd.DataFrame(
+            [
+                {
+                    "date": "2026-06-27",
+                    "account_key": "live:unified:unified_live:unified_live",
+                    "account_id": "unified_live",
+                    "broker": "unified",
+                    "profile": "unified_live",
+                    "environment": "live",
+                    "as_of": "2026-06-27T21:30:00+00:00",
+                    "net_liquidation": 50_150.0,
+                    "cash": 1_250.0,
+                    "daily_pnl": 0.0,
+                    "position_count": 20,
+                    "snapshot_id": "unified-1",
+                }
+            ]
+        )
+
+        blended = blended_live_nav_history(
+            unified_nav,
+            broker_nav,
+            manual_usd_value=14_000.0,
+            manual_usd_cash=650.0,
+        )
+
+        self.assertEqual(list(blended["date"]), ["2026-06-25", "2026-06-26", "2026-06-27"])
+        self.assertEqual(list(blended["profile"]), ["unified_live", "unified_live", "unified_live"])
+        self.assertEqual(float(blended.iloc[0]["net_liquidation"]), 50_000.0)
+        self.assertEqual(float(blended.iloc[1]["daily_pnl"]), 100.0)
+        self.assertEqual(float(blended.iloc[2]["daily_pnl"]), 50.0)
 
     def test_writes_and_loads_account_trade_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

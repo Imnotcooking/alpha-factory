@@ -94,8 +94,16 @@ class OQPSettings:
     massive_api_key: str | None
     options_api_key: str | None
     rapid_api_key: str | None
+    zai_api_key: str | None
+    openai_api_key: str | None
     gemini_api_key: str | None
     anthropic_api_key: str | None
+    llm_provider: str
+    llm_base_url: str
+    llm_model: str
+    llm_evidence_enabled: bool
+    llm_timeout_seconds: int
+    llm_cache_max_age_hours: float | None
     massive_flat_files_access_key_id: str | None
     massive_flat_files_secret_access_key: str | None
     massive_flat_files_endpoint: str
@@ -108,6 +116,7 @@ class OQPSettings:
     ibkr_paper_submit_client_id: int
     ibkr_live_client_id: int
     ibkr_live_monitor_enabled: bool
+    ops_status_source: str
     allow_paper_trading: bool
     allow_paper_order_submit: bool
     paper_max_order_notional: float | None
@@ -140,6 +149,15 @@ class OQPSettings:
     def has_massive_api_key(self) -> bool:
         return bool(self.massive_api_key or self.options_api_key)
 
+    @property
+    def llm_api_key(self) -> str | None:
+        provider = self.llm_provider.strip().lower()
+        if provider in {"zai", "z.ai", "glm", "glm-5.2"}:
+            return self.zai_api_key
+        if provider == "openai":
+            return self.openai_api_key
+        return self.zai_api_key or self.openai_api_key
+
 
 def load_settings(env_file: Path | str | None = None) -> OQPSettings:
     env_path = Path(env_file) if env_file is not None else REPO_ROOT / ".env"
@@ -151,6 +169,20 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
     gemini_json_sources = (
         (MIDDLE_OFFICE_ROOT / "pages" / "api_keys.json", ("gemini_key", "GEMINI_KEY")),
     )
+    openai_api_key = _credential(("OPENAI_API_KEY",), env_values)
+    zai_api_key = _credential(("ZAI_API_KEY", "GLM_API_KEY"), env_values)
+    llm_provider = _setting(
+        "LLM_PROVIDER",
+        env_values,
+        "zai" if zai_api_key else "openai",
+    ) or ("zai" if zai_api_key else "openai")
+    llm_provider_key = llm_provider.strip().lower()
+    default_llm_base_url = (
+        "https://api.openai.com/v1"
+        if llm_provider_key == "openai"
+        else "https://api.z.ai/api/paas/v4"
+    )
+    default_llm_model = "gpt-4.1-mini" if llm_provider_key == "openai" else "glm-5.2"
 
     return OQPSettings(
         fmp_api_key=_credential(("FMP_API_KEY", "FMP_KEY"), env_values, fmp_json_sources),
@@ -161,10 +193,28 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
         massive_api_key=_credential(("MASSIVE_API_KEY",), env_values),
         options_api_key=_credential(("OPTIONS_API_KEY",), env_values),
         rapid_api_key=_credential(("RAPID_API_KEY",), env_values),
+        zai_api_key=zai_api_key,
+        openai_api_key=openai_api_key,
         gemini_api_key=_credential(
             ("GEMINI_API_KEY", "GEMINI_KEY"), env_values, gemini_json_sources
         ),
         anthropic_api_key=_credential(("ANTHROPIC_API_KEY",), env_values),
+        llm_provider=llm_provider,
+        llm_base_url=_setting("LLM_BASE_URL", env_values, default_llm_base_url)
+        or default_llm_base_url,
+        llm_model=_setting("LLM_MODEL", env_values, default_llm_model)
+        or default_llm_model,
+        llm_evidence_enabled=_setting_bool(
+            "LLM_EVIDENCE_ENABLED",
+            env_values,
+            bool(zai_api_key or openai_api_key),
+        ),
+        llm_timeout_seconds=_setting_int("LLM_TIMEOUT_SECONDS", env_values, 60),
+        llm_cache_max_age_hours=_setting_float_default(
+            "LLM_CACHE_MAX_AGE_HOURS",
+            env_values,
+            168.0,
+        ),
         massive_flat_files_access_key_id=_setting(
             "MASSIVE_FLAT_FILES_ACCESS_KEY_ID", env_values
         ),
@@ -201,6 +251,10 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
         ibkr_live_monitor_enabled=_setting_bool(
             "IBKR_LIVE_MONITOR_ENABLED", env_values, False
         ),
+        ops_status_source=(
+            _setting("OQP_OPS_STATUS_SOURCE", env_values, "snapshot" if os.uname().sysname == "Darwin" else "direct")
+            or "direct"
+        ).strip().lower(),
         allow_paper_trading=_setting_bool("ALLOW_PAPER_TRADING", env_values, False),
         allow_paper_order_submit=_setting_bool(
             "ALLOW_PAPER_ORDER_SUBMIT", env_values, False

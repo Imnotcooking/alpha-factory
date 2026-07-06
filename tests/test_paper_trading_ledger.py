@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 from pathlib import Path
 
 from oqp.brokers import (
@@ -11,6 +12,9 @@ from oqp.brokers import (
     IBKRReadOnlyPortfolioSnapshot,
 )
 from oqp.paper_trading import (
+    DEFAULT_PAPER_TRADING_DB_PATH,
+    PAPER_TRADING_DB_PATH_ENV,
+    default_paper_trading_ledger_path,
     ensure_paper_trading_schema,
     load_latest_paper_execution_reviews,
     load_latest_paper_nav,
@@ -63,6 +67,17 @@ def sample_snapshot(*, nav: float = 1_000_000.0) -> IBKRReadOnlyPortfolioSnapsho
 
 
 class PaperTradingLedgerTests(unittest.TestCase):
+    def test_default_path_lives_under_runtime_db_and_supports_env_override(self) -> None:
+        self.assertEqual(
+            DEFAULT_PAPER_TRADING_DB_PATH.parts[-4:],
+            ("runtime", "db", "paper_trading", "paper_trading.db"),
+        )
+        with patch.dict("os.environ", {PAPER_TRADING_DB_PATH_ENV: "runtime/db/custom.db"}):
+            self.assertEqual(
+                default_paper_trading_ledger_path(),
+                DEFAULT_PAPER_TRADING_DB_PATH.parents[3] / "runtime" / "db" / "custom.db",
+            )
+
     def test_schema_creates_expected_tables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "paper.db"

@@ -36,7 +36,7 @@ class IBKRReadOnlyPortfolioSnapshot:
 
     health: BrokerHealth
     position_rows: tuple[dict[str, Any], ...] = ()
-    metrics: dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -159,20 +159,32 @@ class IBKRBrokerAdapter(BrokerAdapter):
         summary = list(self._ib.accountSummary())
         account_id = self.config.account_id if self.config else None
         account_id = account_id or self._first_item_attr(summary, "account") or "unknown"
+        base_currency = self._summary_text(summary, ("BaseCurrency",))
 
         net_liquidation, currency = self._summary_value(
-            summary, ("NetLiquidation",), with_currency=True
+            summary,
+            ("NetLiquidation",),
+            currency="BASE",
+            with_currency=True,
         )
-        cash = self._summary_value(summary, ("TotalCashValue",))
-        buying_power = self._summary_value(summary, ("BuyingPower", "AvailableFunds"))
-        available_funds = self._summary_value(summary, ("AvailableFunds",))
-        excess_liquidity = self._summary_value(summary, ("ExcessLiquidity",))
-        gross_position_value = self._summary_value(summary, ("GrossPositionValue",))
+        if net_liquidation is None:
+            net_liquidation, currency = self._summary_value(
+                summary,
+                ("NetLiquidation",),
+                with_currency=True,
+            )
+        account_currency = base_currency or (None if currency == "BASE" else currency) or "USD"
+        cash = self._summary_value(summary, ("TotalCashValue",), currency="BASE")
+        cash = self._cash_value(summary, account_currency=account_currency, base_cash=cash)
+        buying_power = self._summary_value(summary, ("BuyingPower", "AvailableFunds"), currency="BASE")
+        available_funds = self._summary_value(summary, ("AvailableFunds",), currency="BASE")
+        excess_liquidity = self._summary_value(summary, ("ExcessLiquidity",), currency="BASE")
+        gross_position_value = self._summary_value(summary, ("GrossPositionValue",), currency="BASE")
 
         return AccountSummary(
             broker=self.broker,
             account_id=account_id,
-            currency=currency or "USD",
+            currency=account_currency,
             net_liquidation=net_liquidation,
             cash=cash,
             buying_power=buying_power,
@@ -180,6 +192,8 @@ class IBKRBrokerAdapter(BrokerAdapter):
             metadata={
                 "available_funds": available_funds,
                 "excess_liquidity": excess_liquidity,
+                "ibkr_summary_currency": currency,
+                "ibkr_base_currency": base_currency,
             },
         )
 
@@ -482,7 +496,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         with_currency: bool = False,
     ) -> float | tuple[float | None, str | None] | None:
         items = list(summary)
-        currency_order = (currency,) if currency else ("USD", "BASE", "")
+        currency_order = (currency,) if currency else ("BASE", "USD", "")
 
         for preferred_currency in currency_order:
             for item in items:
@@ -493,11 +507,57 @@ class IBKRBrokerAdapter(BrokerAdapter):
                 value = self._float(item.value)
                 if value is not None:
                     if with_currency:
-                        return value, item.currency if item.currency != "BASE" else "USD"
+                        return value, item.currency
                     return value
 
         if with_currency:
             return None, None
+        return None
+
+    def _cash_value(
+        self,
+        summary: Iterable[Any],
+        *,
+        account_currency: str,
+        base_cash: float | None,
+    ) -> float | None:
+        """Return the most useful account cash value from IBKR summary rows.
+
+        IBKR sometimes reports ``TotalCashValue BASE`` as zero while the account
+        UI and currency-specific rows show real cash in the account currency.
+        Prefer a non-zero base row, then fall back to account-currency cash
+        rows before keeping the original zero.
+        """
+
+        if base_cash is not None and abs(float(base_cash)) > 1e-9:
+            return base_cash
+
+        currencies = tuple(
+            dict.fromkeys(
+                currency
+                for currency in (
+                    str(account_currency or "").upper(),
+                    "BASE",
+                    "USD",
+                    "EUR",
+                )
+                if currency
+            )
+        )
+        for tags in (("TotalCashValue",), ("CashBalance",), ("SettledCash",)):
+            for currency in currencies:
+                value = self._summary_value(summary, tags, currency=currency)
+                if value is not None and abs(float(value)) > 1e-9:
+                    return value
+
+        return base_cash
+
+    def _summary_text(self, summary: Iterable[Any], tags: tuple[str, ...]) -> str | None:
+        for item in summary:
+            if item.tag not in tags:
+                continue
+            value = str(getattr(item, "value", "") or "").strip().upper()
+            return value or None
         return None
 
     def _first_item_attr(self, items: Iterable[Any], attr: str) -> str | None:
@@ -605,17 +665,27 @@ def fetch_ibkr_readonly_portfolio_snapshot(
 
 def ibkr_account_summary_to_middle_office_metrics(
     account: AccountSummary,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Convert generic account summary fields to the legacy metrics JSON."""
 
+    nav = _float_or_zero(account.net_liquidation)
+    cash = _float_or_zero(account.cash)
+    margin_buffer = _float_or_zero(
+        account.metadata.get("excess_liquidity")
+        or account.metadata.get("available_funds")
+        or account.buying_power
+    )
+    currency = (account.currency or "USD").upper()
     return {
-        "Total_NAV_USD": _float_or_zero(account.net_liquidation),
-        "Available_Cash_USD": _float_or_zero(account.cash),
-        "Margin_Buffer_USD": _float_or_zero(
-            account.metadata.get("excess_liquidity")
-            or account.metadata.get("available_funds")
-            or account.buying_power
-        ),
+        "Account_Currency": currency,
+        "Total_NAV": nav,
+        "Available_Cash": cash,
+        "Margin_Buffer": margin_buffer,
+        # Legacy aliases retained for older jobs; prefer the currency-aware
+        # keys above for new account-ledger writes.
+        "Total_NAV_USD": nav,
+        "Available_Cash_USD": cash,
+        "Margin_Buffer_USD": margin_buffer,
     }
 
 

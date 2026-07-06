@@ -1,19 +1,7 @@
-"""Compatibility entrypoint for the active research dashboard."""
-
 from __future__ import annotations
 
-import sys
+import runpy
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from apps._compat import run_legacy_streamlit_script
-
-
-run_legacy_streamlit_script(
-    "alpha_research_lab/ui_v2/app.py",
-    legacy_root="alpha_research_lab/ui_v2",
-)
+runpy.run_path(str(Path(__file__).with_name("Homepage.py")), run_name="__main__")

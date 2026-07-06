@@ -148,6 +148,7 @@ class DCFValuation:
     present_value_terminal: float
     enterprise_value: float
     equity_value: float
+    shares_outstanding: float
     fair_value_per_share: float
     margin_of_safety: float
 
@@ -158,6 +159,8 @@ class DCFValuation:
             {"Valuation Metric": "PV of Terminal Value", "Amount": self.present_value_terminal},
             {"Valuation Metric": "Enterprise Value", "Amount": self.enterprise_value},
             {"Valuation Metric": "Equity Value", "Amount": self.equity_value},
+            {"Valuation Metric": "Shares Outstanding", "Amount": self.shares_outstanding},
+            {"Valuation Metric": "Intrinsic Value / Share", "Amount": self.fair_value_per_share},
         ]
 
 
@@ -218,7 +221,9 @@ def fetch_fmp_json(
             stable=stable,
             params=params,
         )
-    except (DataAdapterError, OSError, ValueError):
+    except (DataAdapterError, OSError, ValueError) as exc:
+        if not suppress_error_messages:
+            return {"Error Message": str(exc)}
         return []
 
     if suppress_error_messages and isinstance(json_data, dict) and "Error Message" in json_data:
@@ -268,6 +273,9 @@ def fetch_fundamental_data(
     data["sector"] = (
         profile_fmp[0].get("sector", "Unknown") if isinstance(profile_fmp, list) and profile_fmp else info.get("sector", "Unknown")
     )
+    data["company_name"] = (
+        profile_fmp[0].get("companyName") if isinstance(profile_fmp, list) and profile_fmp else info.get("longName")
+    ) or symbol
     data["pe"] = safe_num(info.get("trailingPE"), 999.0)
     data["peg"] = safe_num(info.get("pegRatio"), 999.0)
     data["shares"] = safe_num(info.get("sharesOutstanding"), 1.0) or 1.0
@@ -456,23 +464,617 @@ def calculate_dcf_valuation(
         present_value_terminal=float(present_value_terminal),
         enterprise_value=float(enterprise_value),
         equity_value=float(equity_value),
+        shares_outstanding=float(shares),
         fair_value_per_share=float(fair_value),
         margin_of_safety=float(margin_of_safety),
     )
 
 
+def _clamp(value: float, low: float, high: float) -> float:
+    return min(max(value, low), high)
+
+
+def _usable_growth_percent(value: object, *, default: float, low: float = -50.0, high: float = 150.0) -> float:
+    parsed = safe_num(value, np.nan)
+    if pd.isna(parsed) or parsed < low or parsed > high:
+        return default
+    return float(parsed)
+
+
+def estimate_dcf_assumptions(data: dict[str, Any]) -> dict[str, float | str]:
+    """Produce transparent starter DCF assumptions from available fundamentals.
+
+    These are intentionally conservative suggestions, not automated valuation truth.
+    The dashboard keeps the final inputs editable so the user can override them.
+    """
+
+    terminal_growth = 2.5
+    fcf_cagr = _usable_growth_percent(data.get("auto_fcf_cagr"), default=np.nan)
+    rev_cagr = _usable_growth_percent(data.get("auto_rev_cagr"), default=np.nan)
+
+    market_cap = safe_num(data.get("market_cap"))
+    total_cash = safe_num(data.get("total_cash"))
+    total_debt = safe_num(data.get("total_debt"))
+    net_debt_ratio = (total_debt - total_cash) / market_cap if market_cap > 0 else 0.0
+    roce = _clamp(safe_num(data.get("roce")), 0.0, 0.50)
+    positive_quality_business = safe_num(data.get("fcf_ttm")) > 0 and roce >= 0.15
+
+    if not pd.isna(fcf_cagr) and fcf_cagr >= 0 and not pd.isna(rev_cagr) and rev_cagr >= 0:
+        growth_1 = (fcf_cagr * 0.65) + (rev_cagr * 0.35)
+        growth_source = "FCF/revenue CAGR blend"
+    elif not pd.isna(fcf_cagr) and fcf_cagr >= 0:
+        growth_1 = fcf_cagr
+        growth_source = "FCF CAGR"
+    elif not pd.isna(rev_cagr) and rev_cagr >= 0:
+        growth_1 = rev_cagr * 0.80
+        growth_source = "revenue CAGR adjusted for margin/cash-flow conversion"
+    elif not pd.isna(fcf_cagr):
+        growth_1 = fcf_cagr
+        growth_source = "negative FCF CAGR"
+    elif not pd.isna(rev_cagr):
+        growth_1 = rev_cagr
+        growth_source = "negative revenue CAGR"
+    else:
+        growth_1 = 8.0
+        growth_source = "default mature growth"
+
+    if growth_1 < terminal_growth and positive_quality_business:
+        growth_1 = terminal_growth
+        growth_source = f"{growth_source}; floored for positive-FCF/high-ROCE business"
+
+    growth_1 = _clamp(float(growth_1), -10.0, 40.0)
+    growth_2 = _clamp(max(growth_1 * 0.60, terminal_growth if positive_quality_business else -10.0), -10.0, 18.0)
+
+    # A simple listed-equity WACC starter: base cost of capital, leverage premium,
+    # and a modest profitability offset. This is a prompt for review, not a CAPM engine.
+    wacc = 9.5 + (_clamp(net_debt_ratio, -0.10, 0.60) * 4.0) - (roce * 2.0)
+    wacc = _clamp(wacc, 6.5, 16.0)
+
+    return {
+        "wacc_pct": round(wacc, 1),
+        "terminal_growth_pct": terminal_growth,
+        "growth_1_pct": round(growth_1, 1),
+        "growth_2_pct": round(growth_2, 1),
+        "growth_source": growth_source,
+        "raw_fcf_cagr_pct": round(float(fcf_cagr), 1) if not pd.isna(fcf_cagr) else "n/a",
+        "raw_rev_cagr_pct": round(float(rev_cagr), 1) if not pd.isna(rev_cagr) else "n/a",
+        "net_debt_to_market_cap": round(net_debt_ratio, 4),
+        "roce": round(roce, 4),
+    }
+
+
+def _payload_rows(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        raw_rows = (
+            payload.get("data")
+            or payload.get("results")
+            or payload.get("items")
+            or payload.get("documents")
+            or payload.get("transcripts")
+            or []
+        )
+        if isinstance(raw_rows, dict):
+            raw_rows = [raw_rows]
+    elif isinstance(payload, list):
+        raw_rows = payload
+    else:
+        raw_rows = []
+    return [row for row in raw_rows if isinstance(row, dict)]
+
+
+def _document_text_preview(row: dict[str, Any]) -> str:
+    text = _first_text(
+        row,
+        [
+            "text",
+            "content",
+            "transcript",
+            "finalLink",
+            "acceptedDate",
+            "description",
+            "summary",
+        ],
+    )
+    text = " ".join(text.split())
+    return text[:500]
+
+
+DCF_SOURCE_COLUMNS = ["Source", "Document", "Date", "Title", "URL", "Text Preview"]
+
+
+def _payload_error(payload: Any) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("Error Message") or payload.get("message") or payload.get("error") or "")
+    return ""
+
+
+def _document_rows(
+    payload: Any,
+    *,
+    source: str,
+    normalized_symbol: str,
+    seen: set[tuple[str, str, str]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if limit <= 0:
+        return rows
+    for raw in _payload_rows(payload):
+        document_type = _first_text(raw, ["type", "formType", "form", "period", "quarter"]) or "document"
+        date = _first_text(raw, ["date", "fillingDate", "filingDate", "acceptedDate", "publishedDate"])
+        title = _first_text(raw, ["title", "name", "symbol"]) or f"{normalized_symbol} {document_type}"
+        url = _first_text(raw, ["finalLink", "link", "url", "reportLink", "filingUrl"])
+        key = (document_type, date, url or title)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "Source": source,
+                "Document": document_type,
+                "Date": date,
+                "Title": title,
+                "URL": url,
+                "Text Preview": _document_text_preview(raw),
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _transcript_periods(payload: Any) -> list[tuple[int, int]]:
+    periods: list[tuple[int, int]] = []
+    if isinstance(payload, dict):
+        raw_items = payload.get("data") or payload.get("results") or payload.get("items") or []
+    elif isinstance(payload, list):
+        raw_items = payload
+    else:
+        raw_items = []
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        year = int(safe_num(item.get("year"), 0))
+        quarter = int(safe_num(item.get("quarter"), 0))
+        if year > 0 and 1 <= quarter <= 4 and (year, quarter) not in periods:
+            periods.append((year, quarter))
+    return periods
+
+
+def _access_issue_row(source: str, detail: str) -> dict[str, str]:
+    return {
+        "Source": source,
+        "Document": "Access issue",
+        "Date": "",
+        "Title": detail,
+        "URL": "",
+        "Text Preview": "",
+    }
+
+
+def fetch_dcf_source_documents(
+    api_key: str | None,
+    symbol: str,
+    *,
+    limit: int = 8,
+    fmp_fetcher: FMPFetcher = fetch_fmp_json,
+) -> pd.DataFrame:
+    """Fetch source material that can support DCF assumptions.
+
+    The endpoint list is deliberately best-effort because FMP plan coverage differs.
+    Empty responses are normal and should not break the dashboard.
+    """
+
+    normalized_symbol = symbol.upper().strip()
+    if not api_key or not normalized_symbol:
+        return pd.DataFrame(columns=DCF_SOURCE_COLUMNS)
+
+    filing_requests = [
+        (
+            "FMP stable SEC filings",
+            "sec-filings-search/symbol",
+            True,
+            {"symbol": normalized_symbol, "limit": limit},
+        ),
+        (
+            "FMP 10-K filings",
+            f"sec_filings/{normalized_symbol}",
+            False,
+            {"type": "10-k", "page": 0},
+        ),
+        (
+            "FMP 10-Q filings",
+            f"sec_filings/{normalized_symbol}",
+            False,
+            {"type": "10-q", "page": 0},
+        ),
+    ]
+
+    rows: list[dict[str, Any]] = []
+    errors: list[tuple[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for source, endpoint, stable, params in filing_requests:
+        payload = fmp_fetcher(
+            api_key,
+            endpoint,
+            stable=stable,
+            params=params,
+            suppress_error_messages=False,
+        )
+        error = _payload_error(payload)
+        if error:
+            errors.append((source, error))
+            continue
+        rows.extend(
+            _document_rows(
+                payload,
+                source=source,
+                normalized_symbol=normalized_symbol,
+                seen=seen,
+                limit=limit - len(rows),
+            )
+        )
+        if len(rows) >= limit:
+            break
+
+    transcript_dates_source = "FMP transcript dates"
+    transcript_dates = fmp_fetcher(
+        api_key,
+        "earning-call-transcript-dates",
+        stable=True,
+        params={"symbol": normalized_symbol},
+        suppress_error_messages=False,
+    )
+    transcript_error = _payload_error(transcript_dates)
+    transcript_rows_before = len(rows)
+    if transcript_error:
+        errors.append((transcript_dates_source, transcript_error))
+    else:
+        periods = _transcript_periods(transcript_dates)
+        if not periods:
+            current_year = pd.Timestamp.now(tz="UTC").year
+            periods = [
+                (year, quarter)
+                for year in (current_year, current_year - 1)
+                for quarter in (4, 3, 2, 1)
+            ]
+        for year, quarter in periods[:4]:
+            payload = fmp_fetcher(
+                api_key,
+                "earning-call-transcript",
+                stable=True,
+                params={"symbol": normalized_symbol, "year": year, "quarter": quarter},
+                suppress_error_messages=False,
+            )
+            error = _payload_error(payload)
+            if error:
+                errors.append((f"FMP transcript {year}Q{quarter}", error))
+                if "HTTP 402" in error or "Payment Required" in error:
+                    break
+                continue
+            rows.extend(
+                _document_rows(
+                    payload,
+                    source=f"FMP transcript {year}Q{quarter}",
+                    normalized_symbol=normalized_symbol,
+                    seen=seen,
+                    limit=limit - len(rows),
+                )
+            )
+            if len(rows) >= limit:
+                break
+
+    if errors and (not rows or len(rows) == transcript_rows_before):
+        prioritized_errors = [error for error in errors if "transcript" in error[0].lower()] or errors
+        rows.extend(_access_issue_row(source, detail) for source, detail in prioritized_errors[:3])
+
+    return pd.DataFrame(rows, columns=DCF_SOURCE_COLUMNS)
+
+
+def _keyword_hits(text: str, keywords: list[str]) -> list[str]:
+    lowered = text.lower()
+    return [keyword for keyword in keywords if keyword.lower() in lowered]
+
+
+def build_dcf_assumption_evidence(
+    data: dict[str, Any],
+    documents: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Build a compact evidence board for WACC and growth inputs."""
+
+    hints = estimate_dcf_assumptions(data)
+    def _hint_percent(value: object) -> str:
+        if isinstance(value, str):
+            return value
+        return f"{safe_num(value):.1f}%"
+
+    raw_fcf_cagr = _hint_percent(hints.get("raw_fcf_cagr_pct"))
+    raw_rev_cagr = _hint_percent(hints.get("raw_rev_cagr_pct"))
+    history_text = f"FCF CAGR {raw_fcf_cagr}; revenue CAGR {raw_rev_cagr}"
+    doc_text = ""
+    if isinstance(documents, pd.DataFrame) and not documents.empty:
+        source_columns = [column for column in ("Title", "Text Preview") if column in documents]
+        doc_text = " ".join(
+            str(value)
+            for value in documents[source_columns].fillna("").to_numpy().ravel().tolist()
+            if str(value).strip()
+        )
+
+    growth_hits = _keyword_hits(
+        doc_text,
+        ["guidance", "growth", "demand", "backlog", "revenue", "margin", "capacity"],
+    )
+    risk_hits = _keyword_hits(
+        doc_text,
+        ["risk", "debt", "rates", "competition", "demand", "margin", "foreign exchange", "tariff"],
+    )
+
+    rows = [
+        {
+            "Input": "WACC",
+            "Suggested": f"{safe_num(hints.get('wacc_pct')):.1f}%",
+            "Primary Evidence": (
+                f"net debt / market cap {safe_num(hints.get('net_debt_to_market_cap')):.1%}; "
+                f"ROCE {safe_num(hints.get('roce')):.1%}"
+            ),
+            "Source Material": ", ".join(risk_hits[:5]) if risk_hits else "load filings/transcripts for risk language",
+            "How To Use": "Raise for leverage, fragile cash flows, or rate sensitivity; lower for durable cash generation.",
+        },
+        {
+            "Input": "Y1-5 Growth",
+            "Suggested": f"{safe_num(hints.get('growth_1_pct')):.1f}%",
+            "Primary Evidence": f"{hints.get('growth_source')} ({history_text})",
+            "Source Material": ", ".join(growth_hits[:5]) if growth_hits else "load filings/transcripts for management guidance",
+            "How To Use": "Use this for the explicit forecast period; override with concrete guidance when available.",
+        },
+        {
+            "Input": "Y6-10 Growth",
+            "Suggested": f"{safe_num(hints.get('growth_2_pct')):.1f}%",
+            "Primary Evidence": "decay of Y1-5 growth toward maturity",
+            "Source Material": ", ".join(growth_hits[:5]) if growth_hits else "load filings/transcripts for long-run runway",
+            "How To Use": "Usually lower than Y1-5 unless the runway is unusually long and well-supported.",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def _first_number(row: dict[str, Any], keys: list[str], default: float = 0.0) -> float:
+    for key in keys:
+        value = safe_num(row.get(key), default=np.nan)
+        if not pd.isna(value) and value > 0:
+            return value
+    return default
+
+
+def _first_text(row: dict[str, Any], keys: list[str]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _normalize_price_target_rows(payload: Any, *, source: str) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        raw_rows = payload.get("data") or payload.get("results") or payload.get("items") or []
+        if isinstance(raw_rows, dict):
+            raw_rows = [raw_rows]
+    elif isinstance(payload, list):
+        raw_rows = payload
+    else:
+        raw_rows = []
+
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            continue
+        target = _first_number(
+            raw,
+            [
+                "priceTarget",
+                "targetPrice",
+                "newPriceTarget",
+                "analystTargetPrice",
+                "target",
+                "pt",
+                "targetConsensus",
+                "targetMeanPrice",
+            ],
+        )
+        if target <= 0:
+            continue
+        rows.append(
+            {
+                "Published Date": _first_text(
+                    raw,
+                    [
+                        "publishedDate",
+                        "publishedDateTime",
+                        "date",
+                        "pricedDate",
+                        "createdAt",
+                        "updatedAt",
+                    ],
+                ),
+                "Firm": _first_text(
+                    raw,
+                    [
+                        "analystCompany",
+                        "company",
+                        "firm",
+                        "brokerage",
+                        "publishedBy",
+                        "publisher",
+                        "site",
+                    ],
+                ),
+                "Analyst": _first_text(raw, ["analystName", "analyst", "author", "analyst_name"]),
+                "Rating": _first_text(raw, ["rating", "newGrade", "grade", "recommendation", "action"]),
+                "Target": float(target),
+                "Source": source,
+                "Title": _first_text(raw, ["newsTitle", "title", "headline"]),
+                "URL": _first_text(raw, ["newsURL", "url", "link"]),
+            }
+        )
+    return rows
+
+
+def _normalize_peer_symbols(payload: Any) -> list[str]:
+    if isinstance(payload, dict):
+        raw_items = payload.get("peersList") or payload.get("peers") or payload.get("data") or payload.get("results") or []
+    elif isinstance(payload, list):
+        raw_items = payload
+    else:
+        raw_items = []
+
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+
+    symbols: list[str] = []
+    for item in raw_items:
+        if isinstance(item, str):
+            symbol = item
+        elif isinstance(item, dict):
+            nested = item.get("peersList") or item.get("peers")
+            if isinstance(nested, list):
+                symbols.extend(_normalize_peer_symbols(nested))
+                continue
+            symbol = _first_text(
+                item,
+                [
+                    "symbol",
+                    "ticker",
+                    "peerSymbol",
+                    "companySymbol",
+                    "relatedSymbol",
+                ],
+            )
+        else:
+            symbol = ""
+        symbol = symbol.upper().strip()
+        if symbol and "{" not in symbol and symbol not in symbols:
+            symbols.append(symbol)
+    return symbols
+
+
+def _fetch_yahoo_price_targets(symbol: str, *, ticker_factory: Callable[[str], Any] | None = None) -> dict[str, Any]:
+    if ticker_factory is None:
+        import yfinance as yf
+
+        ticker_factory = yf.Ticker
+
+    try:
+        ticker = ticker_factory(symbol.upper())
+    except Exception:
+        return {}
+
+    result: dict[str, Any] = {}
+    try:
+        analyst_targets = getattr(ticker, "analyst_price_targets", None)
+    except Exception:
+        analyst_targets = None
+
+    if isinstance(analyst_targets, pd.Series):
+        analyst_targets = analyst_targets.to_dict()
+    if isinstance(analyst_targets, dict):
+        result["targetConsensus"] = _first_number(
+            analyst_targets,
+            ["mean", "targetMeanPrice", "targetConsensus", "average"],
+        )
+        result["targetHigh"] = _first_number(analyst_targets, ["high", "targetHighPrice", "targetHigh"])
+        result["targetLow"] = _first_number(analyst_targets, ["low", "targetLowPrice", "targetLow"])
+        result["targetMedian"] = _first_number(analyst_targets, ["median", "targetMedianPrice", "targetMedian"])
+        analysts = _first_number(
+            analyst_targets,
+            ["numberOfAnalysts", "numberOfAnalystOpinions", "analystCount"],
+        )
+        if analysts:
+            result["numberOfAnalystOpinions"] = int(analysts)
+    elif isinstance(analyst_targets, pd.DataFrame):
+        rows = _normalize_price_target_rows(analyst_targets.to_dict("records"), source="Yahoo Finance")
+        if rows:
+            result["targetRows"] = rows
+            targets = pd.Series([row["Target"] for row in rows], dtype="float64")
+            result["targetConsensus"] = float(targets.mean())
+            result["targetHigh"] = float(targets.max())
+            result["targetLow"] = float(targets.min())
+            result["numberOfAnalystOpinions"] = int(len(rows))
+
+    try:
+        info = getattr(ticker, "info", {}) or {}
+    except Exception:
+        info = {}
+    if isinstance(info, dict):
+        result["targetConsensus"] = result.get("targetConsensus") or safe_num(info.get("targetMeanPrice"))
+        result["targetHigh"] = result.get("targetHigh") or safe_num(info.get("targetHighPrice"))
+        result["targetLow"] = result.get("targetLow") or safe_num(info.get("targetLowPrice"))
+        result["targetMedian"] = result.get("targetMedian") or safe_num(info.get("targetMedianPrice"))
+        analysts = result.get("numberOfAnalystOpinions") or safe_num(info.get("numberOfAnalystOpinions"))
+        if analysts:
+            result["numberOfAnalystOpinions"] = int(analysts)
+        if info.get("recommendationKey"):
+            result["recommendationKey"] = info.get("recommendationKey")
+        if safe_num(info.get("recommendationMean")):
+            result["recommendationMean"] = safe_num(info.get("recommendationMean"))
+
+    if any(safe_num(result.get(key)) > 0 for key in ("targetConsensus", "targetHigh", "targetLow")):
+        result["source"] = "Yahoo Finance"
+    return result
+
+
 def fetch_price_target_consensus(api_key: str | None, symbol: str) -> dict[str, Any]:
-    result = fetch_fmp_json(
+    normalized_symbol = symbol.upper().strip()
+    result: dict[str, Any] = {}
+    sources: list[str] = []
+
+    consensus = fetch_fmp_json(
         api_key,
         "price-target-consensus",
         stable=True,
-        params={"symbol": symbol.upper()},
+        params={"symbol": normalized_symbol},
         suppress_error_messages=False,
     )
-    if isinstance(result, list) and result:
-        first = result[0]
-        return first if isinstance(first, dict) else {}
-    return {}
+    if isinstance(consensus, list) and consensus and isinstance(consensus[0], dict):
+        result.update(consensus[0])
+        sources.append("FMP")
+
+    fmp_rows: list[dict[str, Any]] = []
+    for endpoint in ("price-target-news", "price-target-summary"):
+        payload = fetch_fmp_json(
+            api_key,
+            endpoint,
+            stable=True,
+            params={"symbol": normalized_symbol},
+            suppress_error_messages=False,
+        )
+        fmp_rows.extend(_normalize_price_target_rows(payload, source="FMP"))
+    if fmp_rows:
+        result["targetRows"] = fmp_rows
+        targets = pd.Series([row["Target"] for row in fmp_rows], dtype="float64")
+        result["targetConsensus"] = result.get("targetConsensus") or float(targets.mean())
+        result["targetHigh"] = result.get("targetHigh") or float(targets.max())
+        result["targetLow"] = result.get("targetLow") or float(targets.min())
+        result["numberOfAnalystOpinions"] = result.get("numberOfAnalystOpinions") or int(len(fmp_rows))
+        if "FMP" not in sources:
+            sources.append("FMP")
+
+    yahoo = _fetch_yahoo_price_targets(normalized_symbol)
+    if yahoo:
+        for key in ("targetConsensus", "targetHigh", "targetLow", "targetMedian", "numberOfAnalystOpinions"):
+            if not result.get(key) and yahoo.get(key):
+                result[key] = yahoo[key]
+        if not result.get("targetRows") and yahoo.get("targetRows"):
+            result["targetRows"] = yahoo["targetRows"]
+        for key in ("recommendationKey", "recommendationMean"):
+            if yahoo.get(key):
+                result[key] = yahoo[key]
+        sources.append("Yahoo Finance")
+
+    if sources:
+        result["source"] = " + ".join(dict.fromkeys(sources))
+    return result
 
 
 def fetch_peer_comparison(
@@ -491,18 +1093,13 @@ def fetch_peer_comparison(
     if isinstance(peers_result, dict) and "Error Message" in peers_result:
         return PeerComparison(error=str(peers_result["Error Message"]))
 
-    peer_list: list[str] = []
-    if isinstance(peers_result, list) and peers_result:
-        first = peers_result[0]
-        if isinstance(first, dict) and isinstance(first.get("peersList"), list):
-            peer_list = [str(item).upper() for item in first["peersList"]]
-        else:
-            peer_list = [str(item).upper() for item in peers_result]
+    normalized_symbol = symbol.upper()
+    peer_list = [peer for peer in _normalize_peer_symbols(peers_result) if peer != normalized_symbol]
 
     if not peer_list:
-        return PeerComparison(error=f"Could not find peer data for {symbol.upper()}.")
+        return PeerComparison(error=f"Could not find peer data for {normalized_symbol}.")
 
-    combined_symbols = list(dict.fromkeys([symbol.upper(), *peer_list[:max_peers]]))
+    combined_symbols = list(dict.fromkeys([normalized_symbol, *peer_list[:max_peers]]))
     metrics_rows: list[dict[str, Any]] = []
     ratio_rows: list[dict[str, Any]] = []
     for peer_symbol in combined_symbols:

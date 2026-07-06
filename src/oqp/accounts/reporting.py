@@ -5,6 +5,86 @@ from __future__ import annotations
 import pandas as pd
 
 
+def blended_live_nav_history(
+    unified_nav: pd.DataFrame,
+    broker_nav: pd.DataFrame,
+    *,
+    manual_usd_value: float | None = None,
+    manual_usd_cash: float | None = None,
+) -> pd.DataFrame:
+    """Return a chart-ready live NAV series while unified history warms up.
+
+    ``unified_live`` is the authoritative series once it exists. During the
+    transition from broker-only monitoring to broker-plus-manual monitoring,
+    earlier broker rows are adjusted by the current manual USD value so the
+    overview chart does not collapse into a one-point axis.
+    """
+
+    columns = [
+        "date",
+        "account_key",
+        "account_id",
+        "broker",
+        "profile",
+        "environment",
+        "as_of",
+        "currency",
+        "net_liquidation",
+        "cash",
+        "daily_pnl",
+        "position_count",
+        "snapshot_id",
+    ]
+    unified = pd.DataFrame() if unified_nav is None else unified_nav.copy()
+    broker = pd.DataFrame() if broker_nav is None else broker_nav.copy()
+    if unified.empty and broker.empty:
+        return pd.DataFrame(columns=columns)
+
+    manual_value = _number(manual_usd_value)
+    manual_cash = _number(manual_usd_cash)
+    frames: list[pd.DataFrame] = []
+
+    if not broker.empty:
+        broker = broker.reindex(columns=columns).copy()
+        broker["date"] = pd.to_datetime(broker["date"], errors="coerce")
+        if not unified.empty and "date" in unified:
+            first_unified_date = pd.to_datetime(unified["date"], errors="coerce").min()
+            broker = broker.loc[broker["date"].lt(first_unified_date)].copy()
+        if not broker.empty:
+            for column in ("net_liquidation", "cash", "position_count"):
+                broker[column] = pd.to_numeric(broker[column], errors="coerce").fillna(0.0)
+            broker["net_liquidation"] = broker["net_liquidation"] + manual_value
+            broker["cash"] = broker["cash"] + manual_cash
+            broker["profile"] = "unified_live"
+            broker["broker"] = "unified"
+            broker["account_id"] = "unified_live"
+            broker["account_key"] = "live:unified:unified_live:unified_live"
+            broker["snapshot_id"] = "synthetic-" + broker["date"].dt.strftime("%Y-%m-%d")
+            frames.append(broker)
+
+    if not unified.empty:
+        frames.append(unified.reindex(columns=columns).copy())
+
+    if not frames:
+        return pd.DataFrame(columns=columns)
+
+    out = pd.concat(frames, ignore_index=True)
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out["as_of"] = pd.to_datetime(out["as_of"], errors="coerce", utc=True)
+    for column in ("net_liquidation", "cash", "position_count"):
+        out[column] = pd.to_numeric(out[column], errors="coerce").fillna(0.0)
+    out = (
+        out.dropna(subset=["date"])
+        .sort_values(["date", "as_of"])
+        .drop_duplicates(subset=["date"], keep="last")
+        .reset_index(drop=True)
+    )
+    out["daily_pnl"] = out["net_liquidation"].diff().fillna(0.0)
+    out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+    out["as_of"] = out["as_of"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+    return out.reindex(columns=columns)
+
+
 def account_nav_drawdowns(nav_history: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "date",
@@ -46,6 +126,16 @@ def account_nav_drawdowns(nav_history: pd.DataFrame) -> pd.DataFrame:
         out["drawdown"] / out["equity_peak"].replace(0, pd.NA)
     ).fillna(0.0)
     return out.reindex(columns=columns)
+
+
+def _number(value: float | int | str | None) -> float:
+    if value is None:
+        return 0.0
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return 0.0 if pd.isna(parsed) else parsed
 
 
 def account_position_history_by_symbol(positions: pd.DataFrame) -> pd.DataFrame:
@@ -217,6 +307,76 @@ def account_profit_breakdown(
         ],
         columns=columns,
     )
+
+
+def account_performance_summary(
+    nav_history: pd.DataFrame,
+    positions: pd.DataFrame,
+    *,
+    current_nav: float | None = None,
+    current_cash: float | None = None,
+    current_daily_pnl: float | None = None,
+) -> dict[str, float | int | None]:
+    """Summarize account return, drawdown, cash, exposure, and position P&L."""
+
+    drawdowns = account_nav_drawdowns(nav_history)
+    latest_nav_row = None if drawdowns.empty else drawdowns.iloc[-1]
+    totals = account_position_totals(positions)
+
+    nav = (
+        current_nav
+        if current_nav is not None
+        else None
+        if latest_nav_row is None
+        else float(latest_nav_row["net_liquidation"])
+    )
+    cash = (
+        current_cash
+        if current_cash is not None
+        else None
+        if latest_nav_row is None
+        else float(latest_nav_row["cash"])
+    )
+    daily_pnl = (
+        current_daily_pnl
+        if current_daily_pnl is not None
+        else None
+        if latest_nav_row is None
+        else float(latest_nav_row["daily_pnl"])
+    )
+    latest_return = (
+        None if latest_nav_row is None else float(latest_nav_row["daily_return"])
+    )
+    cumulative_return = (
+        None if latest_nav_row is None else float(latest_nav_row["cumulative_return"])
+    )
+    max_drawdown_pct = (
+        None if drawdowns.empty else float(drawdowns["drawdown_pct"].min())
+    )
+    gross_exposure = totals["gross_exposure"]
+    gross_exposure_pct = (
+        None
+        if nav in (None, 0) or gross_exposure is None
+        else float(gross_exposure) / float(nav)
+    )
+    cash_pct = None if nav in (None, 0) or cash is None else float(cash) / float(nav)
+
+    return {
+        "nav_observations": int(len(drawdowns)),
+        "latest_nav": nav,
+        "latest_cash": cash,
+        "cash_pct": cash_pct,
+        "daily_pnl": daily_pnl,
+        "daily_return": latest_return,
+        "cumulative_return": cumulative_return,
+        "max_drawdown_pct": max_drawdown_pct,
+        "position_rows": int(totals["position_rows"] or 0),
+        "gross_exposure": gross_exposure,
+        "gross_exposure_pct": gross_exposure_pct,
+        "unrealized_pnl": totals["unrealized_pnl"],
+        "realized_pnl": totals["realized_pnl"],
+        "total_position_pnl": totals["total_pnl"],
+    }
 
 
 def account_top_positions(

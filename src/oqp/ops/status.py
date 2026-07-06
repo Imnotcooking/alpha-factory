@@ -34,16 +34,20 @@ from oqp.brokers import (
 from oqp.config import REPO_ROOT, OQPSettings, load_settings
 
 
-DEFAULT_PORTFOLIO_HEALTH_PATH = REPO_ROOT / "logs" / "portfolio_snapshot_health.json"
-DEFAULT_PAPER_HEALTH_PATH = REPO_ROOT / "logs" / "paper_trading_health.json"
+DEFAULT_PORTFOLIO_HEALTH_PATH = REPO_ROOT / "runtime" / "logs" / "portfolio_snapshot_health.json"
+DEFAULT_PAPER_HEALTH_PATH = REPO_ROOT / "runtime" / "logs" / "paper_trading_health.json"
 DEFAULT_IBKR_HEARTBEAT_HEALTH_PATH = (
-    REPO_ROOT / "logs" / "ibkr_adapter_heartbeat_health.json"
+    REPO_ROOT / "runtime" / "logs" / "ibkr_adapter_heartbeat_health.json"
+)
+DEFAULT_SERVER_IBKR_READINESS_PATH = (
+    REPO_ROOT / "runtime" / "logs" / "server_ibkr_readiness_health.json"
 )
 IBKR_HEARTBEAT_CLIENT_ID_OFFSET = 9_000
 SYSTEMD_UNITS = (
+    "oqp-research-dashboard.service",
+    "oqp-ops-dashboard.service",
     "oqp-money-dashboard.service",
     "oqp-paper-dashboard.service",
-    "oqp-ops-dashboard.service",
     "oqp-portfolio-snapshot.timer",
     "oqp-paper-snapshot.timer",
     "oqp-paper-strategy-runner.timer",
@@ -105,6 +109,7 @@ def collect_ops_status(
     portfolio_health_path: str | Path = DEFAULT_PORTFOLIO_HEALTH_PATH,
     paper_health_path: str | Path = DEFAULT_PAPER_HEALTH_PATH,
     ibkr_heartbeat_health_path: str | Path = DEFAULT_IBKR_HEARTBEAT_HEALTH_PATH,
+    server_ibkr_readiness_path: str | Path = DEFAULT_SERVER_IBKR_READINESS_PATH,
     max_age_hours: float = 36.0,
     repo_root: str | Path = REPO_ROOT,
 ) -> OpsStatusSnapshot:
@@ -115,23 +120,53 @@ def collect_ops_status(
     account_rows = latest_account_rows(ledger_path)
     event_rows = latest_account_event_rows(ledger_path)
     items: list[OpsStatusItem] = []
-    items.extend(
-        [
-            socket_status_item(
-                "Live IBKR Gateway",
-                active_settings.ibkr_host,
-                active_settings.ibkr_live_port,
-                category="Gateway",
+    status_source = active_settings.ops_status_source
+    items.append(
+        OpsStatusItem(
+            "Gateway",
+            "Broker status source",
+            "pass",
+            (
+                "Using synced server health files and account ledgers."
+                if status_source == "snapshot"
+                else "Using direct local broker socket/API checks."
             ),
-            socket_status_item(
-                "Paper IBKR Gateway",
-                active_settings.ibkr_host,
-                active_settings.ibkr_paper_port,
-                category="Gateway",
-            ),
-        ]
+            {"Source": status_source},
+        )
     )
-    items.extend(ibkr_api_heartbeat_items(active_settings))
+    if status_source == "snapshot":
+        items.extend(
+            health_file_items(
+                Path(ibkr_heartbeat_health_path),
+                label="IBKR Adapter Heartbeat",
+                category="Broker Heartbeat",
+                max_age_hours=max_age_hours,
+            )
+        )
+        items.extend(
+            server_ibkr_readiness_items(
+                Path(server_ibkr_readiness_path),
+                max_age_hours=max_age_hours,
+            )
+        )
+    else:
+        items.extend(
+            [
+                socket_status_item(
+                    "Live IBKR Gateway",
+                    active_settings.ibkr_host,
+                    active_settings.ibkr_live_port,
+                    category="Gateway",
+                ),
+                socket_status_item(
+                    "Paper IBKR Gateway",
+                    active_settings.ibkr_host,
+                    active_settings.ibkr_paper_port,
+                    category="Gateway",
+                ),
+            ]
+        )
+        items.extend(ibkr_api_heartbeat_items(active_settings))
     items.extend(account_freshness_items(account_rows, max_age_hours=max_age_hours))
     items.extend(account_event_items(event_rows))
     items.extend(
@@ -150,20 +185,26 @@ def collect_ops_status(
             max_age_hours=max_age_hours,
         )
     )
-    items.extend(
-        health_file_items(
-            Path(ibkr_heartbeat_health_path),
-            label="IBKR Adapter Heartbeat",
-            category="Jobs",
-            max_age_hours=max_age_hours,
+    if status_source != "snapshot":
+        items.extend(
+            health_file_items(
+                Path(ibkr_heartbeat_health_path),
+                label="IBKR Adapter Heartbeat",
+                category="Jobs",
+                max_age_hours=max_age_hours,
+            )
         )
-    )
-    items.extend(systemd_status_items())
-    items.extend(cron_status_items())
-    items.extend(discord_status_items())
-    items.extend(safety_status_items(active_settings))
+    if status_source == "snapshot":
+        items.extend(snapshot_scheduler_items())
+        items.extend(snapshot_notification_items())
+        items.extend(safety_status_items(active_settings, snapshot_mode=True))
+    else:
+        items.extend(systemd_status_items())
+        items.extend(cron_status_items())
+        items.extend(discord_status_items())
+        items.extend(safety_status_items(active_settings))
     host_summary = host_summary_values(root)
-    items.extend(host_health_items(host_summary))
+    items.extend(host_health_items(host_summary, snapshot_mode=status_source == "snapshot"))
 
     return OpsStatusSnapshot(
         checked_at=datetime.now(timezone.utc),
@@ -280,8 +321,11 @@ def account_freshness_items(
             )
             continue
         age_hours = row.get("age_hours")
-        status = "pass" if age_hours is not None and age_hours <= max_age_hours else "fail"
+        is_fresh = age_hours is not None and age_hours <= max_age_hours
+        status = "pass" if is_fresh else "warn"
+        age_text = "unknown age" if age_hours is None else f"{float(age_hours):.1f}h old"
         detail = (
+            f"{'fresh' if is_fresh else 'stale'} snapshot ({age_text}): "
             f"as_of={row.get('as_of')} nav={_money(row.get('net_liquidation'))} "
             f"positions={row.get('position_count')}"
         )
@@ -493,6 +537,77 @@ def health_file_items(
     return items
 
 
+def server_ibkr_readiness_items(
+    path: Path,
+    *,
+    max_age_hours: float,
+) -> list[OpsStatusItem]:
+    if not path.exists():
+        return [
+            OpsStatusItem(
+                "Broker Heartbeat",
+                "Server IBKR readiness",
+                "warn",
+                f"Missing {path}. Run scripts/sync_server_runtime.sh to refresh server readiness.",
+            )
+        ]
+
+    age_hours = _file_age_hours(path)
+    items = [
+        OpsStatusItem(
+            "Broker Heartbeat",
+            "Server IBKR readiness status file",
+            "pass" if age_hours <= max_age_hours else "warn",
+            f"Modified {age_hours:.1f} hours ago at {_mtime(path).isoformat()}.",
+            {"Age Hours": round(age_hours, 2)},
+        )
+    ]
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        items.append(OpsStatusItem("Broker Heartbeat", "Server IBKR readiness payload", "warn", str(exc)))
+        return items
+
+    profiles = payload.get("profiles")
+    if not isinstance(profiles, dict):
+        items.append(
+            OpsStatusItem(
+                "Broker Heartbeat",
+                "Server IBKR readiness payload",
+                "warn",
+                "No profile readiness data found.",
+            )
+        )
+        return items
+
+    for profile in ("live", "paper"):
+        profile_payload = profiles.get(profile, {})
+        if not isinstance(profile_payload, dict):
+            continue
+        checks = profile_payload.get("checks", [])
+        adapter_detail = ""
+        if isinstance(checks, list):
+            for check in checks:
+                if isinstance(check, dict) and check.get("name") == "adapter check":
+                    adapter_detail = str(check.get("detail") or "")
+                    break
+        status = str(profile_payload.get("status") or "warn")
+        detail = adapter_detail or f"status={status} checked_at={payload.get('checked_at', '')}"
+        items.append(
+            OpsStatusItem(
+                "Broker Heartbeat",
+                f"{profile.title()} IBKR server readiness",
+                status if status in {"pass", "warn", "fail"} else "warn",
+                detail,
+                {
+                    "Profile": profile,
+                    "Age Hours": round(age_hours, 2),
+                },
+            )
+        )
+    return items
+
+
 def systemd_status_items() -> list[OpsStatusItem]:
     if shutil.which("systemctl") is None:
         return [
@@ -579,6 +694,17 @@ def cron_status_items() -> list[OpsStatusItem]:
     ]
 
 
+def snapshot_scheduler_items() -> list[OpsStatusItem]:
+    return [
+        OpsStatusItem(
+            "Schedulers",
+            "Server-owned scheduling",
+            "pass",
+            "Local dashboard is in snapshot mode; scheduling is verified through synced server health files.",
+        )
+    ]
+
+
 def discord_status_items() -> list[OpsStatusItem]:
     portfolio = os.getenv("OQP_DISCORD_WEBHOOK_URL") or os.getenv("OQP_HEALTH_WEBHOOK_URL")
     paper = os.getenv("OQP_PAPER_DISCORD_WEBHOOK_URL") or portfolio
@@ -588,8 +714,23 @@ def discord_status_items() -> list[OpsStatusItem]:
     ]
 
 
-def safety_status_items(settings: OQPSettings) -> list[OpsStatusItem]:
+def snapshot_notification_items() -> list[OpsStatusItem]:
     return [
+        OpsStatusItem(
+            "Notifications",
+            "Server-side webhooks",
+            "pass",
+            "Local dashboard does not require webhook secrets; notification status comes from server jobs.",
+        )
+    ]
+
+
+def safety_status_items(
+    settings: OQPSettings,
+    *,
+    snapshot_mode: bool = False,
+) -> list[OpsStatusItem]:
+    items = [
         OpsStatusItem(
             "Safety",
             "Live trading disabled",
@@ -611,13 +752,26 @@ def safety_status_items(settings: OQPSettings) -> list[OpsStatusItem]:
                 f"{str(settings.allow_paper_order_submit).lower()}"
             ),
         ),
-        OpsStatusItem(
-            "Safety",
-            "Live monitor gate",
-            "pass" if settings.ibkr_live_monitor_enabled else "warn",
-            f"IBKR_LIVE_MONITOR_ENABLED={str(settings.ibkr_live_monitor_enabled).lower()}",
-        ),
     ]
+    if snapshot_mode:
+        items.append(
+            OpsStatusItem(
+                "Safety",
+                "Live monitor evidence",
+                "pass",
+                "Using synced server heartbeat and account snapshots for live monitoring.",
+            )
+        )
+    else:
+        items.append(
+            OpsStatusItem(
+                "Safety",
+                "Live monitor gate",
+                "pass" if settings.ibkr_live_monitor_enabled else "warn",
+                f"IBKR_LIVE_MONITOR_ENABLED={str(settings.ibkr_live_monitor_enabled).lower()}",
+            )
+        )
+    return items
 
 
 def host_summary_values(repo_root: Path) -> dict[str, Any]:
@@ -632,7 +786,11 @@ def host_summary_values(repo_root: Path) -> dict[str, Any]:
     }
 
 
-def host_health_items(summary: dict[str, Any]) -> list[OpsStatusItem]:
+def host_health_items(
+    summary: dict[str, Any],
+    *,
+    snapshot_mode: bool = False,
+) -> list[OpsStatusItem]:
     disk_used_pct = float(summary.get("disk_used_pct", 0.0))
     items = [
         OpsStatusItem(
@@ -651,8 +809,12 @@ def host_health_items(summary: dict[str, Any]) -> list[OpsStatusItem]:
             OpsStatusItem(
                 "Host",
                 "Memory",
-                "warn",
-                "Memory metrics unavailable on this host.",
+                "pass" if snapshot_mode else "warn",
+                (
+                    "Memory metrics are not collected from the local snapshot viewer."
+                    if snapshot_mode
+                    else "Memory metrics unavailable on this host."
+                ),
             )
         )
     else:

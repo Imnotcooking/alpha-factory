@@ -10,6 +10,7 @@ from typing import Any
 
 import pandas as pd
 
+from oqp.portfolio.symbols import to_yahoo_ticker
 from oqp.portfolio.snapshots import (
     PortfolioPositionSnapshot,
     position_snapshots_to_legacy_frame,
@@ -28,11 +29,8 @@ FUTUBULL_REQUIRED_COLUMNS = (
 TRADING212_REQUIRED_COLUMNS = ("Action", "Time")
 
 TRADING212_TICKER_ALIASES = {
-    "VWCE": "VWCE.DE",
-    "VUAA": "VUAA.DE",
-    "EQQQ": "EQQQ.L",
-    "EQAC": "EQQB.DE",
-    "ASML": "ASML",
+    symbol: to_yahoo_ticker(symbol)
+    for symbol in ("VWCE", "VUAA", "EQQQ", "EQAC", "ASML")
 }
 
 

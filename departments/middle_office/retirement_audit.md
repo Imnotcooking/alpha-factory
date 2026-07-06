@@ -8,16 +8,17 @@ The root `Middle_Office/` folder has been archived to:
 
 `departments/archive/legacy_middle_office/`
 
-The active money dashboard now uses native pages and shared modules:
+The live portfolio command center now uses the unified Ops Dashboard and shared
+modules:
 
-- `apps/money_dashboard/app.py`
-- `apps/money_dashboard/pages/01_Stock_Valuation.py`
-- `apps/money_dashboard/pages/02_Risk_Management.py`
-- `apps/money_dashboard/pages/03_Options_Desk.py`
+- `apps/ops_dashboard/Homepage.py`
 - `src/oqp/portfolio/`
 - `src/oqp/investing/`
 - `src/oqp/risk/`
 - `src/oqp/options/`
+
+The retired Money and Paper dashboard archive was deleted after the active Ops
+Dashboard and paper-trading dashboard absorbed the useful code paths.
 
 ## Active References
 
@@ -51,10 +52,7 @@ server deployments safe if the old root folder still exists there.
 The following stale duplicate files were removed because they could appear as
 extra Streamlit pages or stale modules:
 
-- `apps/money_dashboard/app 2.py`
-- `apps/money_dashboard/pages/01_Stock_Valuation 2.py`
-- `apps/money_dashboard/pages/02_Risk_Management 2.py`
-- `apps/paper_trading_dashboard/app 2.py`
+- retired shadow files formerly under Money/Paper dashboards
 - `src/oqp/brokers/ibkr 2.py`
 - `src/oqp/risk/__init__ 2.py`
 - `tests/test_middle_office_etl 2.py`
@@ -65,7 +63,7 @@ extra Streamlit pages or stale modules:
 
 - The legacy options strategy router from `pages/3_Options_Desk.py` has been
   extracted into `src/oqp/options/analytics.py` as `score_option_strategies`.
-- The native money dashboard Options Desk now shows a Strategy Fit tab before
+- The archived Money dashboard Options Desk had a Strategy Fit tab before
   individual contract scans.
 - The router ranks strategy families only. It does not create orders, write
   trade proposals, or bypass the paper-trading safety layer.

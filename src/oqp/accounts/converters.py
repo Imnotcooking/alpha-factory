@@ -37,10 +37,11 @@ def account_snapshot_from_ibkr_readonly(
     env = _environment(environment)
     timestamp = as_of or snapshot.health.checked_at or account_timestamp()
     metrics = snapshot.metrics
-    cash = _optional_float(metrics.get("Available_Cash_USD"))
-    nav = _optional_float(metrics.get("Total_NAV_USD"))
-    buying_power = _optional_float(metrics.get("Buying_Power_USD"))
-    margin_buffer = _optional_float(metrics.get("Margin_Buffer_USD"))
+    currency = str(metrics.get("Account_Currency") or "USD").upper()
+    cash = _optional_float(metrics.get("Available_Cash", metrics.get("Available_Cash_USD")))
+    nav = _optional_float(metrics.get("Total_NAV", metrics.get("Total_NAV_USD")))
+    buying_power = _optional_float(metrics.get("Buying_Power", metrics.get("Buying_Power_USD")))
+    margin_buffer = _optional_float(metrics.get("Margin_Buffer", metrics.get("Margin_Buffer_USD")))
     positions = tuple(
         position_snapshot_from_legacy_row(row)
         for row in snapshot.position_rows
@@ -59,7 +60,7 @@ def account_snapshot_from_ibkr_readonly(
         broker=broker,
         profile=profile,
         environment=env,
-        currency="USD",
+        currency=currency,
         net_liquidation=nav,
         cash=cash,
         buying_power=buying_power,
@@ -69,7 +70,7 @@ def account_snapshot_from_ibkr_readonly(
         cash_balances=(
             (
                 CashSnapshot(
-                    currency="USD",
+                    currency=currency,
                     cash=cash,
                     buying_power=buying_power,
                 ),
@@ -80,6 +81,7 @@ def account_snapshot_from_ibkr_readonly(
         metadata={
             "source": "ibkr_readonly",
             "broker_label": broker_label,
+            "account_currency": currency,
             "snapshot_date": _date_text(snapshot_date) if snapshot_date else None,
         },
     )
@@ -108,10 +110,11 @@ def account_snapshot_from_live_positions_frame(
         for row in row_dicts
         if str(row.get("Ticker") or row.get("ticker") or "").strip()
     )
-    cash = _optional_float(metrics.get("Available_Cash_USD"))
-    nav = _optional_float(metrics.get("Total_NAV_USD"))
-    buying_power = _optional_float(metrics.get("Buying_Power_USD"))
-    margin_buffer = _optional_float(metrics.get("Margin_Buffer_USD"))
+    currency = str(metrics.get("Account_Currency") or "USD").upper()
+    cash = _optional_float(metrics.get("Available_Cash", metrics.get("Available_Cash_USD")))
+    nav = _optional_float(metrics.get("Total_NAV", metrics.get("Total_NAV_USD")))
+    buying_power = _optional_float(metrics.get("Buying_Power", metrics.get("Buying_Power_USD")))
+    margin_buffer = _optional_float(metrics.get("Margin_Buffer", metrics.get("Margin_Buffer_USD")))
 
     return AccountSnapshot(
         snapshot_id=_snapshot_id(
@@ -125,7 +128,7 @@ def account_snapshot_from_live_positions_frame(
         broker=broker,
         profile=profile,
         environment=env,
-        currency="USD",
+        currency=currency,
         net_liquidation=nav,
         cash=cash,
         buying_power=buying_power,
@@ -135,7 +138,7 @@ def account_snapshot_from_live_positions_frame(
         cash_balances=(
             (
                 CashSnapshot(
-                    currency="USD",
+                    currency=currency,
                     cash=cash,
                     buying_power=buying_power,
                 ),
@@ -146,6 +149,7 @@ def account_snapshot_from_live_positions_frame(
         metadata={
             "source": "live_positions_frame",
             "broker_label": broker_label,
+            "account_currency": currency,
             "snapshot_date": _date_text(snapshot_date) if snapshot_date else None,
         },
     )

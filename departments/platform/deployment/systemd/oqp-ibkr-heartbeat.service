@@ -11,6 +11,6 @@ WorkingDirectory=/home/ubuntu/oqp_new
 EnvironmentFile=-/home/ubuntu/.oqp_server_env
 EnvironmentFile=-/home/ubuntu/.oqp_portfolio_health_env
 Environment=PYTHONPATH=src:.
-ExecStart=/home/ubuntu/oqp_new/.venv/bin/python scripts/check_ibkr_adapter_heartbeat.py --profile all --status-path logs/ibkr_adapter_heartbeat_health.json
-StandardOutput=append:/home/ubuntu/oqp_new/logs/ibkr_adapter_heartbeat.log
-StandardError=append:/home/ubuntu/oqp_new/logs/ibkr_adapter_heartbeat.log
+ExecStart=/home/ubuntu/oqp_new/.venv/bin/python scripts/check_ibkr_adapter_heartbeat.py --profile all --status-path runtime/logs/ibkr_adapter_heartbeat_health.json
+StandardOutput=append:/home/ubuntu/oqp_new/runtime/logs/ibkr_adapter_heartbeat.log
+StandardError=append:/home/ubuntu/oqp_new/runtime/logs/ibkr_adapter_heartbeat.log

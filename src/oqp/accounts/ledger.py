@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS account_nav (
     profile TEXT NOT NULL,
     environment TEXT NOT NULL,
     as_of TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
     net_liquidation REAL NOT NULL,
     cash REAL,
     daily_pnl REAL,
@@ -134,6 +135,7 @@ class AccountSnapshotWriteResult:
     environment: str
     profile: str
     account_id: str | None
+    currency: str
     position_rows: int
     cash_rows: int
     net_liquidation: float
@@ -148,6 +150,7 @@ class AccountSnapshotWriteResult:
             "environment": self.environment,
             "profile": self.profile,
             "account_id": _redact_account(self.account_id),
+            "currency": self.currency,
             "position_rows": self.position_rows,
             "cash_rows": self.cash_rows,
             "net_liquidation": self.net_liquidation,
@@ -186,6 +189,7 @@ def ensure_account_ledger_schema(db_path: str | Path) -> Path:
         conn.execute(ACCOUNT_CASH_SCHEMA)
         conn.execute(ACCOUNT_NAV_SCHEMA)
         conn.execute(ACCOUNT_TRADE_EVENTS_SCHEMA)
+        _ensure_column(conn, "account_nav", "currency", "TEXT NOT NULL DEFAULT 'USD'")
         conn.commit()
     return path
 
@@ -353,19 +357,21 @@ def write_account_snapshot(
                 profile,
                 environment,
                 as_of,
+                currency,
                 net_liquidation,
                 cash,
                 daily_pnl,
                 position_count,
                 snapshot_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(date, account_key) DO UPDATE SET
                 account_id = excluded.account_id,
                 broker = excluded.broker,
                 profile = excluded.profile,
                 environment = excluded.environment,
                 as_of = excluded.as_of,
+                currency = excluded.currency,
                 net_liquidation = excluded.net_liquidation,
                 cash = excluded.cash,
                 daily_pnl = excluded.daily_pnl,
@@ -380,6 +386,7 @@ def write_account_snapshot(
                 snapshot.profile,
                 snapshot.environment.value,
                 as_of_text,
+                snapshot.currency,
                 nav_value,
                 cash_value,
                 daily_pnl,
@@ -397,6 +404,7 @@ def write_account_snapshot(
         environment=snapshot.environment.value,
         profile=snapshot.profile,
         account_id=snapshot.account_id,
+        currency=snapshot.currency,
         position_rows=snapshot.position_count,
         cash_rows=len(snapshot.cash_balances),
         net_liquidation=nav_value,
@@ -553,6 +561,7 @@ def load_latest_account_nav(
         "profile",
         "environment",
         "as_of",
+        "currency",
         "net_liquidation",
         "cash",
         "daily_pnl",
@@ -596,6 +605,7 @@ def load_account_nav_history(
         "profile",
         "environment",
         "as_of",
+        "currency",
         "net_liquidation",
         "cash",
         "daily_pnl",
@@ -750,6 +760,17 @@ def _filters(
         clauses.append(f"{prefix}profile = ?")
         params.append(profile)
     return ("WHERE " + " AND ".join(clauses) if clauses else "", tuple(params))
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    declaration: str,
+) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
 def _json(payload: dict[str, Any]) -> str:

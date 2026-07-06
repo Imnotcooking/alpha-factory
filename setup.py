@@ -1,0 +1,29 @@
+from __future__ import annotations
+
+from setuptools import Extension, find_packages, setup
+
+try:
+    import pybind11
+except ImportError as exc:  # pragma: no cover - setup-time guard
+    raise SystemExit("pybind11 is required to build oqp.native._quant_core") from exc
+
+
+ext_modules = [
+    Extension(
+        "oqp.native._quant_core",
+        ["src/oqp/native/cpp/quant_core.cpp"],
+        include_dirs=[pybind11.get_include()],
+        language="c++",
+        extra_compile_args=["-O3", "-std=c++17"],
+    )
+]
+
+
+setup(
+    name="oxford-quant-pipeline",
+    version="0.1.0",
+    description="Oxford Quant Pipeline shared backend package",
+    package_dir={"": "src"},
+    packages=find_packages("src"),
+    ext_modules=ext_modules,
+)

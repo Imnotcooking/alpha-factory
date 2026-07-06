@@ -77,7 +77,7 @@ def candidate_from_backtest_row(
     return StrategyCandidate(
         candidate_id=f"candidate-{run_id}",
         strategy_id=factor_id,
-        source="alpha_research_lab",
+        source="alpha_lab",
         promotion_status=status,
         native_market_vertical=native_market,
         tested_market_vertical=tested_market,
@@ -109,7 +109,7 @@ def candidate_from_backtest_row(
         safety_limits=CandidateSafetyLimits(paper_only=True, allow_live_trading=False),
         instrument_mapping_required=target_market != tested_market,
         notes=notes,
-        tags=("alpha_research_lab", native_market.lower()),
+        tags=("alpha_lab", native_market.lower()),
         metadata={
             "asset_class": _text(row.get("asset_class")),
             "split_mode": _text(row.get("split_mode")),
@@ -154,9 +154,9 @@ def write_candidate_from_research_db(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Export an alpha_research_lab backtest row as a strategy candidate."
+        description="Export an alpha-lab backtest row as a strategy candidate."
     )
-    parser.add_argument("--db", type=Path, default=Path("alpha_research_lab/research_memory.db"))
+    parser.add_argument("--db", type=Path, default=Path("runtime/db/research/alpha_lab/research_memory.db"))
     parser.add_argument("--run-id", type=str, default=None)
     parser.add_argument("--factor-id", type=str, default=None)
     parser.add_argument(

@@ -16,6 +16,7 @@ from oqp.brokers import (  # noqa: E402
     BrokerConnectionStatus,
     BrokerEnvironment,
     BrokerHealth,
+    IBKRBrokerAdapter,
     fetch_ibkr_readonly_portfolio_snapshot,
     ibkr_account_summary_to_middle_office_metrics,
     ibkr_position_to_middle_office_row,
@@ -90,6 +91,32 @@ class FakeIBKRAdapter:
         ]
 
 
+class FakeSummaryItem:
+    def __init__(self, tag: str, value: str, currency: str, account: str = "U123") -> None:
+        self.tag = tag
+        self.value = value
+        self.currency = currency
+        self.account = account
+
+
+class FakeConnectedIB:
+    def isConnected(self) -> bool:
+        return True
+
+    def managedAccounts(self) -> list[str]:
+        return ["U123"]
+
+    def accountSummary(self) -> list[FakeSummaryItem]:
+        return [
+            FakeSummaryItem("BaseCurrency", "EUR", ""),
+            FakeSummaryItem("NetLiquidation", "38025.43", "BASE"),
+            FakeSummaryItem("TotalCashValue", "0.0", "BASE"),
+            FakeSummaryItem("TotalCashValue", "563.52", "EUR"),
+            FakeSummaryItem("AvailableFunds", "1200.00", "BASE"),
+            FakeSummaryItem("GrossPositionValue", "41000.00", "BASE"),
+        ]
+
+
 class IBKRReadOnlyPortfolioTests(unittest.TestCase):
     def test_converts_position_to_middle_office_row(self) -> None:
         position = Position(
@@ -128,9 +155,23 @@ class IBKRReadOnlyPortfolioTests(unittest.TestCase):
             )
         )
 
+        self.assertEqual(metrics["Account_Currency"], "USD")
+        self.assertEqual(metrics["Total_NAV"], 100_000.0)
+        self.assertEqual(metrics["Available_Cash"], 5_000.0)
+        self.assertEqual(metrics["Margin_Buffer"], 12_500.0)
         self.assertEqual(metrics["Total_NAV_USD"], 100_000.0)
         self.assertEqual(metrics["Available_Cash_USD"], 5_000.0)
         self.assertEqual(metrics["Margin_Buffer_USD"], 12_500.0)
+
+    def test_account_summary_falls_back_to_account_currency_cash(self) -> None:
+        adapter = IBKRBrokerAdapter()
+        adapter._ib = FakeConnectedIB()
+
+        summary = adapter.get_account_summary()
+
+        self.assertEqual(summary.currency, "EUR")
+        self.assertEqual(summary.net_liquidation, 38_025.43)
+        self.assertEqual(summary.cash, 563.52)
 
     def test_fetches_readonly_snapshot_and_disconnects(self) -> None:
         adapter = FakeIBKRAdapter()

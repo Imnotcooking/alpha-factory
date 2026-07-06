@@ -13,7 +13,7 @@ It does not place orders.
 The paper ledger defaults to:
 
 ```text
-data/paper_trading/paper_trading.db
+runtime/db/paper_trading/paper_trading.db
 ```
 
 Tables:
@@ -127,8 +127,8 @@ Run after the real portfolio snapshot, or at another time that fits the paper
 trial cadence:
 
 ```cron
-45 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_snapshot_job.sh >> logs/paper_snapshot_job.log 2>&1
-*/15 13-22 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_strategy_runner_job.sh >> logs/paper_strategy_runner.log 2>&1
+45 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_snapshot_job.sh >> runtime/logs/paper_snapshot_job.log 2>&1
+*/15 13-22 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_strategy_runner_job.sh >> runtime/logs/paper_strategy_runner.log 2>&1
 ```
 
 ## Safety Boundary

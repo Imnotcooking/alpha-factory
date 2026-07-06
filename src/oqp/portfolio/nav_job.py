@@ -22,6 +22,7 @@ from oqp.portfolio.ledger import (
     load_latest_live_positions,
     write_historical_nav,
 )
+from oqp.portfolio.symbols import to_yahoo_ticker
 from oqp.portfolio.valuation import ManualPortfolioInputs, value_portfolio_snapshot
 
 
@@ -210,7 +211,7 @@ def market_tickers_for_positions(
             ticker = value.strip()
             if not ticker or len(ticker) >= 10:
                 continue
-            position_tickers.append(_to_yahoo_ticker(ticker))
+            position_tickers.append(to_yahoo_ticker(ticker))
 
     all_tickers = [
         *position_tickers,
@@ -287,10 +288,6 @@ def _read_json_object_with_fallback(
     if payload or fallback is None or path.exists():
         return payload
     return _read_json_object(fallback)
-
-
-def _to_yahoo_ticker(ticker: str) -> str:
-    return ticker.replace("BRK.B", "BRK-B").replace("BRK B", "BRK-B")
 
 
 def _manual_inputs_have_value(manual: ManualPortfolioInputs) -> bool:
