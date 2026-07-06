@@ -42,6 +42,9 @@ research_memory.db
 data/
 !src/oqp/data/
 !src/oqp/data/**
+src/oqp/data/**/__pycache__/
+src/oqp/data/**/*.py[cod]
+src/oqp/data/**/.DS_Store
 offline_quant_lab/data/
 runtime/
 logs/
@@ -78,6 +81,8 @@ alpha_research_lab/**/*promotion*
 !alpha_research_lab/evaluation/research_trial_ledger.py
 !alpha_research_lab/tests/test_research_trial_ledger.py
 !alpha_research_lab/tests/test_vertical_trial_storage.py
+backtest_1-main/
+manager_research_demo/
 departments/research/factors/**
 !departments/research/factors/
 !departments/research/factors/README.md

@@ -1,10 +1,11 @@
 # Repository Commit Readiness
 
-Last reviewed: 2026-06-25
+Last reviewed: 2026-07-06
 
 This note records the safe Git boundary for the OQP restructuring work. The
 goal is to keep the main architecture commit clean while avoiding accidental
-changes to alpha research work supervised elsewhere.
+publication of private alpha research edge, runtime state, or local scratch
+projects.
 
 ## Current Safety Status
 
@@ -24,7 +25,7 @@ changes to alpha research work supervised elsewhere.
 
 ## Commit Boundary
 
-The restructuring commit should include the active platform surface:
+Architecture commits should include the active platform surface:
 
 - `.gitignore`
 - `.dockerignore`
@@ -34,9 +35,16 @@ The restructuring commit should include the active platform surface:
 - `scripts/`
 - `tests/`
 - `departments/`
+- `notebooks/` when the notebooks are educational/public and contain no
+  private alpha edge or generated data outputs
 
-The restructuring commit should include the old root app deletions only when
-we are ready to fully retire them from the root:
+The former `alpha_research_lab/` folder is now decommissioned. Committing its
+deletion is allowed once active code imports from `apps/research_dashboard/`,
+`src/oqp/research/`, `src/oqp/intelligence/`, `scripts/research/`, and
+`departments/research/` instead.
+
+The restructuring commit should include old root app deletions only when we are
+ready to fully retire them from the root:
 
 - `Dockerfile`
 - `app.py`
@@ -53,14 +61,12 @@ Already retired during cleanup:
 - `departments/archive/legacy_alpha_factory/`
 - `departments/archive/legacy_dashboards/`
 
-## Do Not Mix Into This Commit
+## Do Not Mix Into Public Commits
 
-- `alpha_research_lab/` changes should remain owned by the separate alpha lab
-  workstream.
 - Alpha factor implementations and research edge artifacts are private by
-  default. Do not publish `alpha_research_lab/factors/fac_*.py`, factor
-  metadata, execution logs, cached research data, promotion/trial/candidate
-  artifacts, trained local model JSON/PKL files, or archive workbench scripts.
+  default. Do not publish live `fac_*.py` recipes, factor metadata, execution
+  logs, cached research data, promotion/trial/candidate artifacts, trained
+  local model JSON/PKL files, or archive workbench scripts.
 - Retired factors can be committed later, but only as a deliberate public
   allowlist. Treat them like educational examples: freeze the code, remove
   proprietary parameters or dataset-specific tricks, strip performance sweep
@@ -68,18 +74,19 @@ Already retired during cleanup:
   public examples or retired-factors path before staging.
 - The fuller policy lives in
   `departments/research/public_private_boundary.md`.
-- Existing staged churn in `Photos/`, `backtest_1/`, old notebooks, compiled
-  objects, and old model artifacts should be reviewed separately before any
-  final Git commit.
+- `backtest_1-main/` and `manager_research_demo/` are local scratch/reference
+  projects. They stay ignored unless they are deliberately migrated into
+  `src/oqp`, `apps/`, `departments/archive/`, or `notebooks/` after review.
+- Existing churn in `Photos/`, old notebooks, compiled objects, and old model
+  artifacts should be reviewed separately before any final Git commit.
 - Ignored local folders under archived legacy projects, especially old
   `venv/` and `.venv/`, do not need to be committed and can be deleted from
   disk when local cleanup is desired.
 
 ## Immediate Next Action
 
-Before committing, stage only the OQP restructuring paths and inspect the
-staged diff. If the alpha lab is still dirty, avoid `git add -A`; use explicit
-path staging instead.
+Before committing, stage only the intended OQP restructuring paths and inspect
+the staged diff. Avoid `git add -A`; use explicit path staging instead.
 
 Run the hygiene checker before committing:
 

@@ -229,20 +229,26 @@ Reusable logic lives in `src/oqp/market/volatility.py`,
 
 ## Local Usage
 
-Install dependencies in a virtual environment, then run dashboards with
-`PYTHONPATH=src:.`.
+Install dependencies in a virtual environment, copy the environment template,
+then run dashboards with `PYTHONPATH=src:.`.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 
-PYTHONPATH=src:. streamlit run apps/research_dashboard/Homepage.py
-PYTHONPATH=src:. streamlit run apps/ops_dashboard/Homepage.py
+PYTHONPATH=src:. streamlit run apps/research_dashboard/Homepage.py --server.port 8524
+PYTHONPATH=src:. streamlit run apps/ops_dashboard/Homepage.py --server.port 8529
 
 # Or launch the local bookmarked dashboard ports with the project venv:
 ./scripts/start_local_dashboards.sh
 ```
+
+The dashboards can boot without broker/vendor keys, but live data features need
+local credentials in `.env`. A fresh clone should expect empty dashboard states
+until runtime ledgers are generated or synced. The repo never commits `.env`,
+SQLite ledgers, runtime artifacts, broker exports, or generated market data.
 
 Run tests:
 
@@ -267,6 +273,8 @@ research surface needs another review. The current policy is:
 See:
 
 - `ARCHITECTURE.md`
+- `departments/research/README.md`
+- `departments/research/decommission_readiness.md`
 - `departments/research/public_private_boundary.md`
 - `departments/research/public_allowlist.md`
 - `departments/platform/deployment/repo_commit_readiness.md`

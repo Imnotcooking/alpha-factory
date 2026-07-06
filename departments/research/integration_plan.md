@@ -1,11 +1,11 @@
 # Alpha Lab Integration Plan
 
-Last reviewed: 2026-07-02
+Last reviewed: 2026-07-06
 
-This plan keeps `alpha_research_lab` productive while gradually promoting the
-public-safe, reusable research infrastructure into `src/oqp`. The goal is not a
-large folder move. The goal is to make every promoted layer importable,
-testable, reproducible, and clear about what remains private.
+This plan records the completed migration out of the former
+`alpha_research_lab/` tree. The goal was not a large folder move for its own
+sake. The goal was to make every promoted layer importable, testable,
+reproducible, and clear about what remains private.
 
 ## Integration Principles
 
@@ -14,8 +14,8 @@ testable, reproducible, and clear about what remains private.
 - Keep live factor recipes, raw data, execution logs, model checkpoints, and
   trial artifacts private by default.
 - Keep Streamlit pages as consumers of `src/oqp`, not owners of research logic.
-- Preserve compatibility shims in `alpha_research_lab` during migration so
-  active notebooks, scripts, and dashboards keep running.
+- Do not recreate the old root lab folder. New work lands in the promoted
+  package, app, department, or runtime homes below.
 - Each promoted module needs a focused test in `tests/` before old imports are
   removed.
 
@@ -34,8 +34,8 @@ testable, reproducible, and clear about what remains private.
 | `data_engine/instrument_master.py` | `src/oqp/data/instruments.py` | promoted | CN futures physical metadata, fee profile, tick size, and US equity placeholder registry. |
 | `config.py` market taxonomy | `src/oqp/contracts/market_vertical.py` | promoted | Market vertical enum, aliases, and public asset taxonomy metadata. |
 | `ui_v2/asset_taxonomy.py` | `src/oqp/data/asset_taxonomy.py` | promoted | Shared taxonomy UI/dataframe helpers and lane metadata. |
-| `evaluator.py` execution desk | `src/oqp/research/backtesting/` | partially promoted | Capital policy, trade policy, portfolio optimizer, and execution modes are promoted; legacy evaluator remains a private alpha workflow until its factor/backtest handoff is sanitized. |
-| `cpp_engine/` | `src/oqp/native/` | bridge temporarily | Source promoted; legacy extension remains fallback while scripts migrate. |
+| `evaluator.py` execution desk | `src/oqp/research/backtesting/` | promoted | Capital policy, trade policy, portfolio optimizer, execution modes, and reusable evaluator components are promoted. |
+| `cpp_engine/` | `src/oqp/native/` | promoted | Source/build config belongs under the native package; compiled products stay ignored. |
 | `benchmark_engine/` | `src/oqp/research/backtesting/benchmarks.py` | promoted | Dynamic equal-weight, absolute, risk-free, named-index, and sector-neutral benchmark generators for research backtests; alpha wrapper remains. |
 | `tick_pulse/` | `src/oqp/research/tick_pulse/` | promoted | Native bridge, C++ RTV bridge, feature building, backend selection, asset ranking, heuristic calibration, tick XGBoost, gatekeeper, and tick-ML cache helpers are promoted; saved parquet/cache/model artifacts remain private. |
 | `ml_engine/artifact_store.py` | `src/oqp/research/artifacts.py` | promoted | Model reproducibility layer with stable paths and hashes. |
@@ -50,7 +50,7 @@ testable, reproducible, and clear about what remains private.
 | `latent_engine/` | `src/oqp/research/latent/` | promoted | Generic VAE/VQ-VAE encoders, temporal panel windows, STORM-style comparison helpers, and codebook diagnostics are promoted; trained latent artifacts stay private. |
 | `factors/fac_*.py` | none by default | keep private | Publish only sanitized retired examples through allowlist. |
 | `data_cache/`, `execution_logs/`, `metadata/` | none | keep private | Runtime or research artifacts, not source integration targets. |
-| `ui_v2/` | `apps/research_dashboard/` | late | Migrate one page at a time after backend extraction. |
+| `ui_v2/` | `apps/research_dashboard/` | promoted | Research dashboard source now lives under the app surface directly. |
 | `archive/`, `backtest_1-main/`, `manager_research_demo/` | `departments/archive/` if needed | archive/reference | Do not mix into active OQP core. |
 
 ## Immediate Sequence
@@ -78,12 +78,11 @@ testable, reproducible, and clear about what remains private.
     research utilities.
 16. Completed: migrate tick-pulse C++ bridge, heuristic calibration, tick
     XGBoost, gatekeeper, and tick-ML cache utilities.
-17. Next: migrate or retire remaining UI pages one-by-one after each page's
-    backend logic has a promoted OQP owner.
-18. Manual heavy migration map: use
+17. Completed: migrate or retire remaining UI pages after each page's backend
+    logic received a promoted OQP owner.
+18. Reference only: use
     `departments/research/manual_heavy_migration_map.md` when moving
-    live factors, bulky data files, model artifacts, and remaining UI pieces by
-    hand.
+    live factors, bulky data files, and model artifacts by hand.
 
 ## Completion Criteria For This Slice
 
@@ -113,6 +112,6 @@ testable, reproducible, and clear about what remains private.
   diagnostics from `oqp.research.latent` or `oqp.research`.
 - New code can import tick-pulse calibration, tick XGBoost, gatekeeper, C++
   RTV bridge, and tick-ML cache utilities from `oqp.research.tick_pulse`.
-- Old alpha-lab imports still resolve.
+- Old alpha-lab imports are no longer part of the active architecture.
 - No live factor implementation, cached market data, execution logs, or model
   artifact is required by the promoted tests.

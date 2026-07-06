@@ -1,6 +1,6 @@
 # Alpha Factory Architecture
 
-Last reviewed: 2026-06-29
+Last reviewed: 2026-07-06
 
 This document is the current restructuring checkpoint. The repo is converging
 toward two dashboard surfaces backed by shared, testable modules under
@@ -137,13 +137,13 @@ The Ops Dashboard is the daily operating cockpit:
 
 ```mermaid
 flowchart TD
-    Ops["Unified Ops Dashboard"] --> Overview["Overview: action queue, operating pipeline, accounts, system summary"]
-    Ops --> Live["Live Portfolio page: overview, holdings, option spreads, performance, exposure, reconciliation"]
-    Ops --> Paper["Paper Trading: paper account, tickets, reviews, paper ledger"]
-    Ops --> IntelligencePage["Intelligence: engine registry outputs"]
-    Ops --> Risk["Risk: control room, snapshot, exposure, concentration, drawdowns"]
-    Ops --> Execution["Execution: queue, tickets, reviews, live boundary"]
-    Ops --> System["System: summary, gateways, jobs, host, raw checks"]
+    Ops["Unified Ops Dashboard"] --> Home["Homepage: action queue, operating pipeline, accounts, system summary"]
+    Ops --> Live["Live Portfolio: overview, holdings, exposure, options hub, reconciliation"]
+    Ops --> Paper["Paper Trading: paper account, reviews, tickets, paper ledger"]
+    Ops --> Workbench["Discretionary Workbench: watchlist, opportunity hub, API status"]
+    Ops --> Risk["Risk Control Room: policy, allocation lab, risk snapshots"]
+    Ops --> Execution["Execution Strategy Monitor: strategy roster, proposals, reviews, tickets"]
+    Ops --> Journal["Journal Reports: notes, daily summaries, report archive"]
 ```
 
 The rule is UI consolidation without storage or execution consolidation: live,
@@ -158,14 +158,16 @@ apps/ops_dashboard/pages/01_Live_Portfolio.py
 
 It reads the unified account ledger and renders:
 
-- Overview: NAV curve, daily P&L, cash vs invested, system reads
-- Holdings: current holdings enriched with `HV 5D`, `HV 20D`, option metadata,
-  Greeks when available, and spread group
-- Option Spreads: recognized option packages, leg audit, underlying exposure
-- Performance: drawdown, cumulative return, monthly returns
-- Exposure: asset mix, gross exposure vs NAV, historical symbol/asset exposure
-- Reconciliation: account ledger freshness, price-history cache status, Ops
-  checks, latest live events
+- Overview: NAV curve, drawdown/benchmark/leverage-style performance view,
+  weekly performance, asset sleeve mix, daily P&L, and system reads.
+- Holdings: IBKR plus manual external holdings, native/reporting currency,
+  market value, cost basis, unrealized P&L, and available `HV 5D` / `HV 20D`.
+- Exposure: sector, sleeve, currency, concentration, option-adjusted
+  underlying exposure, factor-proxy diagnostics, and PCA crowding.
+- Options Hub: option book audit, recognized packages, merged payoff and Greeks
+  lab, and volatility/model quality checks.
+- Reconciliation: account ledger freshness, risk lab structure, risk-history
+  cache status, Ops checks, and latest live events.
 
 Shared helpers:
 
@@ -176,11 +178,10 @@ Shared helpers:
 
 ## Intelligence Engine Layer
 
-The intelligence layer follows the same modular ideology as
-`alpha_research_lab`: each category owns its own folder, base contracts, and
-future model implementations, while one coordinator runs the selected engines.
-This keeps model logic out of Streamlit pages and makes dashboard decisions
-testable.
+The intelligence layer follows the same modular ideology as the decommissioned
+alpha lab: each category owns its own folder, base contracts, and future model
+implementations, while one coordinator runs the selected engines. This keeps
+model logic out of Streamlit pages and makes dashboard decisions testable.
 
 ```mermaid
 flowchart TD
