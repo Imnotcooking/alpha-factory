@@ -147,7 +147,7 @@ def _render_calculation_audit(
     distribution = _build_event_distribution(candidates, t)
     if not distribution.empty:
         st.markdown(f"##### {t['event_distribution']}")
-        st.dataframe(distribution, width="stretch", hide_index=True)
+        st.dataframe(distribution, use_container_width=True, hide_index=True)
 
 
 def _render_raw_row_viewer(raw_df: pd.DataFrame, selected_symbol: str, t: dict):
@@ -195,7 +195,7 @@ def _render_raw_row_viewer(raw_df: pd.DataFrame, selected_symbol: str, t: dict):
 
     original_columns = [col for col in raw_df.columns if col in symbol_rows.columns]
     one_row = row[original_columns].to_frame().T
-    st.dataframe(one_row, width="stretch", hide_index=True)
+    st.dataframe(one_row, use_container_width=True, hide_index=True)
 
     meanings = t.get("row_meanings", {})
     detail_rows = [
@@ -207,7 +207,7 @@ def _render_raw_row_viewer(raw_df: pd.DataFrame, selected_symbol: str, t: dict):
         }
         for col in original_columns
     ]
-    st.dataframe(pd.DataFrame(detail_rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
 
 
 def _render_research_readout(
@@ -227,7 +227,7 @@ def _render_research_readout(
         if isinstance(sweep_raw, tuple) and sweep_raw and isinstance(sweep_raw[0], pd.DataFrame):
             sweep_raw = sweep_raw[0]
         display = format_research_sweep_display(sweep_raw, t)
-    st.dataframe(display, width="stretch", hide_index=True)
+    st.dataframe(display, use_container_width=True, hide_index=True)
 
 
 def _render_contract_health(summary: pd.DataFrame, tpl: str, t: dict):
@@ -257,7 +257,7 @@ def _render_contract_health(summary: pd.DataFrame, tpl: str, t: dict):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_event_map(features: pd.DataFrame, candidates: pd.DataFrame, hypothesis: str, tpl: str, t: dict):
@@ -464,7 +464,7 @@ def _render_event_map(features: pd.DataFrame, candidates: pd.DataFrame, hypothes
         fig.update_yaxes(title_text=t["chart_rtv_fast"], row=2, col=1)
         fig.update_yaxes(title_text=t["chart_rtv_abs"], row=3, col=1)
         fig.update_xaxes(rangebreaks=_active_trading_rangebreaks())
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
         return
 
     fig.add_trace(
@@ -518,7 +518,7 @@ def _render_event_map(features: pd.DataFrame, candidates: pd.DataFrame, hypothes
     fig.update_yaxes(title_text=t["chart_flow_book"], row=2, col=1)
     fig.update_yaxes(title_text=t["chart_volume_x"], row=3, col=1)
     fig.update_xaxes(rangebreaks=_active_trading_rangebreaks())
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _event_option_label(row: pd.Series, position: int, t: dict) -> str:
@@ -682,7 +682,7 @@ def _render_payoff_asymmetry_chart(
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_event_horizon_bars(
@@ -762,7 +762,7 @@ def _render_event_horizon_bars(
             plot_bgcolor="rgba(0,0,0,0)",
             showlegend=False,
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_outcome_overview(candidates: pd.DataFrame, tpl: str, t: dict):
@@ -803,7 +803,7 @@ def _render_outcome_overview(candidates: pd.DataFrame, tpl: str, t: dict):
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     with cols[1]:
         fig = px.histogram(
@@ -830,7 +830,7 @@ def _render_outcome_overview(candidates: pd.DataFrame, tpl: str, t: dict):
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def _build_event_ledger(candidates: pd.DataFrame, t: dict) -> pd.DataFrame:
@@ -901,11 +901,11 @@ def _render_event_ledger(candidates: pd.DataFrame, t: dict):
         ledger.to_csv(index=False).encode("utf-8-sig"),
         file_name="tick_pulse_event_ledger.csv",
         mime="text/csv",
-        width="stretch",
+        use_container_width=True,
     )
     st.dataframe(
         _style_event_ledger(ledger, t),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         height=560,
     )

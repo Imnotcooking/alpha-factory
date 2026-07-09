@@ -217,6 +217,9 @@ class ChineseFuturesRegistry(BaseRegistry):
         Chinese index labels (e.g. ``黄金(au)[指数]`` -> ``au``).
         """
         value = str(ticker or "").strip()
+        kq_match = re.search(r"@[^.]+\.([A-Za-z]+)\d*$", value)
+        if kq_match:
+            return kq_match.group(1)
         paren_match = re.search(r"[\(（]([A-Za-z]+)[\)）]", value)
         if paren_match:
             return paren_match.group(1)

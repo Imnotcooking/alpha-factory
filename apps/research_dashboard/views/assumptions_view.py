@@ -70,7 +70,7 @@ class AssumptionsView:
                     st.markdown(f"#### {copy.get('assumptions_available', 'Available manifests')}")
                     st.dataframe(
                         index.loc[:, ["run_id", "factor_id", "asset_class", "execution_mode", "modified_at"]],
-                        width="stretch",
+                        use_container_width=True,
                         hide_index=True,
                         height=260,
                     )
@@ -95,6 +95,12 @@ class AssumptionsView:
         self._render_section(copy.get("assumptions_data", "Data"), manifest.get("data", {}), copy)
         self._render_section(copy.get("assumptions_signal", "Signal & execution"), manifest.get("signal_and_execution_mode", {}), copy)
         self._render_section(copy.get("assumptions_engine", "Execution engine"), manifest.get("execution_engine", {}), copy)
+        if manifest.get("costs_and_slippage"):
+            self._render_costs_and_slippage(
+                copy.get("assumptions_costs", "Costs & slippage"),
+                manifest.get("costs_and_slippage", {}),
+                copy,
+            )
         self._render_section(copy.get("assumptions_liquidity", "Liquidity policy"), manifest.get("liquidity_policy", {}), copy)
 
         if manifest.get("option_contract_selection"):
@@ -238,6 +244,25 @@ class AssumptionsView:
                 "total_slippage_cost": record.get("total_slippage_cost"),
                 "total_execution_cost": record.get("total_execution_cost"),
             },
+            "costs_and_slippage": {
+                "summary": (
+                    "Legacy reconstruction: cost assumptions are inferred from ledger "
+                    "fields. For current futures runs, the engine records the explicit "
+                    "0.5 tick per-side slippage overlay and instrument fee source."
+                ),
+                "tca_model": "see legacy engine row",
+                "fixed_slippage_ticks_per_side": "",
+                "round_trip_slippage_ticks_assumed": "",
+                "exchange_fee_source": "legacy DB realized cost fields",
+                "avg_daily_cost_bps": record.get("avg_daily_cost_bps"),
+                "total_exchange_fees": record.get("total_exchange_fees"),
+                "total_slippage_cost": record.get("total_slippage_cost"),
+                "total_execution_cost": record.get("total_execution_cost"),
+                "avg_round_trip_fee_bps": record.get("avg_round_trip_fee_bps"),
+                "avg_round_trip_fee_ticks": record.get("avg_round_trip_fee_ticks"),
+                "fee_constrained_rate": record.get("fee_constrained_rate"),
+                "lot_constrained_rate": record.get("lot_constrained_rate"),
+            },
             "realized_summary": {
                 "returns_file_path": record.get("returns_file_path"),
                 "trading_days": "",
@@ -348,7 +373,22 @@ class AssumptionsView:
         if frame.empty:
             st.info(copy.get("assumptions_no_values", "No recorded values."))
         else:
-            st.dataframe(frame, width="stretch", hide_index=True)
+            st.dataframe(frame, use_container_width=True, hide_index=True)
+
+    def _render_costs_and_slippage(self, title: str, payload: Any, copy: dict[str, Any]) -> None:
+        st.markdown(f"#### {title}")
+        if not isinstance(payload, dict) or not payload:
+            st.info(copy.get("assumptions_no_values", "No recorded values."))
+            return
+        summary = payload.get("summary") or payload.get("paragraph") or payload.get("costs_paragraph")
+        if summary:
+            st.info(str(summary))
+        table_payload = {key: value for key, value in payload.items() if key not in {"summary", "paragraph", "costs_paragraph"}}
+        frame = self._key_value_frame(table_payload)
+        if frame.empty:
+            st.info(copy.get("assumptions_no_values", "No recorded values."))
+        else:
+            st.dataframe(frame, use_container_width=True, hide_index=True)
 
     def _key_value_frame(self, payload: Any) -> pd.DataFrame:
         if not isinstance(payload, dict) or not payload:

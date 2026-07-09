@@ -342,6 +342,7 @@ private:
     bool enforce_price_limits;
     bool enforce_t1_settlement;
     double limit_board_pct = 0.099; 
+    double fixed_slippage_ticks_per_side;
 
     static int sign_of(double value) {
         if (value > 0.0) return 1;
@@ -378,6 +379,18 @@ private:
     static double round_contract_lots(double contracts) {
         if (!std::isfinite(contracts)) return 0.0;
         return std::round(contracts);
+    }
+
+    static double fixed_tick_slippage_cost(
+        double contract_change_abs,
+        double multiplier,
+        double tick_size,
+        double ticks_per_side
+    ) {
+        if (contract_change_abs <= 0.0 || multiplier <= 0.0 || tick_size <= 0.0 || ticks_per_side <= 0.0) {
+            return 0.0;
+        }
+        return contract_change_abs * multiplier * tick_size * ticks_per_side;
     }
 
     static double fee_component_contracts(
@@ -528,10 +541,12 @@ private:
 public:
     ExecutionEngine(std::shared_ptr<ITCAModel> tca, std::shared_ptr<IMarginModel> margin, 
                     double initial_capital, double deadband, 
-                    bool price_limits = false, bool t1_settlement = false)
+                    bool price_limits = false, bool t1_settlement = false,
+                    double fixed_slippage_ticks = 0.0)
         : tca_model(tca), margin_model(margin), equity(initial_capital), 
           deadband(deadband), is_liquidated(false), 
-          enforce_price_limits(price_limits), enforce_t1_settlement(t1_settlement) {}
+          enforce_price_limits(price_limits), enforce_t1_settlement(t1_settlement),
+          fixed_slippage_ticks_per_side(fixed_slippage_ticks) {}
 
     // UPDATED SIGNATURE: Added volatilities and hursts arrays
     py::array_t<double> run_simulation(
@@ -839,7 +854,17 @@ public:
                 double trade_size_notional = integer_lots
                     ? actual_contract_change * price
                     : actual_weight_change * equity;
-                double tca_cost_notional = tca_model->calculate_slippage(trade_size_notional, volume, price, vol, hurst);
+                double traded_contracts = integer_lots
+                    ? actual_contract_change
+                    : (price > 0.0 ? trade_size_notional / price : 0.0);
+                double model_slippage_cost = tca_model->calculate_slippage(trade_size_notional, volume, price, vol, hurst);
+                double tick_slippage_cost = fixed_tick_slippage_cost(
+                    traded_contracts,
+                    multiplier,
+                    tick_size,
+                    fixed_slippage_ticks_per_side
+                );
+                double tca_cost_notional = model_slippage_cost + tick_slippage_cost;
                 double fee_cost = integer_lots
                     ? calculate_exchange_fee_contracts(
                         previous_contracts,
@@ -866,9 +891,7 @@ public:
                     );
 
                 notional_ptr[i] = trade_size_notional;
-                contracts_ptr[i] = integer_lots
-                    ? actual_contract_change
-                    : (price > 0.0 ? trade_size_notional / price : 0.0);
+                contracts_ptr[i] = traded_contracts;
                 slip_ptr[i] = tca_cost_notional;
                 fee_ptr[i] = fee_cost;
                 total_cost_ptr[i] = tca_cost_notional + fee_cost;
@@ -1157,7 +1180,17 @@ public:
                     double trade_size_notional = integer_lots
                         ? actual_contract_change * price
                         : actual_weight_change * equity_before_group;
-                    double tca_cost_notional = tca_model->calculate_slippage(trade_size_notional, volume, price, vol, hurst);
+                    double traded_contracts = integer_lots
+                        ? actual_contract_change
+                        : (price > 0.0 ? trade_size_notional / price : 0.0);
+                    double model_slippage_cost = tca_model->calculate_slippage(trade_size_notional, volume, price, vol, hurst);
+                    double tick_slippage_cost = fixed_tick_slippage_cost(
+                        traded_contracts,
+                        multiplier,
+                        tick_size,
+                        fixed_slippage_ticks_per_side
+                    );
+                    double tca_cost_notional = model_slippage_cost + tick_slippage_cost;
                     double fee_cost = integer_lots
                         ? calculate_exchange_fee_contracts(
                             previous_contracts,
@@ -1184,9 +1217,7 @@ public:
                         );
 
                     notional_ptr[j] = trade_size_notional;
-                    contracts_ptr[j] = integer_lots
-                        ? actual_contract_change
-                        : (price > 0.0 ? trade_size_notional / price : 0.0);
+                    contracts_ptr[j] = traded_contracts;
                     slip_ptr[j] = tca_cost_notional;
                     fee_ptr[j] = fee_cost;
                     total_cost_ptr[j] = tca_cost_notional + fee_cost;
@@ -2335,9 +2366,10 @@ PYBIND11_MODULE(_quant_core, m) {
         .def(py::init<double>(), py::arg("maintenance_req") = 0.25);
 
     py::class_<ExecutionEngine>(m, "ExecutionEngine")
-        .def(py::init<std::shared_ptr<ITCAModel>, std::shared_ptr<IMarginModel>, double, double, bool, bool>(),
+        .def(py::init<std::shared_ptr<ITCAModel>, std::shared_ptr<IMarginModel>, double, double, bool, bool, double>(),
              py::arg("tca_model"), py::arg("margin_model"), py::arg("initial_capital") = 1000000.0,
-             py::arg("deadband") = 0.015, py::arg("enforce_price_limits") = false, py::arg("enforce_t1") = false)
+             py::arg("deadband") = 0.015, py::arg("enforce_price_limits") = false, py::arg("enforce_t1") = false,
+             py::arg("fixed_slippage_ticks_per_side") = 0.0)
         // UPDATED BINDING: Accepts volatilities and hursts
         .def("run_simulation", &ExecutionEngine::run_simulation,
              py::arg("asset_ids"), py::arg("prices"), py::arg("target_weights"), 

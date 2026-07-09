@@ -225,7 +225,7 @@ class TearSheetView:
 
         fig.update_layout(template="plotly_dark", height=700, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         fig.update_xaxes(hoverformat="%Y-%m-%d")
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
         st.markdown("---")
 
         # 2. Monthly Heatmap & Volatility Matrix
@@ -244,7 +244,7 @@ class TearSheetView:
             st.markdown(f"#### {t.get('heatmap_title', '🗓️ Monthly Return Matrix')}")
             fig_hm = go.Figure(data=go.Heatmap(z=monthly_pivot.values * 100, x=['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], y=monthly_pivot.index, colorscale='RdYlGn', zmid=0, text=np.round(monthly_pivot.values * 100, 1), texttemplate="%{text}%", hoverinfo="z"))
             fig_hm.update_layout(template="plotly_dark", height=350, yaxis=dict(autorange="reversed", type='category'), margin=dict(l=10, r=10, t=30, b=10))
-            st.plotly_chart(fig_hm, width="stretch")
+            st.plotly_chart(fig_hm, use_container_width=True)
             with st.expander(t.get('heatmap_help_title', '💡 Insight')): st.markdown(t.get('heatmap_help', ''))
             
         with c_vol:
@@ -253,5 +253,5 @@ class TearSheetView:
             fig_v.add_trace(go.Scatter(x=df_vol['date'], y=df_vol['rolling_vol'] * 100, mode='lines', line=dict(color='#FF9800', width=2), fill='tozeroy', fillcolor='rgba(255, 152, 0, 0.2)'))
             fig_v.add_hline(y=ann_vol*100, line_dash="dash", line_color="gray")
             fig_v.update_layout(template="plotly_dark", height=350, yaxis_title="Ann. Volatility (%)", margin=dict(l=10, r=10, t=30, b=10))
-            st.plotly_chart(fig_v, width="stretch")
+            st.plotly_chart(fig_v, use_container_width=True)
             with st.expander(t.get('vol_help_title', '💡 Insight')): st.markdown(t.get('vol_help', ''))

@@ -98,8 +98,29 @@ class ResearchDashboardDNAViewTests(unittest.TestCase):
         self.assertNotIn("L0", set(frame["ticker"]))
         self.assertEqual(set(frame["side"]), {"Winner", "Loser"})
         self.assertEqual(frame.loc[frame["ticker"].eq("W5"), "company_name"].iloc[0], "最强赢家")
+        self.assertEqual(frame.loc[frame["ticker"].eq("W5"), "asset_name_zh"].iloc[0], "最强赢家")
         self.assertEqual(frame.loc[frame["ticker"].eq("L5"), "company_name"].iloc[0], "最大亏损股")
+        self.assertEqual(frame.loc[frame["ticker"].eq("L5"), "asset_name_zh"].iloc[0], "最大亏损股")
         self.assertEqual(int(frame.loc[frame["ticker"].eq("W5"), "trade_count"].iloc[0]), 2)
+
+    def test_asset_winner_loser_frame_decodes_cn_futures_names_for_hover(self) -> None:
+        trades = pd.DataFrame(
+            {
+                "ticker": ["KQ.i@CZCE.FG", "KQ.i@DCE.jm"],
+                "trade_pnl": [1.20, -0.80],
+            }
+        )
+
+        original_lookup = DNAView._cn_equity_name_lookup
+        DNAView._cn_equity_name_lookup = staticmethod(lambda _base_dir: {})
+        try:
+            frame = DNAView(data_manager=None)._asset_winner_loser_frame(trades)
+        finally:
+            DNAView._cn_equity_name_lookup = original_lookup
+
+        names = dict(zip(frame["ticker"], frame["asset_name_zh"], strict=False))
+        self.assertEqual(names["KQ.i@CZCE.FG"], "玻璃 (FG)")
+        self.assertEqual(names["KQ.i@DCE.jm"], "焦煤 (jm)")
 
     def test_trade_pnl_distribution_tracks_flat_trades_and_tails_separately(self) -> None:
         trades = pd.DataFrame(

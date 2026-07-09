@@ -27,6 +27,7 @@ class NativeBacktestBackend:
         "SquareRootTCA",
         "StochasticTCAWrapper",
     )
+    futures_fixed_slippage_ticks_per_side = 0.5
 
     def __init__(
         self,
@@ -117,6 +118,11 @@ class NativeBacktestBackend:
         else:
             tca = qc.StochasticTCAWrapper(1e-4, 0.1, 2.0, 60)
             margin = qc.FuturesMargin(maintenance_req=0.05)
+        fixed_slippage_ticks = (
+            self.futures_fixed_slippage_ticks_per_side
+            if taxonomy.get("instrument_family") == "future"
+            else 0.0
+        )
         return qc.ExecutionEngine(
             tca_model=tca,
             margin_model=margin,
@@ -124,6 +130,7 @@ class NativeBacktestBackend:
             deadband=float(request.deadband),
             enforce_price_limits=bool(taxonomy.get("price_limit", False)),
             enforce_t1=bool(taxonomy.get("t_settlement", 0) == 1),
+            fixed_slippage_ticks_per_side=float(fixed_slippage_ticks),
         )
 
     def _coerce_result(

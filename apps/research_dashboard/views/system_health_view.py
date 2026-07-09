@@ -471,7 +471,7 @@ class SystemHealthView:
             st.caption(copy["subtitle"])
         with action_col:
             st.write("")
-            if st.button(copy["refresh"], width="stretch"):
+            if st.button(copy["refresh"], use_container_width=True):
                 st.session_state["_data_health_refresh_requested"] = True
 
     @staticmethod
@@ -528,10 +528,10 @@ class SystemHealthView:
                 title=copy["checks"],
             )
             fig.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=20), xaxis_title="", yaxis_title="")
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
             st.dataframe(
                 self._style_status(checks[["area", "check", "status", "detail", "path", "modified"]]),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 height=360,
             )
@@ -620,7 +620,7 @@ class SystemHealthView:
         )
         st.dataframe(
             self._style_status(display),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             height=220,
             column_config={
@@ -668,7 +668,7 @@ class SystemHealthView:
                 display[col] = display[col].map(self._whole_number_label)
         st.dataframe(
             self._style_status(display),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             height=360,
             column_config={
@@ -695,7 +695,7 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), width="stretch", hide_index=True)
+        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True)
 
     def _render_tick_table(self, df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['tick_files']}")
@@ -715,7 +715,7 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=420)
+        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=420)
 
     def _render_market_coverage(self, market_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['market_coverage']}")
@@ -740,7 +740,7 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=260)
+        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=260)
 
     def _render_database(
         self,
@@ -750,9 +750,9 @@ class SystemHealthView:
         copy: dict,
     ) -> None:
         st.markdown(f"### {copy['db_schema']}")
-        st.dataframe(self._style_status(db_df), width="stretch", hide_index=True)
+        st.dataframe(self._style_status(db_df), use_container_width=True, hide_index=True)
         st.markdown(f"### {copy['returns_linkage']}")
-        st.dataframe(self._style_status(returns_df), width="stretch", hide_index=True)
+        st.dataframe(self._style_status(returns_df), use_container_width=True, hide_index=True)
         st.markdown(f"#### {copy['return_issues_title']}")
         if return_issues_df.empty:
             st.success(copy["return_issues_empty"])
@@ -770,11 +770,11 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=220)
+        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=220)
 
     def _render_latent(self, latent_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['latent_title']}")
-        st.dataframe(self._style_status(latent_df), width="stretch", hide_index=True)
+        st.dataframe(self._style_status(latent_df), use_container_width=True, hide_index=True)
 
     def _render_models(self, model_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['model_title']}")
@@ -841,11 +841,11 @@ class SystemHealthView:
                 "created_at": copy["created_at"],
             }
         )
-        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=460)
+        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=460)
 
     def _render_infra(self, infra_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['infra_title']}")
-        st.dataframe(self._style_status(infra_df), width="stretch", hide_index=True)
+        st.dataframe(self._style_status(infra_df), use_container_width=True, hide_index=True)
 
     @staticmethod
     @st.cache_data(show_spinner=False)

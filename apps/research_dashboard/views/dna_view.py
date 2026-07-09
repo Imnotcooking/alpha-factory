@@ -24,6 +24,7 @@ DNA_COPY = {
         "edge_caption": "Color shows average trade PnL by entry period and holding bucket. Hover reveals trade count, win rate, and total PnL.",
         "edge_color": "Avg PnL %",
         "hover_company": "Company",
+        "hover_chinese_name": "Chinese Name",
         "hover_trades": "Trades",
         "hover_trade_pnl": "Trade PnL",
         "hover_side": "Side",
@@ -79,6 +80,7 @@ If no trade ledger exists, the page falls back to portfolio-level returns so the
         "edge_caption": "颜色表示不同入场周期与持仓区间下的平均单笔交易 PnL。悬停可查看交易数、胜率和累计 PnL。",
         "edge_color": "平均 PnL %",
         "hover_company": "公司",
+        "hover_chinese_name": "中文名",
         "hover_trades": "交易数",
         "hover_trade_pnl": "交易 PnL",
         "hover_side": "方向",
@@ -122,6 +124,88 @@ If no trade ledger exists, the page falls back to portfolio-level returns so the
 如果没有交易记录，本页会自动退回到组合级收益分析。
 """,
     },
+}
+
+
+CN_FUTURES_PRODUCT_NAMES_ZH = {
+    "AP": "苹果",
+    "CF": "棉花",
+    "CJ": "红枣",
+    "CY": "棉纱",
+    "FG": "玻璃",
+    "MA": "甲醇",
+    "OI": "菜籽油",
+    "PF": "短纤",
+    "PK": "花生",
+    "PL": "瓶片",
+    "PR": "瓶片",
+    "PX": "对二甲苯",
+    "RM": "菜籽粕",
+    "SA": "纯碱",
+    "SF": "硅铁",
+    "SH": "烧碱",
+    "SM": "锰硅",
+    "SR": "白糖",
+    "TA": "PTA",
+    "UR": "尿素",
+    "a": "豆一",
+    "b": "豆二",
+    "c": "玉米",
+    "cs": "玉米淀粉",
+    "eb": "苯乙烯",
+    "eg": "乙二醇",
+    "i": "铁矿石",
+    "j": "焦炭",
+    "jd": "鸡蛋",
+    "jm": "焦煤",
+    "l": "聚乙烯",
+    "lg": "原木",
+    "lh": "生猪",
+    "m": "豆粕",
+    "p": "棕榈油",
+    "pg": "液化石油气",
+    "pp": "聚丙烯",
+    "rr": "粳米",
+    "v": "PVC",
+    "y": "豆油",
+    "bz": "纯苯",
+    "ad": "铸造铝合金",
+    "ag": "白银",
+    "al": "铝",
+    "ao": "氧化铝",
+    "au": "黄金",
+    "bc": "国际铜",
+    "br": "丁二烯橡胶",
+    "bu": "沥青",
+    "cu": "铜",
+    "fu": "燃料油",
+    "hc": "热卷",
+    "lu": "低硫燃料油",
+    "ni": "镍",
+    "nr": "20号胶",
+    "op": "纸浆",
+    "pb": "铅",
+    "rb": "螺纹钢",
+    "ru": "橡胶",
+    "sc": "原油",
+    "sn": "锡",
+    "sp": "纸浆",
+    "ss": "不锈钢",
+    "zn": "锌",
+    "ec": "集运欧线",
+    "si": "工业硅",
+    "ps": "多晶硅",
+    "lc": "碳酸锂",
+    "pd": "钯",
+    "pt": "铂",
+    "IC": "中证500股指",
+    "IF": "沪深300股指",
+    "IH": "上证50股指",
+    "IM": "中证1000股指",
+    "T": "10年期国债",
+    "TF": "5年期国债",
+    "TL": "30年期国债",
+    "TS": "2年期国债",
 }
 
 
@@ -290,7 +374,13 @@ class DNAView:
                     orientation="h",
                     color="side",
                     color_discrete_map={"Winner": "#2ca02c", "Loser": "#d62728"},
-                    custom_data=["ticker", "company_name", "trade_count", "trade_pnl_pct"],
+                    custom_data=[
+                        "ticker",
+                        "company_name",
+                        "asset_name_zh",
+                        "trade_count",
+                        "trade_pnl_pct",
+                    ],
                     template=template,
                 )
                 fig.add_vline(x=0, line_dash="dash", line_color="gray")
@@ -298,8 +388,9 @@ class DNAView:
                     hovertemplate=(
                         "<b>%{customdata[0]}</b><br>"
                         f"{copy['hover_company']}: %{{customdata[1]}}<br>"
-                        f"{copy['hover_trades']}: %{{customdata[2]:,}}<br>"
-                        f"{copy['hover_trade_pnl']}: %{{customdata[3]:+.2f}}%"
+                        f"{copy['hover_chinese_name']}: %{{customdata[2]}}<br>"
+                        f"{copy['hover_trades']}: %{{customdata[3]:,}}<br>"
+                        f"{copy['hover_trade_pnl']}: %{{customdata[4]:+.2f}}%"
                         "<extra></extra>"
                     )
                 )
@@ -310,7 +401,7 @@ class DNAView:
                     yaxis_title="",
                     legend_title_text="",
                 )
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
         with top_right:
             st.markdown(f"#### {copy['pnl_dist']}")
@@ -348,7 +439,7 @@ class DNAView:
                     yaxis_title=copy["dist_y"],
                     showlegend=False,
                 )
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
         with bottom_left:
             st.markdown(f"#### {copy['holding_pain']}")
@@ -425,7 +516,7 @@ class DNAView:
                         legend_title_text=copy["hover_side"],
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     )
-                    st.plotly_chart(fig, width="stretch")
+                    st.plotly_chart(fig, use_container_width=True)
 
         with bottom_right:
             st.markdown(f"#### {copy['edge_stability']}")
@@ -504,7 +595,7 @@ class DNAView:
                 )
                 fig.update_xaxes(tickangle=-45)
                 fig.update_yaxes(autorange="reversed")
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
     def _asset_winner_loser_frame(self, trades: pd.DataFrame) -> pd.DataFrame:
         asset = (
@@ -516,6 +607,7 @@ class DNAView:
         asset["trade_pnl_pct"] = asset["trade_pnl"] * 100.0
 
         name_map = self._trade_name_lookup(trades)
+        cn_name_map = self._trade_chinese_name_lookup(trades)
         name_map.update(
             {
                 key: value
@@ -523,7 +615,20 @@ class DNAView:
                 if key not in name_map
             }
         )
+        cn_name_map.update(
+            {
+                key: value
+                for key, value in self._cn_equity_name_lookup(str(BASE_DIR)).items()
+                if key not in cn_name_map
+            }
+        )
         asset["company_name"] = asset["ticker"].map(name_map).fillna("N/A")
+        asset["asset_name_zh"] = (
+            asset["ticker"]
+            .map(cn_name_map)
+            .fillna(asset["ticker"].map(self._cn_futures_display_name))
+            .fillna("N/A")
+        )
         asset["display_label"] = asset["ticker"]
 
         winners = asset[asset["trade_pnl_pct"] > 0].nlargest(5, "trade_pnl_pct")
@@ -814,6 +919,77 @@ class DNAView:
         return out
 
     @staticmethod
+    def _trade_chinese_name_lookup(trades: pd.DataFrame) -> dict[str, str]:
+        if "ticker" not in trades.columns:
+            return {}
+        primary_cols = [
+            "company_name_zh",
+            "name_zh",
+            "stock_name_zh",
+            "asset_name_zh",
+            "instrument_name_zh",
+            "chinese_name",
+        ]
+        fallback_cols = ["asset_name", "instrument_name", "name"]
+        available = [col for col in primary_cols if col in trades.columns]
+        fallback_available = [col for col in fallback_cols if col in trades.columns]
+        if not available and not fallback_available:
+            return {}
+
+        out: dict[str, str] = {}
+        keyed = trades.copy()
+        keyed["ticker"] = keyed["ticker"].astype(str)
+
+        for col in available:
+            values = keyed[["ticker", col]].dropna()
+            if values.empty:
+                continue
+            values[col] = values[col].astype(str).str.strip()
+            values = values[values[col].ne("")]
+            for ticker, name in values.drop_duplicates("ticker").itertuples(index=False):
+                out.setdefault(str(ticker), str(name))
+
+        for col in fallback_available:
+            values = keyed[["ticker", col]].dropna()
+            if values.empty:
+                continue
+            values[col] = values[col].astype(str).str.strip()
+            values = values[values[col].map(DNAView._contains_cjk)]
+            for ticker, name in values.drop_duplicates("ticker").itertuples(index=False):
+                out.setdefault(str(ticker), str(name))
+        return out
+
+    @staticmethod
+    def _contains_cjk(value: object) -> bool:
+        text = str(value or "")
+        return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+    @staticmethod
+    def _cn_futures_base_symbol(ticker: object) -> str:
+        text = str(ticker or "").strip()
+        if not text:
+            return ""
+        if "@" in text:
+            text = text.rsplit("@", 1)[-1]
+        if "." in text:
+            text = text.rsplit(".", 1)[-1]
+        return text.strip()
+
+    @staticmethod
+    def _cn_futures_display_name(ticker: object) -> str | None:
+        base = DNAView._cn_futures_base_symbol(ticker)
+        if not base:
+            return None
+        name = (
+            CN_FUTURES_PRODUCT_NAMES_ZH.get(base)
+            or CN_FUTURES_PRODUCT_NAMES_ZH.get(base.upper())
+            or CN_FUTURES_PRODUCT_NAMES_ZH.get(base.lower())
+        )
+        if not name:
+            return None
+        return f"{name} ({base})"
+
+    @staticmethod
     @st.cache_data(show_spinner=False)
     def _cn_equity_name_lookup(base_dir: str) -> dict[str, str]:
         root = Path(base_dir) / "runtime" / "data" / "equity_cn" / "daily"
@@ -887,14 +1063,14 @@ class DNAView:
                 yaxis=dict(title="Equity"),
                 yaxis2=dict(title="Drawdown", overlaying="y", side="right", tickformat=".0%"),
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         with right:
             st.markdown(f"#### {copy['daily_return_dist']}")
             fig = px.histogram(df, x="net_return_pct", nbins=60, template=template)
             fig.add_vline(x=0, line_dash="dash", line_color="gray")
             fig.update_layout(height=420, margin=dict(l=10, r=10, t=20, b=10), xaxis_title="Daily Net Return (%)")
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         st.markdown(f"#### {copy['turnover_return']}")
         fig = px.scatter(
@@ -907,7 +1083,7 @@ class DNAView:
         )
         fig.add_hline(y=0, line_dash="dash", line_color="gray")
         fig.update_layout(height=360, margin=dict(l=10, r=10, t=20, b=10), yaxis_title="Daily Net Return (%)")
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     @staticmethod
     def _pct(value) -> str:

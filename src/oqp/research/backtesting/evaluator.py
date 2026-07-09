@@ -60,6 +60,14 @@ _DEFAULT_ALPHA_ARTIFACT_ROOT = os.path.join(
     "research",
 )
 
+FUTURES_FIXED_SLIPPAGE_TICKS_PER_SIDE = 0.5
+FUTURES_SLIPPAGE_ASSUMPTION_TEXT = (
+    "For futures, each contract trade pays a deterministic 0.5 tick slippage "
+    "per side on buys, sells, and closes; a round trip therefore assumes 1.0 "
+    "tick of slippage before exchange fees. Exchange fees are loaded from the "
+    "asset-specific InstrumentMaster cost dictionary."
+)
+
 
 VERTICAL_TRIAL_COLUMNS = {
     "market_vertical": "TEXT",
@@ -142,6 +150,12 @@ class ExecutionDesk:
     @staticmethod
     def _fee_type_code(fee_type: str) -> int:
         return 1 if str(fee_type).strip().lower() == "fixed" else 0
+
+    @staticmethod
+    def _fixed_slippage_ticks_per_side(market_policy: dict) -> float:
+        if str(market_policy.get("instrument_family") or "").lower() == "future":
+            return FUTURES_FIXED_SLIPPAGE_TICKS_PER_SIDE
+        return 0.0
 
     def _attach_instrument_profiles(self, df: pd.DataFrame) -> pd.DataFrame:
         master = InstrumentMaster(self.asset_class)
@@ -279,7 +293,16 @@ class ExecutionDesk:
         backtest_route = str(config_data.get("backtest_route") or "vectorized")
         vectorizable = bool(config_data.get("vectorizable", True))
         engine_label = "C++ Execution Engine" if vectorizable else "Python event-driven execution path"
+        fixed_slippage_ticks_per_side = self._fixed_slippage_ticks_per_side(config_data)
         df.attrs["execution_engine_label"] = engine_label
+        df.attrs["fixed_slippage_ticks_per_side"] = fixed_slippage_ticks_per_side
+        df.attrs["round_trip_slippage_ticks"] = fixed_slippage_ticks_per_side * 2.0
+        df.attrs["slippage_assumption"] = (
+            FUTURES_SLIPPAGE_ASSUMPTION_TEXT
+            if fixed_slippage_ticks_per_side > 0.0
+            else "No fixed tick slippage overlay; market-specific TCA model only."
+        )
+        df.attrs["exchange_fee_source"] = f"InstrumentMaster({self.asset_class}) fee profile"
         print(f"   ⚡ [PRIME BROKER] Routing {len(df):,} rows to {engine_label}...")
         
         # Extract Volatility (Using Garman-Klass or Fallback to 1%)
@@ -385,7 +408,10 @@ class ExecutionDesk:
             tca = qc.StochasticTCAWrapper(1e-4, 0.1, 2.0, 60)
             margin_req = float(df['margin_rate'].median()) if 'margin_rate' in df.columns else 0.05
             margin = qc.FuturesMargin(maintenance_req=margin_req)
-            df.attrs["tca_model"] = "StochasticTCAWrapper(lambda=1e-4, eta=0.1, gamma=2.0, T=60)"
+            df.attrs["tca_model"] = (
+                "StochasticTCAWrapper(lambda=1e-4, eta=0.1, gamma=2.0, T=60) "
+                f"+ FixedTickSlippage({fixed_slippage_ticks_per_side:g} ticks/side)"
+            )
             df.attrs["margin_model"] = f"FuturesMargin(maintenance_req={margin_req:g})"
 
         has_limits = config_data.get("price_limit", False)
@@ -401,7 +427,8 @@ class ExecutionDesk:
                 initial_capital=self.initial_capital,
                 deadband=self.min_trade_weight_delta,
                 enforce_price_limits=has_limits,
-                enforce_t1=is_t1
+                enforce_t1=is_t1,
+                fixed_slippage_ticks_per_side=fixed_slippage_ticks_per_side,
             )
 
         if vectorizable and explicit_returns_available and hasattr(engine, "run_simulation_with_costs_and_returns"):
@@ -1848,6 +1875,35 @@ class AlphaEvaluator:
         else:
             benchmark_summary.update({"observations": 0, "start_date": None, "end_date": None})
 
+        total_exchange_fees = float(portfolio.get("daily_exchange_fee", pd.Series([0.0])).sum())
+        total_slippage_cost = float(portfolio.get("daily_slippage_cost", pd.Series([0.0])).sum())
+        total_execution_cost = float(portfolio.get("daily_total_cost", pd.Series([0.0])).sum())
+        avg_daily_cost_bps = float(portfolio.get("daily_cost_bps", pd.Series([0.0])).mean())
+        costs_and_slippage = {
+            "summary": asset_df.attrs.get("slippage_assumption"),
+            "tca_model": asset_df.attrs.get("tca_model"),
+            "fixed_slippage_ticks_per_side": asset_df.attrs.get("fixed_slippage_ticks_per_side"),
+            "round_trip_slippage_ticks_assumed": asset_df.attrs.get("round_trip_slippage_ticks"),
+            "exchange_fee_source": asset_df.attrs.get("exchange_fee_source"),
+            "exchange_fee_definition": (
+                "fee_type=fixed charges cash per contract; fee_type=ratio charges "
+                "notional times rate. Open, close-history, and close-today fees are "
+                "handled separately when the instrument profile supplies them."
+            ),
+            "cost_units": (
+                "Cash fields are in the account currency; daily_cost_bps is "
+                "daily_total_cost divided by prior portfolio equity times 10,000."
+            ),
+            "avg_daily_cost_bps": avg_daily_cost_bps,
+            "total_exchange_fees": total_exchange_fees,
+            "total_slippage_cost": total_slippage_cost,
+            "total_execution_cost": total_execution_cost,
+            "avg_round_trip_fee_bps": float(portfolio.get("avg_round_trip_fee_bps", pd.Series([0.0])).mean()),
+            "avg_round_trip_fee_ticks": float(portfolio.get("avg_round_trip_fee_ticks", pd.Series([0.0])).mean()),
+            "fee_constrained_rate": float(portfolio.get("fee_constrained_rate", pd.Series([0.0])).mean()),
+            "lot_constrained_rate": float(portfolio.get("lot_constrained_rate", pd.Series([0.0])).mean()),
+        }
+
         manifest = {
             "run_id": run_id,
             "factor_id": factor_id,
@@ -1895,12 +1951,13 @@ class AlphaEvaluator:
                 "min_daily_traded_value": market_policy.get("min_daily_traded_value", 0.0),
                 "direct_weight_row_grid_preserved": df.attrs.get("execution_mode") == "direct",
             },
+            "costs_and_slippage": costs_and_slippage,
             "benchmark": benchmark_summary,
             "realized_summary": {
                 "returns_file_path": returns_file_path,
                 "trading_days": int(len(portfolio)),
                 "avg_daily_turnover": float(portfolio.get("daily_turnover", pd.Series([0.0])).mean()),
-                "avg_daily_cost_bps": float(portfolio.get("daily_cost_bps", pd.Series([0.0])).mean()),
+                "avg_daily_cost_bps": avg_daily_cost_bps,
                 "max_portfolio_leverage": float(portfolio.get("portfolio_leverage", pd.Series([0.0])).max()),
             },
         }
@@ -2085,6 +2142,23 @@ class AlphaEvaluator:
                 "allow_settlement_proxy": metadata.get("option_allow_settlement_proxy"),
                 "commission_per_contract": metadata.get("option_commission_per_contract"),
                 "direct_weight_row_grid_preserved": False,
+            },
+            "costs_and_slippage": {
+                "summary": (
+                    "Options use the event-driven option fill model: quoted bid/ask or "
+                    "settlement proxy determines fill and mark prices, while listed "
+                    "commission assumptions are recorded per contract."
+                ),
+                "tca_model": "bid_ask_fill_or_settlement_proxy",
+                "fixed_slippage_ticks_per_side": None,
+                "round_trip_slippage_ticks_assumed": None,
+                "exchange_fee_source": "option metadata commission_per_contract",
+                "exchange_fee_definition": "Per-contract option commission plus bid/ask fill proxy when available.",
+                "cost_units": "Cash fields are in the account currency; daily cost bps use prior portfolio equity.",
+                "avg_daily_cost_bps": float(avg_daily_cost_bps),
+                "total_exchange_fees": float(total_exchange_fees),
+                "total_slippage_cost": float(total_slippage_cost),
+                "total_execution_cost": float(total_execution_cost),
             },
             "diagnostics": {
                 "chain_rows": diagnostics.get("chain_rows"),

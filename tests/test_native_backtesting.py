@@ -37,6 +37,49 @@ class NativeLoaderTests(unittest.TestCase):
             if old_module is not None:
                 sys.modules["quant_core"] = old_module
 
+    def test_fixed_tick_slippage_charges_half_tick_per_contract_side(self) -> None:
+        required = (
+            "ExecutionEngine",
+            "SquareRootTCA",
+            "FuturesMargin",
+        )
+        status = quant_core_status(required, allow_legacy=False)
+        if not status.ok:
+            self.skipTest(f"packaged quant core unavailable: {status.error or status.missing_features}")
+        qc = load_quant_core(required, allow_legacy=False)
+        engine = qc.ExecutionEngine(
+            tca_model=qc.SquareRootTCA(bps=0.0, gamma=0.0),
+            margin_model=qc.FuturesMargin(maintenance_req=0.05),
+            initial_capital=100_000.0,
+            deadband=0.0,
+            enforce_price_limits=False,
+            enforce_t1=False,
+            fixed_slippage_ticks_per_side=0.5,
+        )
+
+        result = engine.run_simulation_with_costs_and_returns(
+            asset_ids=np.asarray([0, 0], dtype=np.int32),
+            prices=np.asarray([1_000.0, 1_000.0], dtype=np.float64),
+            target_weights=np.asarray([0.01, 0.0], dtype=np.float64),
+            period_returns=np.asarray([0.0, 0.0], dtype=np.float64),
+            volumes=np.asarray([1_000.0, 1_000.0], dtype=np.float64),
+            volatilities=np.asarray([0.01, 0.01], dtype=np.float64),
+            hursts=np.asarray([0.5, 0.5], dtype=np.float64),
+            time_ids=np.asarray([0, 1], dtype=np.int32),
+            date_ids=np.asarray([0, 1], dtype=np.int32),
+            multipliers=np.asarray([10.0, 10.0], dtype=np.float64),
+            fee_types=np.asarray([1, 1], dtype=np.int32),
+            fee_open=np.asarray([0.0, 0.0], dtype=np.float64),
+            fee_close_history=np.asarray([0.0, 0.0], dtype=np.float64),
+            fee_close_today=np.asarray([0.0, 0.0], dtype=np.float64),
+            tick_sizes=np.asarray([2.0, 2.0], dtype=np.float64),
+            integer_lots=True,
+        )
+
+        np.testing.assert_allclose(np.asarray(result["trade_contracts"]), [1.0, 1.0])
+        np.testing.assert_allclose(np.asarray(result["slippage_cost"]), [10.0, 10.0])
+        np.testing.assert_allclose(np.asarray(result["total_cost"]), [10.0, 10.0])
+
 
 class PythonBacktestBackendTests(unittest.TestCase):
     def test_python_backtest_backend_returns_equity_curve(self) -> None:

@@ -145,7 +145,7 @@ def render_asset_download_ranker(
         xaxis_title=t["asset_sort_options"]["recent_ann_vol"],
         yaxis_title="",
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     display_cols = [
         "download_priority_rank",
@@ -179,7 +179,7 @@ def render_asset_download_ranker(
                 "coverage": "{:.0%}",
             }
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     if os.environ.get("OQP_MANAGER_DEMO") == "1":
@@ -190,7 +190,7 @@ def render_asset_download_ranker(
             data=filtered.to_csv(index=False).encode("utf-8-sig"),
             file_name="tick_pulse_asset_download_rank.csv",
             mime="text/csv",
-            width="stretch",
+            use_container_width=True,
         )
 
 

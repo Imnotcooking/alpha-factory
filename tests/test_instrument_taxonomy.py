@@ -49,12 +49,21 @@ class InstrumentTaxonomyTests(unittest.TestCase):
     def test_instrument_master_handles_cn_futures_and_us_equity_without_symbol_damage(self) -> None:
         futures_master = InstrumentMaster("FUTURES_CN")
         gold = futures_master.get_profile("黄金(au)[指数]")
+        kq_gold = futures_master.get_profile("KQ.i@SHFE.au")
+        kq_csi500 = futures_master.get_profile("KQ.i@CFFEX.IC")
         rebar = futures_master.get_profile("rb2601")
 
         self.assertEqual(gold.ticker, "au")
         self.assertEqual(gold.exchange, "SHFE")
         self.assertEqual(gold.multiplier, 1000)
         self.assertEqual(gold.tick_size, 0.02)
+        self.assertEqual(kq_gold.ticker, "au")
+        self.assertEqual(kq_gold.exchange, "SHFE")
+        self.assertEqual(kq_gold.multiplier, 1000)
+        self.assertEqual(kq_gold.fee_open, 20.0)
+        self.assertEqual(kq_csi500.ticker, "IC")
+        self.assertEqual(kq_csi500.exchange, "CFFEX")
+        self.assertEqual(kq_csi500.multiplier, 200)
         self.assertEqual(rebar.ticker, "rb")
         self.assertEqual(rebar.exchange, "SHFE")
 

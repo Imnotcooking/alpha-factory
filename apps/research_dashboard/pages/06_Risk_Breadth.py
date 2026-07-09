@@ -290,7 +290,7 @@ fig_spectrum.update_layout(
     yaxis_tickformat=".0%",
     yaxis_title="Variance",
 )
-st.plotly_chart(fig_spectrum, width="stretch")
+st.plotly_chart(fig_spectrum, use_container_width=True)
 
 if not component_labels.empty:
     st.markdown(f"#### {t['component_interpreter']}")
@@ -314,7 +314,7 @@ if not component_labels.empty:
     )
     st.dataframe(
         display_labels.style.format({"top3_sector_share": "{:.1%}"}),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 
@@ -364,7 +364,7 @@ with map_cols[1]:
             template=template,
         )
     fig_sector.update_layout(height=520, margin=dict(l=10, r=10, t=20, b=10))
-    st.plotly_chart(fig_sector, width="stretch")
+    st.plotly_chart(fig_sector, use_container_width=True)
 
 st.markdown(f"#### {t['top_loadings']}: {selected_component}")
 top_loadings = asset_loadings[asset_loadings["component"] == selected_component].copy()
@@ -382,7 +382,7 @@ st.dataframe(
             "explained_variance_ratio",
         ]
     ].style.format({"explained_variance_ratio": "{:.1%}"}),
-    width="stretch",
+    use_container_width=True,
     hide_index=True,
 )
 
@@ -410,7 +410,7 @@ else:
         margin=dict(l=10, r=10, t=20, b=10),
         yaxis_title="Effective dimensions",
     )
-    st.plotly_chart(fig_roll, width="stretch")
+    st.plotly_chart(fig_roll, use_container_width=True)
 
     fig_haircut = px.area(
         rolling,
@@ -424,4 +424,4 @@ else:
         yaxis_tickformat=".0%",
         yaxis_title=t["haircut"],
     )
-    st.plotly_chart(fig_haircut, width="stretch")
+    st.plotly_chart(fig_haircut, use_container_width=True)
