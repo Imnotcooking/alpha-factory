@@ -7,6 +7,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from oqp.data.futures_cn import normalize_futures_cn_daily_frame
+from oqp.data.runtime_paths import (
+    default_futures_cn_index_daily_file,
+    discover_futures_cn_daily_files,
+)
 from oqp.research.state_space.base_filter import StateSpaceSchema
 from oqp.research.state_space.dual_kalman_regression import DualKalmanRegressionConfig
 from oqp.research.state_space.feature_adapter import build_dual_kalman_features
@@ -37,31 +42,23 @@ class RelationshipLabConfig:
 
 def list_daily_price_files(base_dir: str | Path) -> list[Path]:
     repo_root = Path(base_dir)
-    runtime_daily = repo_root / "runtime" / "data" / "alpha_lab" / "market_data" / "daily"
-    patterns = ["*1d*index*.parquet", "*1d*main*.parquet", "*daily*.parquet"]
+    patterns = ("*1d*index*.parquet", "*1d*main*.parquet", "*daily*.parquet", "*day*.parquet")
     seen: dict[Path, None] = {}
-    for pattern in patterns:
-        for path in sorted(runtime_daily.glob(pattern) if runtime_daily.exists() else []):
-            if path.is_file():
-                seen[path.resolve()] = None
-    root_matrix = repo_root / "runtime" / "data" / "alpha_lab" / "feature_store" / "ML_Feature_Matrix.parquet"
+    for path in discover_futures_cn_daily_files(patterns=patterns):
+        seen[path.resolve()] = None
+    root_matrix = repo_root / "runtime" / "data" / "feature_store" / "ML_Feature_Matrix.parquet"
     if root_matrix.exists():
         seen[root_matrix.resolve()] = None
-    return list(seen.keys())
+    files = list(seen.keys())
+    default_source = default_futures_cn_index_daily_file()
+    if default_source.exists():
+        default_resolved = default_source.resolve()
+        files = [default_resolved, *[path for path in files if path != default_resolved]]
+    return files
 
 
 def load_daily_price_frame(path: str | Path) -> pd.DataFrame:
-    df = pd.read_parquet(path)
-    required = {"date", "ticker", "close"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Daily price file missing required columns: {sorted(missing)}")
-    cols = [col for col in ["date", "ticker", "open", "high", "low", "close", "volume", "oi", "open_interest"] if col in df.columns]
-    out = df[cols].copy()
-    out["date"] = pd.to_datetime(out["date"])
-    out["ticker"] = out["ticker"].astype(str)
-    out["close"] = pd.to_numeric(out["close"], errors="coerce")
-    return out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    return normalize_futures_cn_daily_frame(pd.read_parquet(path))
 
 
 def available_tickers(df: pd.DataFrame, min_observations: int = 252) -> pd.DataFrame:

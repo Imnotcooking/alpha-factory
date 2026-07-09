@@ -37,9 +37,10 @@ rewritten to use synthetic fixtures or public examples.
 Keep these out of the public commit:
 
 - `departments/research/factors/`
-- `runtime/data/alpha_lab/`
-- `runtime/db/research/alpha_lab/`
-- `runtime/artifacts/research/alpha_lab/`
+- `runtime/data/`
+- `runtime/data/futures_cn/`
+- `runtime/db/research/`
+- `runtime/artifacts/research/`
 - candidate, trial, promotion, sweep, and backtest result artifacts
 
 ## Retired Factor Promotion

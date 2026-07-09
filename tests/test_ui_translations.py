@@ -124,10 +124,10 @@ class UiTranslationTests(unittest.TestCase):
 
         self.assertEqual(module.TEXT["ZH"]["title"], TEXT["ZH"]["title"])
         self.assertTrue(
-            module.DB_PATH.endswith("runtime/db/research/alpha_lab/research_memory.db")
+            module.DB_PATH.endswith("runtime/db/research/research_memory.db")
         )
         self.assertTrue(
-            module.LOGS_DIR.endswith("runtime/artifacts/research/alpha_lab")
+            module.LOGS_DIR.endswith("runtime/artifacts/research")
         )
 
 

@@ -3,6 +3,14 @@
 Copy this file into a strategy-family folder and rename the copy to
 ``fac_###_descriptive_name.py``. Keep this template generic and public-safe; it
 should document the expected shape without encoding a live research edge.
+
+Backtest runner expectations:
+- expose ``FACTOR_ID``, ``FACTOR_METADATA``, ``FACTOR_CONTRACT``, and ``compute``.
+- ``compute(data)`` must return at least ``date``, ``ticker``, and the
+  ``FACTOR_CONTRACT["alpha_signal_col"]`` column.
+- ``supported_markets`` is a positive allowlist. Anything not listed is blocked.
+- allocator modules such as Kelly and HRP are optional execution-stage config,
+  not part of the factor alpha calculation.
 """
 
 from __future__ import annotations
@@ -10,18 +18,39 @@ from __future__ import annotations
 import pandas as pd
 
 from oqp.research.factor_presets import (
-    CROSS_SECTIONAL_DAILY_NEXT_OPEN as FACTOR_CONTRACT,
+    CROSS_SECTIONAL_DAILY_NEXT_OPEN as _BASE_FACTOR_CONTRACT,
 )
 
 
 FACTOR_ID = "fac_template_private"
+FACTOR_NAME = "Private Factor Template"
+CATEGORY = "Template"
+COMPLEXITY = 1
+
+FACTOR_CONTRACT = {
+    **_BASE_FACTOR_CONTRACT,
+    # Change this to the markets where this factor has been designed and tested.
+    # Examples: ["FUTURES_CN"], ["EQUITY_US"], ["OPTIONS_US"], ["OPTIONS_CN"].
+    "supported_markets": ["FUTURES_CN"],
+}
+
+# Optional pipeline policy consumed by the backtest runner. Keep the alpha logic
+# inside compute(); keep sizing/allocation choices declarative here or pass them
+# from the CLI with --sizing_modules, --kelly_fraction, and leverage caps.
+EXECUTION_MODE_CONFIG = {
+    # Default risk_desk behavior is ["kelly", "hrp"]. Use [] or "none" to test
+    # the raw factor signal with only portfolio caps.
+    "sizing_modules": ["kelly", "hrp"],
+    "kelly_fraction": 0.5,
+    "max_gross_leverage": 1.0,
+    "max_weight_per_asset": 0.05,
+}
 
 FACTOR_METADATA = {
     "status": "private_template",
-    "native_market": "REPLACE_ME",
-    "suitable_markets": ["REPLACE_ME"],
+    "native_market": "FUTURES_CN",
+    "supported_markets": FACTOR_CONTRACT["supported_markets"],
     "experimental_markets": [],
-    "unsupported_markets": [],
     "required_fields": ["date", "ticker", "close"],
     "optional_fields": [],
     "uses_open_interest": False,
@@ -33,6 +62,16 @@ FACTOR_METADATA = {
     "execution_mode": "risk_desk",
     "publication_note": "Private recipe template. Replace before use.",
 }
+
+
+def compute(data: pd.DataFrame, *, lookback: int = 20) -> pd.DataFrame:
+    """Backtest-runner entrypoint.
+
+    Keep this function deterministic: no file IO, no API calls, no mutation of
+    global state. Load data in the runner; compute only the factor signal here.
+    """
+
+    return compute_factor(data, lookback=lookback)
 
 
 def compute_factor(data: pd.DataFrame, *, lookback: int = 20) -> pd.DataFrame:
@@ -62,6 +101,7 @@ def compute_factor(data: pd.DataFrame, *, lookback: int = 20) -> pd.DataFrame:
     result.attrs["factor_id"] = FACTOR_ID
     result.attrs["factor_metadata"] = FACTOR_METADATA
     result.attrs["factor_contract"] = FACTOR_CONTRACT
+    result.attrs["execution_mode_config"] = EXECUTION_MODE_CONFIG
     return result.reset_index(drop=True)
 
 

@@ -939,6 +939,7 @@ class FactorPromotionView:
         export_clicked = st.button(
             copy["export_update_button"] if selected_run_exported else copy["export_button"],
             key=f"candidate-export-button-{evidence.evidence_key}",
+            width="stretch",
         )
 
         if selected_status == "paper_candidate" and row.get("stage") != "Paper-Trading Candidate":

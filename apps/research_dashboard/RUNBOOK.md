@@ -30,9 +30,10 @@ The dashboard uses these architecture roots:
 
 | Purpose | Path |
 |---|---|
-| Research runtime data | `runtime/data/alpha_lab/` |
-| Research artifacts and result files | `runtime/artifacts/research/alpha_lab/` |
-| Research database | `runtime/db/research/alpha_lab/research_memory.db` |
+| Research runtime data | `runtime/data/` |
+| CN futures daily market data | `runtime/data/futures_cn/daily/` |
+| Research artifacts and result files | `runtime/artifacts/research/` |
+| Research database | `runtime/db/research/research_memory.db` |
 | Shared Python package logic | `src/oqp/` |
 | Streamlit app shell | `apps/research_dashboard/` |
 
@@ -57,11 +58,11 @@ mixing UI workflow state into the statistical trial ledger.
 | Page | Role | Primary Dependencies | Smoke Coverage |
 |---|---|---|---|
 | `01_Data_Health` | Check data/artifact readiness before research | runtime data, artifact roots, DB schema, native extension status | system health snapshot smoke |
-| `02_Pulse_Scan` | Discover directionless tick pulses before forming hypotheses | `runtime/data/alpha_lab/market_data/tick/`, `src/oqp/research/tick_pulse/` | preflight wrapper/import tests |
+| `02_Pulse_Scan` | Discover directionless tick pulses before forming hypotheses | `runtime/data/futures_cn/tick/`, `src/oqp/research/tick_pulse/` | preflight wrapper/import tests |
 | `03_Tick_Event_Study` | Test tick-pulse directional hypotheses and saved seeds | tick data, research cache, `src/oqp/research/tick_pulse/` | preflight wrapper/import tests |
-| `04_Arbitrage_Lab` | Scan pair/spread dislocations and relationship stability | daily market parquet, `src/oqp/research/state_space/` | real-data relationship scan |
+| `04_Arbitrage_Lab` | Scan pair/spread dislocations and relationship stability | `runtime/data/futures_cn/daily/`, `src/oqp/research/state_space/` | real-data relationship scan |
 | `05_Regime_Analysis` | Interpret GMM regimes and latent/VQ cross-checks | feature matrix, GMM probabilities, latent artifacts | real-data regime/latent smoke |
-| `06_Risk_Breadth` | Estimate independent risk-factor breadth | daily market parquet, `src/oqp/risk/factor_breadth.py` | real-data breadth smoke |
+| `06_Risk_Breadth` | Estimate independent risk-factor breadth | `runtime/data/futures_cn/daily/`, `src/oqp/risk/factor_breadth.py` | real-data breadth smoke |
 | `07_Feature_Review` | Rank feature quality, redundancy, MDA, latent diagnostics | feature matrices, `src/oqp/research/ml/` | real-data governance smoke |
 | `08_Factor_Review` | Review factor evidence and candidate status | `research_memory.db`, factor files, diagnostics artifacts | `test_research_dashboard_real_data_smoke.py` board load |
 | `09_Strategy_Comparison` | Compare completed backtest runs | research DB, returns/trades artifacts | real-data run ledger load |
@@ -120,7 +121,7 @@ tail -n 160 runtime/logs/research_dashboard.log
 
 3. If a page import fails, check whether the failing dependency belongs in `src/oqp/` and whether the app-local wrapper re-exports the legacy UI helper names.
 
-4. If a page data load fails, verify the page's runtime root first. Avoid copying private data into app folders; place reusable data under `runtime/data/alpha_lab/` and outputs under `runtime/artifacts/research/alpha_lab/`.
+4. If a page data load fails, verify the page's runtime root first. Avoid copying private data into app folders; place CN futures market data under `runtime/data/futures_cn/{daily,intraday,tick}/`, generated research matrices under `runtime/data/`, and outputs under `runtime/artifacts/research/`.
 
 5. If a page works locally but would fail on a public clone, add a public-safe empty state or an optional smoke test skip.
 

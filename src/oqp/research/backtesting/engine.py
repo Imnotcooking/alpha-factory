@@ -24,7 +24,7 @@ class BacktestEngine:
         self.python_backend = PythonBacktestBackend()
 
     def run(self, request: ExecutionBacktestRequest) -> ExecutionBacktestResult:
-        if self.prefer_native:
+        if self.prefer_native and request.native_compatible:
             try:
                 return NativeBacktestBackend(legacy_paths=self.legacy_native_paths).run(request)
             except QuantCoreUnavailable:

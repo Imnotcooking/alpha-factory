@@ -88,11 +88,7 @@ departments/research/factors/**
 !departments/research/factors/README.md
 !departments/research/factors/factor_template_private.py
 !departments/research/factors/*/
-
-# Legacy alpha archive private edge
-departments/archive/legacy_alpha_factory/**/factor_library/fac_*.py
-departments/archive/legacy_alpha_factory/**/models/
-departments/archive/legacy_alpha_factory/strategy_agents/agent_*.py
+tests/test_*factor*.py
 
 # 5. PyTorch Model Checkpoints (Only upload the final, compressed .zip or .pt)
 # Uncomment the line below if you want to ignore all models

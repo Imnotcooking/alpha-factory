@@ -156,7 +156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Export an alpha-lab backtest row as a strategy candidate."
     )
-    parser.add_argument("--db", type=Path, default=Path("runtime/db/research/alpha_lab/research_memory.db"))
+    parser.add_argument("--db", type=Path, default=Path("runtime/db/research/research_memory.db"))
     parser.add_argument("--run-id", type=str, default=None)
     parser.add_argument("--factor-id", type=str, default=None)
     parser.add_argument(

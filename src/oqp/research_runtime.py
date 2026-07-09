@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oqp.config import REPO_ROOT
+from oqp.data.runtime_paths import default_futures_cn_index_daily_file
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,12 +18,7 @@ class AlphaResearchRuntimePaths:
 
     @property
     def default_daily_data_file(self) -> Path:
-        return (
-            self.data_root
-            / "market_data"
-            / "daily"
-            / "全市场_1d_index_20180101_20260602.parquet"
-        )
+        return default_futures_cn_index_daily_file()
 
     @property
     def feature_matrix_path(self) -> Path:
@@ -46,13 +42,13 @@ def alpha_research_runtime_paths() -> AlphaResearchRuntimePaths:
         data_root=Path(
             os.environ.get(
                 "ALPHA_RUNTIME_DATA_ROOT",
-                REPO_ROOT / "runtime" / "data" / "alpha_lab",
+                REPO_ROOT / "runtime" / "data",
             )
         ),
         artifact_root=Path(
             os.environ.get(
                 "ALPHA_RUNTIME_ARTIFACT_ROOT",
-                REPO_ROOT / "runtime" / "artifacts" / "research" / "alpha_lab",
+                REPO_ROOT / "runtime" / "artifacts" / "research",
             )
         ),
         db_path=Path(
@@ -62,7 +58,6 @@ def alpha_research_runtime_paths() -> AlphaResearchRuntimePaths:
                 / "runtime"
                 / "db"
                 / "research"
-                / "alpha_lab"
                 / "research_memory.db",
             )
         ),

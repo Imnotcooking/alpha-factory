@@ -9,7 +9,7 @@ import pandas as pd
 import scipy.stats as stats
 
 
-DEFAULT_MATRIX_PATH = "runtime/data/alpha_lab/feature_store/ML_Feature_Matrix.parquet"
+DEFAULT_MATRIX_PATH = "runtime/data/feature_store/ML_Feature_Matrix.parquet"
 DEFAULT_FEATURE = "f_oi_growth_10d"
 DEFAULT_HORIZONS = tuple(range(1, 11))
 

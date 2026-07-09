@@ -51,11 +51,14 @@ from oqp.accounts import (  # noqa: E402
     blended_live_nav_history,
 )
 from oqp.market import (  # noqa: E402
+    commodity_channel_index,
     historical_volatility_frame,
+    load_cached_market_history,
     load_cached_price_history,
     load_price_history,
     refresh_yahoo_market_cache,
 )
+from oqp.market.volatility import bollinger_squeeze_metrics  # noqa: E402
 from oqp.options import (  # noqa: E402
     extract_portfolio_option_legs,
     option_book_summary,
@@ -94,10 +97,16 @@ from oqp.ui import (  # noqa: E402
     ops_tabs,
     ops_text,
     page_header,
+    qmt_connector_contract_frame,
+    qmt_exposure_by_asset,
+    qmt_position_slice,
     render_dark_bar_chart,
     render_dark_line_chart,
     render_dark_pie_chart,
     render_dark_table,
+    render_qmt_account_panel,
+    render_qmt_audit_panel,
+    render_qmt_connector_panel,
     style_dark_plotly,
 )
 
@@ -113,6 +122,9 @@ OPS_LANG = language_selector()
 apply_ops_theme()
 
 REPORTING_CURRENCY = "USD"
+US_ACCOUNT_SCOPE = "US Accounts (IBKR)"
+CN_ACCOUNT_SCOPE = "CN Accounts (华源证券 / QMT)"
+ACCOUNT_SCOPES = (US_ACCOUNT_SCOPE, CN_ACCOUNT_SCOPE)
 
 
 def T(key: str, default: str | None = None, **format_values: Any) -> str:
@@ -246,11 +258,17 @@ def format_holdings_display(frame: pd.DataFrame) -> pd.DataFrame:
         "Weight": maybe_percent,
         "HV 5D": maybe_percent,
         "HV 20D": maybe_percent,
+        "CCI 20": lambda value: decimal(value, 1),
+        "BB Width": maybe_percent,
+        "BB 6M %ile": maybe_percent,
+        "BB Z": lambda value: decimal(value, 2),
         "As Of": human_timestamp,
     }
     for column, formatter in formatters.items():
         if column in out.columns:
             out[column] = out[column].map(formatter)
+    if "Squeeze" in out.columns:
+        out["Squeeze"] = out["Squeeze"].map(lambda value: "yes" if bool(value) else "")
     out = out.rename(
         columns={
             "Market Price": currency_header("Market Price"),
@@ -282,10 +300,16 @@ def holdings_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "Realized P&L",
         "HV 5D",
         "HV 20D",
+        "CCI 20",
+        "BB Width",
+        "BB 6M %ile",
+        "BB Z",
     ]
     for column in numeric_columns:
         if column in out:
             out[column] = pd.to_numeric(out[column], errors="coerce")
+    if "Squeeze" in out:
+        out["Squeeze"] = out["Squeeze"].map(lambda value: "yes" if bool(value) else "")
 
     columns = [
         "Symbol",
@@ -302,6 +326,11 @@ def holdings_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "Underlying",
         "HV 5D",
         "HV 20D",
+        "CCI 20",
+        "BB Width",
+        "BB 6M %ile",
+        "BB Z",
+        "Squeeze",
         "As Of",
     ]
     return out[[column for column in columns if column in out.columns]]
@@ -351,6 +380,14 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
         function(params) {
             if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
             return (Number(params.value) * 100).toFixed(1) + "%";
+        }
+        """
+    )
+    number_formatter = JsCode(
+        """
+        function(params) {
+            if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
+            return Number(params.value).toFixed(1);
         }
         """
     )
@@ -438,6 +475,15 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
     for column in ["HV 5D", "HV 20D"]:
         if column in grid_frame:
             builder.configure_column(column, type=["numericColumn"], valueFormatter=percent_formatter, width=112, minWidth=102)
+    if "CCI 20" in grid_frame:
+        builder.configure_column("CCI 20", type=["numericColumn"], valueFormatter=number_formatter, width=105, minWidth=96)
+    for column in ["BB Width", "BB 6M %ile"]:
+        if column in grid_frame:
+            builder.configure_column(column, type=["numericColumn"], valueFormatter=percent_formatter, width=116, minWidth=108)
+    if "BB Z" in grid_frame:
+        builder.configure_column("BB Z", type=["numericColumn"], valueFormatter=number_formatter, width=95, minWidth=88)
+    if "Squeeze" in grid_frame:
+        builder.configure_column("Squeeze", width=106, minWidth=96)
     if "As Of" in grid_frame:
         builder.configure_column("As Of", headerName="As Of", width=150, minWidth=132)
     custom_css = {
@@ -881,6 +927,121 @@ def volatility_with_aliases(volatility: pd.DataFrame) -> pd.DataFrame:
     return rows.drop_duplicates(subset=["symbol"], keep="last").reset_index(drop=True)
 
 
+def account_wrapper_selector() -> str:
+    """Top-level wrapper for live portfolio account views."""
+
+    st.caption("Account wrapper")
+    if hasattr(st, "segmented_control"):
+        selected = st.segmented_control(
+            "Account wrapper",
+            ACCOUNT_SCOPES,
+            default=st.session_state.get("live_account_scope", US_ACCOUNT_SCOPE),
+            label_visibility="collapsed",
+            key="live_account_scope",
+        )
+        return str(selected or US_ACCOUNT_SCOPE)
+    return st.radio(
+        "Account wrapper",
+        ACCOUNT_SCOPES,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="live_account_scope",
+    )
+
+
+def cn_account_mask(frame: pd.DataFrame) -> pd.Series:
+    """Detect rows belonging to the planned 华源证券/QMT CN account wrapper."""
+
+    if frame.empty:
+        return pd.Series(False, index=frame.index)
+    text_parts = []
+    for column in (
+        "Broker",
+        "broker",
+        "Profile",
+        "profile",
+        "Account",
+        "account_id",
+        "Asset Class",
+        "asset_class",
+        "Currency",
+        "currency",
+        "Native Currency",
+        "native_currency",
+        "Symbol",
+        "symbol",
+        "metadata_json",
+    ):
+        if column in frame:
+            text_parts.append(frame[column].fillna("").astype(str))
+    if not text_parts:
+        return pd.Series(False, index=frame.index)
+    text = text_parts[0]
+    for part in text_parts[1:]:
+        text = text + " " + part
+    normalized = text.str.upper()
+    return normalized.str.contains(
+        r"QMT|HUAYUAN|华源|EQUITY_CN|OPTIONS_CN|FUTURES_CN|\.SH|\.SZ|CNY|CNH",
+        regex=True,
+        na=False,
+    )
+
+
+def holdings_for_account_scope(holdings: pd.DataFrame, scope: str) -> pd.DataFrame:
+    """Filter enriched holdings to the selected account wrapper."""
+
+    if holdings.empty:
+        return holdings
+    mask = cn_account_mask(holdings)
+    if scope == CN_ACCOUNT_SCOPE:
+        return holdings.loc[mask].reset_index(drop=True)
+    return holdings.loc[~mask].reset_index(drop=True)
+
+
+def positions_for_account_scope(
+    positions: pd.DataFrame,
+    all_positions: pd.DataFrame,
+    scope: str,
+) -> pd.DataFrame:
+    """Filter raw positions to the selected account wrapper."""
+
+    frame = all_positions if scope == CN_ACCOUNT_SCOPE else positions
+    if frame.empty:
+        return frame
+    mask = cn_account_mask(frame)
+    out = frame.loc[mask] if scope == CN_ACCOUNT_SCOPE else frame.loc[~mask]
+    if "environment" in out:
+        out = out.loc[out["environment"].astype(str).str.lower().eq("live")]
+    return out.reset_index(drop=True)
+
+
+def nav_from_holdings(holdings: pd.DataFrame) -> float | None:
+    if holdings.empty or "Market Value" not in holdings:
+        return None
+    values = pd.to_numeric(holdings["Market Value"], errors="coerce").abs()
+    total = values.sum(min_count=1)
+    return None if pd.isna(total) or total == 0 else float(total)
+
+
+def cash_from_holdings(holdings: pd.DataFrame) -> float | None:
+    if holdings.empty or "Market Value" not in holdings:
+        return None
+    asset = holdings.get("Asset Class", pd.Series("", index=holdings.index)).astype(str).str.lower()
+    symbol = holdings.get("Symbol", pd.Series("", index=holdings.index)).astype(str).str.upper()
+    mask = asset.eq("cash") | symbol.str.contains("CASH", na=False)
+    values = pd.to_numeric(holdings.loc[mask, "Market Value"], errors="coerce")
+    total = values.sum(min_count=1)
+    return None if pd.isna(total) else float(total)
+
+
+def pnl_from_holdings(holdings: pd.DataFrame) -> float | None:
+    if holdings.empty or "Unrealized P&L" not in holdings:
+        return None
+    values = pd.to_numeric(holdings["Unrealized P&L"], errors="coerce")
+    total = values.sum(min_count=1)
+    return None if pd.isna(total) else float(total)
+
+
 def format_factor_lab_summary(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return frame
@@ -1318,6 +1479,10 @@ def load_live_portfolio_data() -> dict[str, Any]:
         environment="live",
         profile=UNIFIED_LIVE_PROFILE,
     )
+    all_live_positions = load_latest_account_positions(
+        account_ledger,
+        environment="live",
+    )
     position_history = load_account_position_history(
         account_ledger,
         environment="live",
@@ -1325,8 +1490,9 @@ def load_live_portfolio_data() -> dict[str, Any]:
     )
     events = load_account_trade_events(account_ledger, environment="live", limit=100)
     static_price_history = load_price_history()
+    history_symbols = live_price_history_symbols(positions)
     cached_price_history = load_cached_price_history(
-        live_price_history_symbols(positions),
+        history_symbols,
         lookback_days=900,
     )
     price_history = combine_price_histories(static_price_history, cached_price_history)
@@ -1335,6 +1501,19 @@ def load_live_portfolio_data() -> dict[str, Any]:
         ignore_index=True,
     ) if not static_price_history.empty or not cached_price_history.empty else pd.DataFrame(columns=["symbol", "date", "close"])
     hv = volatility_with_aliases(historical_volatility_frame(hv_source_history, windows=(5, 20)))
+    cci_rows = []
+    for symbol in history_symbols:
+        history = load_cached_market_history(symbol, lookback_days=220)
+        cci_rows.append(
+            {
+                "symbol": symbol,
+                "cci_20d": commodity_channel_index(history, window=20),
+                **bollinger_squeeze_metrics(history, window=20, lookback=126),
+            }
+        )
+    cci = volatility_with_aliases(pd.DataFrame(cci_rows))
+    if not cci.empty:
+        hv = hv.merge(cci, on="symbol", how="outer") if not hv.empty else cci
     settings = load_settings()
     ops_snapshot = collect_ops_status(settings=settings)
     server_sync = read_json(REPO_ROOT / "runtime" / "state" / "server_sync" / "status.json")
@@ -1351,10 +1530,12 @@ def load_live_portfolio_data() -> dict[str, Any]:
         "broker_positions": broker_positions,
         "manual_positions": manual_positions,
         "positions": positions,
+        "all_live_positions": all_live_positions,
         "position_history": position_history,
         "events": events,
         "price_history": price_history,
         "hv": hv,
+        "settings": settings,
         "ops_snapshot": ops_snapshot,
         "server_sync": server_sync,
     }
@@ -2327,26 +2508,61 @@ data = load_live_portfolio_data()
 latest_nav = data["latest_nav"]
 nav_raw = data["nav_raw"]
 nav_history = data["nav_history"]
-positions = data["positions"]
+all_positions = data["positions"]
 position_history = data["position_history"]
 events = data["events"]
 hv = data["hv"]
-holdings = enriched_live_holdings(positions, hv)
-filtered_holdings = holdings
+all_holdings = enriched_live_holdings(all_positions, hv)
 REPORTING_CURRENCY = latest_nav_currency(latest_nav, data["unified_write"].get("currency"))
-nav = latest_nav_value(latest_nav, "net_liquidation")
-cash = latest_nav_value(latest_nav, "cash")
-daily_pnl = latest_nav_value(latest_nav, "daily_pnl")
+
+page_header(
+    title="Live Portfolio",
+    title_zh="实盘组合",
+    subtitle="Real-money monitoring room for account health, holdings, performance, exposure, and reconciliation.",
+    subtitle_zh="真实资金账户的健康、持仓、表现、敞口与对账监控室。",
+    language=OPS_LANG,
+)
+account_scope = account_wrapper_selector()
+if account_scope == US_ACCOUNT_SCOPE:
+    st.caption("IBKR live account plus external/manual holdings that are not routed through QMT.")
+else:
+    st.caption("华源证券/QMT account wrapper for CN equities, CN options, and CN futures. Empty states are expected until the connector feeds positions.")
+
+positions = positions_for_account_scope(all_positions, data["all_live_positions"], account_scope)
+holdings = holdings_for_account_scope(all_holdings, account_scope)
+if account_scope == CN_ACCOUNT_SCOPE and holdings.empty and not positions.empty:
+    holdings = enriched_live_holdings(positions, hv)
+filtered_holdings = holdings
+
+latest_nav_for_view = latest_nav if account_scope == US_ACCOUNT_SCOPE else pd.DataFrame()
+nav_raw_for_view = nav_raw if account_scope == US_ACCOUNT_SCOPE else pd.DataFrame(columns=nav_raw.columns)
+nav_history_for_view = nav_history if account_scope == US_ACCOUNT_SCOPE else pd.DataFrame(columns=nav_history.columns)
+
+nav = (
+    latest_nav_value(latest_nav, "net_liquidation")
+    if account_scope == US_ACCOUNT_SCOPE
+    else nav_from_holdings(holdings)
+)
+cash = (
+    latest_nav_value(latest_nav, "cash")
+    if account_scope == US_ACCOUNT_SCOPE
+    else cash_from_holdings(holdings)
+)
+daily_pnl = latest_nav_value(latest_nav, "daily_pnl") if account_scope == US_ACCOUNT_SCOPE else None
 cash_like_value = cash_like_holdings_value(holdings)
 total_cash_value = cash_with_equivalents(cash, cash_like_value)
 allocation_cash = cash_not_already_in_holdings(holdings, cash)
 performance = account_performance_summary(
-    nav_raw,
+    nav_raw_for_view,
     positions,
     current_nav=nav,
     current_cash=cash,
     current_daily_pnl=daily_pnl,
 )
+if account_scope == CN_ACCOUNT_SCOPE:
+    performance["unrealized_pnl"] = pnl_from_holdings(holdings)
+    gross_value = nav_from_holdings(holdings)
+    performance["gross_exposure_pct"] = None if not nav or not gross_value else gross_value / abs(float(nav))
 spreads = recognize_option_spreads(positions, hv)
 option_legs = option_leg_report(positions, hv)
 underlying_exposure = underlying_exposure_report(positions, hv)
@@ -2365,15 +2581,6 @@ currency_mix = currency_exposure_frame(
     cash_currency=cash_currency_for_holdings(holdings),
 )
 
-
-page_header(
-    title="Live Portfolio",
-    title_zh="实盘组合",
-    subtitle="Real-money monitoring room for account health, holdings, performance, exposure, and reconciliation.",
-    subtitle_zh="真实资金账户的健康、持仓、表现、敞口与对账监控室。",
-    language=OPS_LANG,
-)
-
 top = st.columns(8)
 top[0].metric(f"{T('nav')} ({REPORTING_CURRENCY})", money(nav))
 top[1].metric(
@@ -2390,9 +2597,18 @@ top[5].metric(
     help="Gross exposure divided by NAV. This is an exposure/leverage read, not profit divided by NAV.",
 )
 top[6].metric(T("max_dd"), percent(performance.get("max_drawdown_pct")))
-top[7].metric(T("snapshot"), T("missing") if latest_nav.empty else human_timestamp(latest_nav.iloc[0].get("as_of")))
+snapshot_time = (
+    human_timestamp(latest_nav.iloc[0].get("as_of"))
+    if account_scope == US_ACCOUNT_SCOPE and not latest_nav.empty
+    else (
+        human_timestamp(holdings["As Of"].dropna().max())
+        if not holdings.empty and "As Of" in holdings and not holdings["As Of"].dropna().empty
+        else T("missing")
+    )
+)
+top[7].metric(T("snapshot"), snapshot_time)
 
-if not data["manual_positions"].empty:
+if account_scope == US_ACCOUNT_SCOPE and not data["manual_positions"].empty:
     manual_currencies = ", ".join(
         sorted(
             data["manual_positions"]["currency"]
@@ -2416,10 +2632,10 @@ overview_tab, holdings_tab, exposure_tab, spreads_tab, reconciliation_tab = st.t
 with overview_tab:
     st.subheader("Portfolio Performance Stack")
     st.caption("Portfolio return, benchmark when available, drawdown, and current gross exposure/NAV in one scan.")
-    render_live_performance_stack(nav_history, data["price_history"], performance)
+    render_live_performance_stack(nav_history_for_view, data["price_history"], performance)
 
     st.subheader("Weekly Performance")
-    weekly = weekly_return_table(nav_history)
+    weekly = weekly_return_table(nav_history_for_view)
     if weekly.empty:
         st.info("No weekly performance table is available yet.")
     else:
@@ -2445,17 +2661,20 @@ with overview_tab:
             render_dark_table(sleeve_table, max_height_px=220)
     with mix_right:
         st.subheader("Daily P&L")
-        if nav_history.empty:
+        if nav_history_for_view.empty:
             st.info("No live daily P&L history has been recorded yet.")
         else:
             render_dark_bar_chart(
-                nav_history.set_index("date")[["daily_pnl"]],
+                nav_history_for_view.set_index("date")[["daily_pnl"]],
                 yaxis_title=currency_header("Daily P&L"),
                 height=360,
             )
 
     st.subheader("System Reads")
-    status_dataframe(live_system_read_rows(data, latest_nav))
+    status_dataframe(live_system_read_rows(data, latest_nav_for_view))
+    if account_scope == CN_ACCOUNT_SCOPE:
+        st.subheader("QMT Live Monitor")
+        render_qmt_connector_panel(data["settings"], data["ops_snapshot"], compact=True)
 
 with holdings_tab:
     st.subheader("Current Holdings")
@@ -2481,6 +2700,14 @@ with holdings_tab:
             st.info("No losing positions are available.")
         else:
             render_dark_table(losers, max_height_px=260)
+
+    if account_scope == CN_ACCOUNT_SCOPE:
+        st.subheader("QMT/CN Holdings Slice")
+        render_dark_table(
+            qmt_position_slice(data["all_live_positions"], environment="live"),
+            empty_message="No QMT live holdings are available yet.",
+            max_height_px=360,
+        )
 
 with spreads_tab:
     st.caption("Options command room for spread recognition, payoff shape, Greeks, and TP/SL scaffolding.")
@@ -2668,6 +2895,13 @@ with exposure_tab:
         "Risk lab view: marked allocation today, option-adjusted underlying exposure now, "
         "and factor/PCA/VaR/MVO modules as the data history gets deeper."
     )
+    if account_scope == CN_ACCOUNT_SCOPE:
+        st.subheader("QMT/CN Exposure Slice")
+        render_dark_table(
+            qmt_exposure_by_asset(data["all_live_positions"]),
+            empty_message="No QMT exposure rows are available yet.",
+            max_height_px=260,
+        )
     non_cash_sectors = sector_mix.loc[sector_mix["Sector"].astype(str) != "Cash"] if not sector_mix.empty else pd.DataFrame()
     largest_sector_row = (
         non_cash_sectors.sort_values("Weight", ascending=False).head(1)
@@ -2965,7 +3199,8 @@ with reconciliation_tab:
     status_dataframe(
         [
             {"Item": "Path", "Value": display_path(data["account_ledger"])},
-            {"Item": "NAV rows", "Value": str(len(nav_raw))},
+            {"Item": "Account wrapper", "Value": account_scope},
+            {"Item": "NAV rows", "Value": str(len(nav_raw_for_view))},
             {"Item": "Position rows", "Value": str(len(positions))},
             {"Item": "IBKR/broker position rows", "Value": str(len(data["broker_positions"]))},
             {"Item": "External/manual position rows", "Value": str(len(data["manual_positions"]))},
@@ -2976,12 +3211,19 @@ with reconciliation_tab:
             {"Item": f"Unified manual value ({REPORTING_CURRENCY})", "Value": money(data["unified_write"].get("manual_usd_value"))},
             {"Item": f"Manual rows excluded from {REPORTING_CURRENCY} NAV", "Value": str(data["unified_write"].get("excluded_manual_rows", 0))},
             {"Item": "Position history rows", "Value": str(len(position_history))},
-            {"Item": "Latest snapshot", "Value": "missing" if latest_nav.empty else human_timestamp(latest_nav.iloc[0].get("as_of"))},
+            {"Item": "Latest snapshot", "Value": "missing" if latest_nav_for_view.empty else human_timestamp(latest_nav_for_view.iloc[0].get("as_of"))},
             {"Item": "Server runtime sync", "Value": human_timestamp(data["server_sync"].get("synced_at"))},
             {"Item": "Price history rows", "Value": str(len(data["price_history"]))},
             {"Item": "HV symbols", "Value": str(len(hv))},
         ]
     )
+
+    if account_scope == CN_ACCOUNT_SCOPE:
+        st.subheader("QMT Live Account Reconciliation")
+        render_qmt_account_panel(data["ops_snapshot"], data["all_live_positions"], environment="live")
+
+        st.subheader("QMT Connector Contracts")
+        render_dark_table(qmt_connector_contract_frame(data["settings"]), max_height_px=260)
 
     st.subheader("Risk Lab Structure")
     st.caption(
@@ -3016,6 +3258,10 @@ with reconciliation_tab:
             ops_rows["Category"].isin(["Gateway", "Broker Heartbeat", "Accounts", "Jobs", "Safety"])
         ]
         status_dataframe(live_related if not live_related.empty else ops_rows)
+
+    if account_scope == CN_ACCOUNT_SCOPE:
+        st.subheader("QMT Audit Trail")
+        render_qmt_audit_panel(data["settings"], limit=10)
 
     st.subheader("Latest Live Events")
     if events.empty:

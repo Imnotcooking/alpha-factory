@@ -2,10 +2,15 @@ import streamlit as st
 import pandas as pd
 import os
 import sys
+from pathlib import Path
 
 UI_DIR = os.path.dirname(os.path.abspath(__file__))
 if UI_DIR not in sys.path:
     sys.path.insert(0, UI_DIR)
+REPO_ROOT = Path(UI_DIR).parents[1]
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 # 1. Core Architecture Imports
 from config import APP_TITLE, APP_ICON, LAYOUT, CUSTOM_CSS, TEXT
@@ -18,6 +23,10 @@ from views.matrix_view import MatrixView
 from views.dna_view import DNAView
 from views.pareto_view import ParetoView
 from views.ml_view import MLView
+from views.assumptions_view import AssumptionsView
+from universe_display import summarize_traded_universe, traded_universe_detail
+from runtime_estimator import runtime_estimate_frame
+from oqp.ui.asset_taxonomy import dashboard_taxonomy_frame
 
 # ==========================================
 # PAGE CONFIGURATION & STATE
@@ -40,6 +49,7 @@ matrix_view = MatrixView(dm)
 dna_view = DNAView(dm)
 pareto_view = ParetoView(dm)
 ml_view = MLView(dm)
+assumptions_view = AssumptionsView(dm)
 
 # ==========================================
 # SIDEBAR: THE LEDGER
@@ -69,9 +79,11 @@ for _, row in runs_df.iterrows():
     
     # --- NEW: Safely extract Taxonomy & Universe ---
     asset_label = row.get('asset_class', 'FUTURES')
-    tickers = str(row.get('traded_tickers', 'ALL'))
-    if len(tickers) > 15:
-        tickers = tickers[:12] + "..." # Truncate so the button doesn't overflow
+    tickers = summarize_traded_universe(
+        row.get("traded_tickers", "ALL"),
+        row.get("universe_size", 0),
+        max_tickers=0,
+    )
         
     # Inject the Asset Class and Universe into the button text
     label = f"{status_icon} {row['name']} (v{row['round_number']})\n[{asset_label} | {tickers}] | IC: {row['holdout_ic']:.4f}"
@@ -83,6 +95,17 @@ for _, row in runs_df.iterrows():
 # MAIN DASHBOARD (TOP SECTION)
 # ==========================================
 st.markdown(f"## {t['title']}")
+with st.expander("Asset Taxonomy / 资产分类", expanded=False):
+    st.caption(
+        "Research runs, factor promotion, and future QMT execution use the same market lanes: "
+        "US equities, US options, Chinese equities, Chinese options, and Chinese futures."
+    )
+    st.dataframe(
+        dashboard_taxonomy_frame(language=st.session_state.lang.lower()),
+        width="stretch",
+        hide_index=True,
+        height=230,
+    )
 
 # Top Metrics Panel
 c1, c2, c3, c4 = st.columns(4)
@@ -93,6 +116,15 @@ c1.metric(t["metrics"][0], len(runs_df))
 c2.metric(t["metrics"][1], f"{best_ic:.4f}")
 c3.metric(t["metrics"][2], len(runs_df['name'].unique()))
 c4.metric(t["metrics"][3], f"{failure_rate:.1f}%")
+
+runtime_df = runtime_estimate_frame(runs_df)
+if not runtime_df.empty:
+    with st.expander("Runtime Estimates / 回测运行时间", expanded=False):
+        st.caption(
+            "Heuristic wall-clock ranges based on latest ledger row counts and asset route. "
+            "The C++ execution pass is usually fast; factor computation often dominates."
+        )
+        st.dataframe(runtime_df, width="stretch", hide_index=True, height=220)
 
 st.markdown("---")
 
@@ -120,21 +152,24 @@ current_run = selected_run_rows.iloc[0]
 asset_class = current_run.get('asset_class', 'N/A')
 traded_tickers = current_run.get('traded_tickers', 'ALL')
 universe_size = current_run.get('universe_size', 0)
+universe_label = traded_universe_detail(traded_tickers, universe_size)
 
-st.info(f"**🏛️ Asset Class:** `{asset_class}` &nbsp;&nbsp;|&nbsp;&nbsp; **🎯 Traded Universe:** `{traded_tickers}` (Total Pool: {universe_size})")
+st.info(f"**🏛️ Asset Class:** `{asset_class}` &nbsp;&nbsp;|&nbsp;&nbsp; **🎯 Traded Universe:** `{universe_label}`")
 
-tab_labels = [
-    t["tab_tearsheet"],
-    t["tab_correlation"],
-    t["tab_dna"],
-    t["tab_pareto"],
-    t["tab_ml"],
+tab_specs = [
+    ("tearsheet", t["tab_tearsheet"]),
+    ("dna", t["tab_dna"]),
+    ("pareto", t["tab_pareto"]),
+    ("correlation", t["tab_correlation"]),
 ]
+if ml_view.should_render_tab(st.session_state.selected_run, current_run):
+    tab_specs.append(("ml", t["tab_ml"]))
+tab_specs.append(("assumptions", t.get("tab_assumptions", "Assumptions")))
 
-tabs = st.tabs(tab_labels)
+tabs = dict(zip([key for key, _ in tab_specs], st.tabs([label for _, label in tab_specs])))
 
 # Route the rendering logic to the designated OOP classes
-with tabs[0]:
+with tabs["tearsheet"]:
     st.markdown(t["chart_title"])
     st.caption(t["chart_desc"])
     returns_path = current_run.get('returns_file_path', None)
@@ -145,23 +180,31 @@ with tabs[0]:
         lang=st.session_state.lang,
     )
 
-with tabs[1]:
-    matrix_view.render_correlation(lang=st.session_state.lang)
-
-with tabs[2]:
+with tabs["dna"]:
     dna_view.render(
         st.session_state.selected_run,
         lang=st.session_state.lang,
         theme_mode=st.session_state.theme_mode,
     )
 
-with tabs[3]:
+with tabs["pareto"]:
     pareto_view.render(current_run, lang=st.session_state.lang)
 
-with tabs[4]:
-    ml_view.render(
+with tabs["correlation"]:
+    matrix_view.render_correlation(lang=st.session_state.lang)
+
+if "ml" in tabs:
+    with tabs["ml"]:
+        ml_view.render(
+            st.session_state.selected_run,
+            current_run,
+            lang=st.session_state.lang,
+            theme_mode=st.session_state.theme_mode,
+        )
+
+with tabs["assumptions"]:
+    assumptions_view.render(
         st.session_state.selected_run,
         current_run,
         lang=st.session_state.lang,
-        theme_mode=st.session_state.theme_mode,
     )

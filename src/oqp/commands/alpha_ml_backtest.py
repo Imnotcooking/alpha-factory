@@ -6,9 +6,10 @@ import sqlite3
 import time
 
 from oqp.research_runtime import alpha_research_runtime_paths
+from oqp.contracts.market_vertical import ASSET_TAXONOMY, normalize_market_vertical
 
 
-VALID_ASSETS = ["EQUITY_US", "EQUITY_CN", "FUTURES_US", "FUTURES_CN"]
+VALID_ASSETS = sorted(ASSET_TAXONOMY)
 ALPHA_RUNTIME_PATHS = alpha_research_runtime_paths()
 ALPHA_RUNTIME_ARTIFACT_ROOT = ALPHA_RUNTIME_PATHS.artifact_root
 ALPHA_RESEARCH_DB_PATH = ALPHA_RUNTIME_PATHS.db_path
@@ -28,6 +29,32 @@ def apply_vertical_attrs(df: pd.DataFrame, attrs: dict[str, str]) -> pd.DataFram
         if value and key not in df.attrs:
             df.attrs[key] = value
     return df
+
+
+def build_execution_mode_config(factor_module, args):
+    from oqp.research.backtesting import ExecutionModeConfig
+
+    raw_config = getattr(factor_module, "EXECUTION_MODE_CONFIG", {}) or {}
+    if not isinstance(raw_config, dict):
+        print("⚠️ WARNING: EXECUTION_MODE_CONFIG must be a dict. Ignoring it.")
+        raw_config = {}
+
+    config_data = dict(raw_config)
+    if args.max_gross_leverage is not None:
+        config_data["max_gross_leverage"] = args.max_gross_leverage
+    if args.max_weight_per_asset is not None:
+        config_data["max_weight_per_asset"] = args.max_weight_per_asset
+    if getattr(args, "sizing_modules", None) is not None:
+        config_data["sizing_modules"] = args.sizing_modules
+    if getattr(args, "kelly_fraction", None) is not None:
+        config_data["kelly_fraction"] = args.kelly_fraction
+
+    allowed = set(ExecutionModeConfig.__dataclass_fields__)
+    unknown = sorted(set(config_data) - allowed)
+    if unknown:
+        print(f"⚠️ WARNING: Ignoring unknown execution mode config keys: {unknown}")
+    filtered = {key: value for key, value in config_data.items() if key in allowed}
+    return ExecutionModeConfig(**filtered)
 
 
 def _run_retraining():
@@ -98,13 +125,41 @@ def _load_feature_matrix(path: str) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(description="Institutional ML Backtest Wrapper")
-    parser.add_argument("--asset", required=True, choices=VALID_ASSETS, help="Asset taxonomy class")
+    parser.add_argument(
+        "--asset",
+        required=True,
+        help=f"Asset taxonomy class or alias (known: {', '.join(VALID_ASSETS)})",
+    )
     parser.add_argument("--factor", required=True, help="Factor module name, e.g. fac_054_XGBoost_Alpha")
     parser.add_argument("--retrain", action="store_true", help="Retrain XGBoost model before backtest")
+    parser.add_argument(
+        "--execution_mode",
+        choices=["auto", "risk_desk", "direct", "statarb"],
+        default="auto",
+        help="How ML factor scores become executable target weights.",
+    )
+    parser.add_argument("--max_gross_leverage", type=float, default=None, help="Override execution-mode gross leverage cap.")
+    parser.add_argument("--max_weight_per_asset", type=float, default=None, help="Optional per-asset cap before gross scaling.")
+    parser.add_argument(
+        "--sizing_modules",
+        type=str,
+        default=None,
+        help="Risk-desk allocation modules. Examples: kelly,hrp (default), kelly, hrp, or none.",
+    )
+    parser.add_argument(
+        "--kelly_fraction",
+        type=float,
+        default=None,
+        help="Override fractional Kelly multiplier when the kelly sizing module is enabled.",
+    )
     args = parser.parse_args()
+    args.asset = normalize_market_vertical(args.asset)
+    if args.asset not in ASSET_TAXONOMY:
+        parser.error(f"unsupported asset taxonomy class: {args.asset}")
 
     from oqp.data import DataEngineFactory
-    from oqp.research.backtesting import AlphaEvaluator, PortfolioOptimizer
+    from oqp.research import validate_factor_market_compatibility
+    from oqp.research.backtesting import AlphaEvaluator, ExecutionModeFactory
     from oqp.research.factors import factor_search_roots, load_factor_module
 
     factor_module_name = args.factor[:-3] if args.factor.endswith(".py") else args.factor
@@ -138,52 +193,41 @@ def main():
             f"❌ Could not import factor module {factor_module_name}.py\n"
             f"   Searched:\n      - {search_roots}"
         ) from exc
+    try:
+        supported_markets = validate_factor_market_compatibility(
+            factor_module,
+            args.asset,
+            factor_id=getattr(factor_module, "FACTOR_ID", factor_module_name),
+        )
+    except Exception as e:
+        print(f"❌ [FACTOR MARKET ERROR] {e}")
+        return
+    print(
+        "   -> 🧭 Factor Market Gate: "
+        f"{'ALL' if '*' in supported_markets else ', '.join(supported_markets)}"
+    )
 
     print("   -> Computing ML factor scores...")
     df = factor_module.compute(df)
     apply_vertical_attrs(df, vertical_attrs)
 
-    # =========================================================
-    # 🏛️ INSTITUTIONAL RISK DESK: PORTFOLIO OPTIMIZATION
-    # =========================================================
-    print("   -> ⚖️ Routing to Risk Desk (Kelly Sizing & HRP)...")
-    optimizer = PortfolioOptimizer(kelly_fraction=0.5, max_weight=0.05)
-
-    # 1. Kelly Volatility Scaling (Scales down bets on highly volatile assets)
-    # Prefer the factor's tradable signal, then fall back to raw model output.
-    alpha_signal_col = next(
-        (col for col in ["signal", "factor_score", "raw_signal"] if col in df.columns),
-        None,
+    execution_mode = (
+        args.execution_mode
+        if args.execution_mode != "auto"
+        else getattr(factor_module, "EXECUTION_MODE", None)
+        or df.attrs.get("execution_mode")
+        or "risk_desk"
     )
-    if alpha_signal_col is None:
-        raise ValueError("❌ Factor module must output signal, factor_score, or raw_signal.")
-    print(f"   -> Using '{alpha_signal_col}' as Risk Desk alpha input.")
-    df["risk_signal"] = df[alpha_signal_col].fillna(0.0)
-    df = optimizer.kelly.compute_weights(df, signal_col="risk_signal")
-
-    # 2. Hierarchical Risk Parity (HRP) Correlation Budgeting
-    print("   -> 🌳 Building HRP Correlation Tree...")
-    if 'ret_1d' not in df.columns:
-        df['ret_1d'] = df.groupby('ticker')['close'].pct_change()
-    
-    # Create a wide matrix of returns for the correlation matrix
-    returns_wide = df.pivot(index='date', columns='ticker', values='ret_1d').fillna(0)
-
-    # For maximum backtest speed, we compute the structural HRP budget globally across the history.
-    # (In live production, you would run this on a rolling 60-day window rebalanced monthly).
-    global_hrp_budgets = optimizer.hrp.compute_weights(returns_wide)
-    df['hrp_budget'] = df['ticker'].map(global_hrp_budgets).fillna(0.0)
-
-    # 3. Synthesize: Kelly Conviction * HRP Risk Budget
-    df['synthesized_weight'] = df['kelly_weight'] * df['hrp_budget']
-
-    # 4. Enforce the Strict Casino Cap (Max 5% per asset, Max 100% Gross Leverage)
-    df = optimizer.cap.enforce(df, "synthesized_weight")
-
-    # 5. Route the finalized weights to the Backtester instead of the raw AI score
-    df["signal"] = df["final_target_weight"]
+    execution_config = build_execution_mode_config(factor_module, args)
+    print(
+        "   -> ⚖️ Execution Mode: "
+        f"{execution_mode} ({execution_config.sizing_modules or 'no sizing modules'})"
+    )
+    execution_result = ExecutionModeFactory.create(execution_mode, execution_config).apply(df)
+    print(f"   -> {execution_result.detail}")
+    print(f"   -> Using '{execution_result.source_col}' as execution input.")
+    df = execution_result.df
     apply_vertical_attrs(df, vertical_attrs)
-    # =========================================================
 
     print("   -> Routing to Evaluator...")
     evaluator = AlphaEvaluator(

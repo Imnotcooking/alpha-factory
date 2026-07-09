@@ -23,7 +23,7 @@ class InvestingStockValuationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "watchlist.json"
             save_stock_watchlist([" aapl ", "MSFT", "aapl", "", None], path)
-            loaded = load_stock_watchlist(path, legacy_path=None)
+            loaded = load_stock_watchlist(path)
 
         self.assertEqual(loaded, ["AAPL", "MSFT"])
 

@@ -16,7 +16,7 @@ if UI_DIR not in sys.path:
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from config import ALPHA_RUNTIME_DATA_ROOT, BASE_DIR, DB_PATH, LOGS_DIR, get_plotly_template
+from config import BASE_DIR, DB_PATH, LOGS_DIR, get_plotly_template
 from ui_state import init_global_ui_state, apply_global_style, render_global_controls_in_sidebar
 from .text import PAGE_TEXT
 from .constants import (
@@ -65,6 +65,7 @@ from oqp.research.tick_pulse import (
     load_tick_scope,
     load_ticks,
 )
+from oqp.data.runtime_paths import discover_futures_cn_tick_files
 from oqp.research import make_evidence_ticket_id, record_evidence_ticket, stable_trial_hash
 from oqp.research.tick_pulse import build_pulse_features_fast
 from oqp.research.tick_pulse.sweeps import (
@@ -879,20 +880,11 @@ def compute_main_contract_file_sweep(
 
 
 def _discover_tick_files() -> list[dict]:
-    data_dir = os.path.join(ALPHA_RUNTIME_DATA_ROOT, "market_data", "tick")
-    if not os.path.isdir(data_dir):
-        return []
-
     files = []
-    for filename in os.listdir(data_dir):
-        if not filename.endswith(".parquet"):
-            continue
-        if "tick_all_data" not in filename:
-            continue
-
-        abs_path = os.path.join(data_dir, filename)
-        rel_path = os.path.relpath(abs_path, REPO_ROOT)
-        stat = os.stat(abs_path)
+    for path in discover_futures_cn_tick_files(patterns=("*tick_all_data*.parquet",)):
+        filename = path.name
+        rel_path = os.path.relpath(path, REPO_ROOT)
+        stat = path.stat()
         metadata = _parse_tick_file_metadata(filename)
         label = _format_tick_file_label(filename, stat.st_size)
         files.append(

@@ -26,6 +26,8 @@ class ExecutionModeConfig:
     max_weight_per_asset: float | None = None
     source_col: str | None = None
     neutralize: bool = False
+    sizing_modules: tuple[str, ...] | str = ()
+    kelly_fraction: float = 0.5
     source_candidates: tuple[str, ...] = field(
         default_factory=lambda: (
             "target_weight",
@@ -36,6 +38,25 @@ class ExecutionModeConfig:
             "raw_signal",
         )
     )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "sizing_modules",
+            _normalize_sizing_modules(self.sizing_modules),
+        )
+        object.__setattr__(
+            self,
+            "max_gross_leverage",
+            max(float(self.max_gross_leverage), 0.0),
+        )
+        if self.max_weight_per_asset is not None:
+            object.__setattr__(
+                self,
+                "max_weight_per_asset",
+                max(float(self.max_weight_per_asset), 0.0),
+            )
+        object.__setattr__(self, "kelly_fraction", max(float(self.kelly_fraction), 0.0))
 
 
 class BaseExecutionMode:
@@ -69,7 +90,7 @@ class BaseExecutionMode:
 
 
 class RiskDeskExecutionMode(BaseExecutionMode):
-    """Kelly + HRP + portfolio-cap path, preserved as the default mode."""
+    """Modular risk allocation stage after factor signal computation."""
 
     name = "risk_desk"
 
@@ -77,13 +98,24 @@ class RiskDeskExecutionMode(BaseExecutionMode):
         self,
         config: ExecutionModeConfig | None = None,
         *,
-        kelly_fraction: float = 0.5,
-        max_weight: float = 0.05,
+        kelly_fraction: float | None = None,
+        max_weight: float | None = None,
     ):
         super().__init__(config)
+        resolved_kelly_fraction = (
+            self.config.kelly_fraction if kelly_fraction is None else float(kelly_fraction)
+        )
+        resolved_max_weight = (
+            self.config.max_weight_per_asset
+            if self.config.max_weight_per_asset is not None
+            else 0.05
+        )
+        if max_weight is not None:
+            resolved_max_weight = float(max_weight)
         self.optimizer = PortfolioOptimizer(
-            kelly_fraction=kelly_fraction,
-            max_weight=max_weight,
+            kelly_fraction=resolved_kelly_fraction,
+            max_weight=resolved_max_weight,
+            max_gross_leverage=self.config.max_gross_leverage,
         )
 
     def apply(self, df: pd.DataFrame) -> ExecutionModeResult:
@@ -92,30 +124,42 @@ class RiskDeskExecutionMode(BaseExecutionMode):
             out,
             candidates=("signal", "factor_score", "raw_signal"),
         )
-        out["risk_signal"] = out[alpha_col].fillna(0.0)
-        out = self.optimizer.kelly.compute_weights(out, signal_col="risk_signal")
+        modules = set(self.config.sizing_modules)
+        out["risk_signal"] = pd.to_numeric(out[alpha_col], errors="coerce").fillna(0.0)
+        current_weight_col = "risk_signal"
 
-        if "ret_1d" not in out.columns:
-            out["ret_1d"] = out.groupby("ticker")["close"].pct_change()
-        returns_wide = (
-            out.pivot(index="date", columns="ticker", values="ret_1d")
-            .fillna(0.0)
-            .astype(float)
-        )
-        global_hrp_budgets = self.optimizer.hrp.compute_weights(returns_wide)
-        out["hrp_budget"] = out["ticker"].map(global_hrp_budgets).fillna(0.0)
+        if "kelly" in modules:
+            out = self.optimizer.kelly.compute_weights(out, signal_col=current_weight_col)
+            current_weight_col = "kelly_weight"
 
-        out["synthesized_weight"] = out["kelly_weight"] * out["hrp_budget"]
+        if "hrp" in modules:
+            if "ret_1d" not in out.columns:
+                out["ret_1d"] = out.groupby("ticker")["close"].pct_change()
+            returns_wide = (
+                out.pivot(index="date", columns="ticker", values="ret_1d")
+                .fillna(0.0)
+                .astype(float)
+            )
+            global_hrp_budgets = self.optimizer.hrp.compute_weights(returns_wide)
+            out["hrp_budget"] = out["ticker"].map(global_hrp_budgets).fillna(0.0)
+            out["allocated_weight"] = out[current_weight_col] * out["hrp_budget"]
+            current_weight_col = "allocated_weight"
+
+        out["synthesized_weight"] = pd.to_numeric(
+            out[current_weight_col],
+            errors="coerce",
+        ).fillna(0.0)
         out = self.optimizer.cap.enforce(out, "synthesized_weight")
         out["signal"] = out["final_target_weight"]
         out["execution_mode"] = self.name
         out.attrs["execution_mode"] = self.name
+        detail = _risk_desk_detail(self.config.sizing_modules)
         return ExecutionModeResult(
             df=out,
             mode=self.name,
             signal_col="signal",
             source_col=alpha_col,
-            detail="Kelly sizing + HRP budgets + portfolio cap.",
+            detail=detail,
         )
 
 
@@ -215,6 +259,52 @@ def _cap_and_scale_weights(
         .fillna(0.0)
     )
     return weights * shrink
+
+
+def _normalize_sizing_modules(value: tuple[str, ...] | list[str] | str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        normalized_text = value.replace("+", ",").replace("|", ",").replace(";", ",")
+        raw_items = [item.strip() for item in normalized_text.split(",")]
+    else:
+        raw_items = [str(item).strip() for item in value]
+
+    aliases = {
+        "": "",
+        "none": "",
+        "off": "",
+        "raw": "",
+        "kelly": "kelly",
+        "kelly_sizer": "kelly",
+        "hrp": "hrp",
+        "risk_parity": "hrp",
+        "hierarchical_risk_parity": "hrp",
+    }
+    modules: list[str] = []
+    for raw in raw_items:
+        key = raw.lower().replace("-", "_").replace(" ", "_")
+        if key not in aliases:
+            raise ValueError(
+                f"Unknown risk_desk sizing module: {raw!r}. "
+                "Expected kelly, hrp, or none."
+            )
+        module = aliases[key]
+        if module and module not in modules:
+            modules.append(module)
+    return tuple(modules)
+
+
+def _risk_desk_detail(modules: tuple[str, ...]) -> str:
+    if modules == ("kelly", "hrp"):
+        return "Kelly sizing + HRP budgets + portfolio cap."
+    if modules == ("kelly",):
+        return "Kelly sizing + portfolio cap."
+    if modules == ("hrp",):
+        return "HRP risk budgets + portfolio cap."
+    if not modules:
+        return "Raw factor signal + portfolio cap."
+    return f"{' + '.join(modules)} allocation modules + portfolio cap."
 
 
 __all__ = [

@@ -16,12 +16,9 @@ projects.
 - Docker build context is also shielded through `.dockerignore`, including
   local envs, secrets, runtime state, broker exports, model checkpoints, and
   `watchlist.json`.
-- The archived Middle Office folder remains only as a compatibility fallback
-  for old local portfolio files. Its local secrets, watchlists, databases, and
-  raw portfolio data are ignored.
-- No active OQP app should import the retired root `Middle_Office/` path.
-  Compatibility lookups now prefer `departments/archive/legacy_middle_office/`
-  when legacy local files are needed.
+- The old Middle Office app/archive has been retired from active runtime code.
+  Portfolio/account jobs now read only from `.env`/process env and `runtime/`
+  paths; do not restore fallback reads from `Middle_Office/` or an archive copy.
 
 ## Commit Boundary
 
@@ -58,8 +55,7 @@ Already retired during cleanup:
 
 - root `offline_quant_lab/`
 - root `strategy_agents/`
-- `departments/archive/legacy_alpha_factory/`
-- `departments/archive/legacy_dashboards/`
+- legacy alpha-factory, dashboard, and Middle Office archive directories
 
 ## Do Not Mix Into Public Commits
 
@@ -76,7 +72,7 @@ Already retired during cleanup:
   `departments/research/public_private_boundary.md`.
 - `backtest_1-main/` and `manager_research_demo/` are local scratch/reference
   projects. They stay ignored unless they are deliberately migrated into
-  `src/oqp`, `apps/`, `departments/archive/`, or `notebooks/` after review.
+  `src/oqp`, `apps/`, `departments/`, or `notebooks/` after review.
 - Existing churn in `Photos/`, old notebooks, compiled objects, and old model
   artifacts should be reviewed separately before any final Git commit.
 - Ignored local folders under archived legacy projects, especially old

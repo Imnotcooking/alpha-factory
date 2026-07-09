@@ -44,8 +44,14 @@ from oqp.ui import (  # noqa: E402
     ops_tabs,
     ops_text,
     page_header,
+    qmt_account_rows,
+    qmt_connector_contract_frame,
+    qmt_exposure_by_asset,
+    qmt_safety_gate_frame,
     render_dark_line_chart,
     render_dark_table,
+    render_market_lane_chips,
+    render_qmt_connector_panel,
     style_dark_plotly,
 )
 
@@ -593,6 +599,11 @@ page_header(
     subtitle_zh="实盘与模拟账户的日常风险驾驶舱：敞口、集中度、回撤、期权、压力测试与政策闸门。",
     language=OPS_LANG,
 )
+render_market_lane_chips(
+    language=OPS_LANG,
+    lanes=("EQUITY_US", "OPTIONS_US", "EQUITY_CN", "OPTIONS_CN", "FUTURES_CN"),
+    caption="Risk controls should be scoped by market lane: equities, options, and futures have different liquidity, leverage, and execution constraints.",
+)
 
 latest_live = data["live"]
 latest_paper = data["paper"]
@@ -632,6 +643,10 @@ with overview_tab:
         st.info("No ops status rows are available.")
     else:
         display_table(status_rows.head(20))
+
+    st.subheader("QMT Risk Gates")
+    render_dark_table(qmt_safety_gate_frame(data["settings"]), max_height_px=300)
+    render_qmt_connector_panel(data["settings"], data["ops_snapshot"], compact=True)
 
 with exposure_tab:
     left, right = st.columns(2)
@@ -676,6 +691,17 @@ with exposure_tab:
         style_dark_plotly(fig)
         st.plotly_chart(fig, use_container_width=True, theme=None)
 
+    st.subheader("QMT/CN Broker Exposure")
+    qmt_positions = pd.concat(
+        [data["live"]["positions"], data["paper"]["positions"]],
+        ignore_index=True,
+    )
+    render_dark_table(
+        qmt_exposure_by_asset(qmt_positions),
+        empty_message="No QMT exposure rows are available yet.",
+        max_height_px=280,
+    )
+
 with drawdown_tab:
     left, right = st.columns(2)
     with left:
@@ -710,6 +736,13 @@ with drawdown_tab:
                 yaxis_title="Market Value",
             )
 
+    st.subheader("QMT Account Drawdown Inputs")
+    render_dark_table(
+        qmt_account_rows(data["ops_snapshot"]),
+        empty_message="No QMT account rows are available yet.",
+        max_height_px=260,
+    )
+
 with options_tab:
     spread_left, greek_right = st.columns([1.15, 1])
     with spread_left:
@@ -729,6 +762,18 @@ with options_tab:
             long = chart.melt(id_vars=["Underlying"], var_name="Metric", value_name="Value")
             plot_bar(long, x="Underlying", y="Value", color="Metric", title="Option Risk by Underlying")
 
+    st.subheader("QMT CN Options Readiness")
+    render_dark_table(
+        pd.DataFrame(
+            [
+                {"Layer": "Contract parser", "Status": "pending real QMT option payloads", "Detail": "Needs MiniQMT/xtquant option contract fields."},
+                {"Layer": "Risk model", "Status": "staged", "Detail": "Can reuse option Greeks and spread audit once CN contracts normalize."},
+                {"Layer": "Submit", "Status": "locked", "Detail": "Only Execution page should expose guarded submit controls."},
+            ]
+        ),
+        max_height_px=220,
+    )
+
 with stress_tab:
     left, right = st.columns([1.2, 1])
     with left:
@@ -742,6 +787,18 @@ with stress_tab:
         worst = stress.sort_values("Estimated P&L").head(5)
         st.subheader("Worst Reads")
         display_table(worst)
+
+    st.subheader("QMT Stress Lane")
+    render_dark_table(
+        pd.DataFrame(
+            [
+                {"Scenario": "CN equity shock", "Status": "ready once QMT positions exist", "Risk Input": "QMT equity market_value by symbol"},
+                {"Scenario": "CN futures shock", "Status": "ready once QMT positions exist", "Risk Input": "signed futures quantity, multiplier, last price"},
+                {"Scenario": "Connector outage", "Status": "monitored", "Risk Input": "QMT heartbeat and latest snapshot age"},
+            ]
+        ),
+        max_height_px=220,
+    )
 
 with allocation_tab:
     st.subheader("Current Allocation")
@@ -802,3 +859,6 @@ with allocation_tab:
         plot_bar(gap, x="Allocation Role", y="Gap", title=f"{account_choice} Target Allocation Gap")
 
     st.info("This tab is currently diagnostic only. HRP, Kelly sizing, regime-aware allocation, and rebalance proposals can plug into this surface later.")
+
+    st.subheader("QMT Allocation Constraints")
+    render_dark_table(qmt_connector_contract_frame(data["settings"]), max_height_px=260)

@@ -12,7 +12,14 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from oqp.ops.ibkr_readiness import main  # noqa: E402
+from oqp.ops.ibkr_readiness import (  # noqa: E402
+    _profile_gate_check,
+    _redact_account,
+    _socket_check,
+    intended_config,
+    main,
+    socket,
+)
 
 
 if __name__ == "__main__":

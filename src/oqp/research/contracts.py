@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 
+from oqp.contracts.market_vertical import ASSET_TAXONOMY, normalize_market_vertical
+
 
 VALID_EVALUATION_GEOMETRIES = {"cross_sectional", "time_series"}
 VALID_EXECUTION_MODES = {"risk_desk", "direct", "statarb"}
@@ -13,9 +15,13 @@ VALID_EXECUTION_LAGS = {"same_bar", "next_bar", "next_open", "already_lagged", "
 VALID_RETURN_ASSUMPTIONS = {
     "bar_signal_next_bar",
     "close_signal_next_open_to_close",
+    "close_signal_next_open_to_next_open",
+    "close_signal_close_to_next_close",
+    "close_signal_close_to_next_open",
     "close_to_close_fallback",
     "custom_forward_return",
 }
+FACTOR_MARKET_WILDCARDS = {"*", "ALL", "ANY"}
 
 
 @dataclass(frozen=True)
@@ -27,6 +33,7 @@ class FactorContract:
     execution_weight_col: str
     execution_lag: str
     return_assumption: str
+    supported_markets: tuple[str, ...]
     contract_source: str
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
@@ -42,7 +49,9 @@ def resolve_factor_contract(
     *,
     factor_id: str,
     requested_execution_mode: str = "auto",
+    requested_return_assumption: str | None = None,
     default_return_assumption: str = "custom_forward_return",
+    market_vertical: str | None = None,
     strict: bool = False,
 ) -> FactorContract:
     raw_contract = getattr(factor_module, "FACTOR_CONTRACT", None)
@@ -129,7 +138,7 @@ def resolve_factor_contract(
         ),
         VALID_EXECUTION_LAGS,
     )
-    return_assumption = _normalize_choice(
+    declared_return_assumption = _normalize_choice(
         "return_assumption",
         pick(
             "return_assumption",
@@ -139,6 +148,25 @@ def resolve_factor_contract(
             default_return_assumption,
         ),
         VALID_RETURN_ASSUMPTIONS,
+    )
+    if requested_return_assumption:
+        return_assumption = _normalize_choice(
+            "return_assumption",
+            requested_return_assumption,
+            VALID_RETURN_ASSUMPTIONS,
+        )
+        if return_assumption != declared_return_assumption:
+            warnings.append(
+                "return_assumption overridden by CLI/data horizon: "
+                f"{declared_return_assumption!r} -> {return_assumption!r}."
+            )
+    else:
+        return_assumption = declared_return_assumption
+    supported_markets = validate_factor_market_compatibility(
+        factor_module,
+        market_vertical,
+        factor_id=factor_id,
+        df=df,
     )
 
     _require_column(df, alpha_signal_col, "alpha_signal_col")
@@ -152,9 +180,61 @@ def resolve_factor_contract(
         execution_weight_col=execution_weight_col,
         execution_lag=execution_lag,
         return_assumption=return_assumption,
+        supported_markets=supported_markets,
         contract_source=contract_source,
         warnings=tuple(dict.fromkeys(warnings)),
     )
+
+
+def resolve_factor_supported_markets(
+    factor_module: ModuleType,
+    df: pd.DataFrame | None = None,
+) -> tuple[str, ...]:
+    """Return normalized market verticals declared by a factor recipe."""
+
+    raw_contract = getattr(factor_module, "FACTOR_CONTRACT", None)
+    if raw_contract is not None and not isinstance(raw_contract, dict):
+        raise ValueError("FACTOR_CONTRACT must be a dict.")
+    raw_contract = raw_contract or {}
+
+    metadata = getattr(factor_module, "FACTOR_METADATA", {}) or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    raw_supported = (
+        raw_contract.get("supported_markets")
+        or metadata.get("supported_markets")
+        or metadata.get("native_market")
+        or (df.attrs.get("supported_markets") if df is not None else None)
+    )
+    return _normalize_market_list(raw_supported, default=("*",), field_name="supported_markets")
+
+
+def validate_factor_market_compatibility(
+    factor_module: ModuleType,
+    market_vertical: str | None,
+    *,
+    factor_id: str = "",
+    df: pd.DataFrame | None = None,
+) -> tuple[str, ...]:
+    """Validate that a factor recipe is allowed to run on a market vertical."""
+
+    supported = resolve_factor_supported_markets(factor_module, df=df)
+    if market_vertical is None:
+        return supported
+
+    normalized_market = normalize_market_vertical(market_vertical)
+    if normalized_market not in ASSET_TAXONOMY:
+        raise ValueError(
+            f"Invalid market_vertical={market_vertical!r}. Expected one of {sorted(ASSET_TAXONOMY)}."
+        )
+    label = factor_id or getattr(factor_module, "FACTOR_ID", "factor")
+    if "*" not in supported and normalized_market not in supported:
+        raise ValueError(
+            f"{label} is not declared for {normalized_market}. "
+            f"Supported markets: {', '.join(supported)}."
+        )
+    return supported
 
 
 def attach_factor_contract_attrs(df: pd.DataFrame, contract: FactorContract) -> pd.DataFrame:
@@ -165,8 +245,43 @@ def attach_factor_contract_attrs(df: pd.DataFrame, contract: FactorContract) -> 
     df.attrs["execution_weight_col"] = contract.execution_weight_col
     df.attrs["execution_lag"] = contract.execution_lag
     df.attrs["return_assumption"] = contract.return_assumption
+    df.attrs["supported_markets"] = list(contract.supported_markets)
     df.attrs["execution_assumption"] = contract.return_assumption
     return df
+
+
+def _normalize_market_list(
+    value: Any,
+    *,
+    default: tuple[str, ...],
+    field_name: str,
+) -> tuple[str, ...]:
+    if value in (None, ""):
+        return default
+    if isinstance(value, str):
+        items = [part.strip() for part in value.split(",")]
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+    else:
+        items = [value]
+
+    normalized: list[str] = []
+    for item in items:
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        marker = raw.upper().replace("-", "_").replace(" ", "_")
+        if marker in FACTOR_MARKET_WILDCARDS:
+            normalized.append("*")
+            continue
+        market = normalize_market_vertical(raw)
+        if market not in ASSET_TAXONOMY:
+            raise ValueError(
+                f"Invalid factor {field_name} entry {item!r}. "
+                f"Expected one of {sorted(ASSET_TAXONOMY)} or '*'."
+            )
+        normalized.append(market)
+    return tuple(dict.fromkeys(normalized)) or default
 
 
 def _normalize_choice(name: str, value: Any, valid: set[str]) -> str:
@@ -184,6 +299,13 @@ def _normalize_choice(name: str, value: Any, valid: set[str]) -> str:
         "pair": "statarb",
         "next_session_open": "next_open",
         "open_to_close": "close_signal_next_open_to_close",
+        "next_open_to_next_close": "close_signal_next_open_to_close",
+        "next_open_to_next_open": "close_signal_next_open_to_next_open",
+        "open_to_open": "close_signal_next_open_to_next_open",
+        "close_to_next_close": "close_signal_close_to_next_close",
+        "close_to_close": "close_signal_close_to_next_close",
+        "close_to_next_open": "close_signal_close_to_next_open",
+        "overnight": "close_signal_close_to_next_open",
         "next_snapshot": "bar_signal_next_bar",
     }
     normalized = aliases.get(normalized, normalized)
@@ -211,10 +333,12 @@ def _infer_geometry(df: pd.DataFrame) -> str:
 
 
 def _infer_execution_lag(return_assumption: str) -> str:
-    if return_assumption == "close_signal_next_open_to_close":
+    if return_assumption in {"close_signal_next_open_to_close", "close_signal_next_open_to_next_open"}:
         return "next_open"
     if return_assumption == "bar_signal_next_bar":
         return "next_bar"
+    if return_assumption in {"close_signal_close_to_next_close", "close_signal_close_to_next_open"}:
+        return "same_bar"
     return "custom"
 
 

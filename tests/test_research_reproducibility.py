@@ -117,7 +117,7 @@ class ResearchReproducibilityTests(unittest.TestCase):
                 confidence_score=0.82,
                 priority=1,
                 metrics={"base_rate": 0.42, "event_rate": 0.49, "events": 240},
-                artifacts=[{"kind": "cache", "path": "runtime/db/research/alpha_lab/research_memory.db"}],
+                artifacts=[{"kind": "cache", "path": "runtime/db/research/research_memory.db"}],
                 context={"market_vertical": "FUTURES_CN", "data_frequency": "tick"},
                 metadata={"next_page": "08_Factor_Review"},
             )

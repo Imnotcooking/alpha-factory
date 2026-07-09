@@ -11,17 +11,13 @@ from typing import Any
 
 import pandas as pd
 
-from oqp.config.paths import REPO_ROOT, legacy_middle_office_root
+from oqp.config.paths import REPO_ROOT
 from oqp.portfolio.snapshots import LIVE_POSITION_COLUMNS
 
 
 DEFAULT_PORTFOLIO_DB_PATH = (
     REPO_ROOT / "runtime" / "db" / "portfolio" / "portfolio_ledger.db"
 )
-LEGACY_MIDDLE_OFFICE_DB_PATH = (
-    legacy_middle_office_root() / "Portfolio" / "clean_data" / "macro_terminal.db"
-)
-DEFAULT_MIDDLE_OFFICE_DB_PATH = DEFAULT_PORTFOLIO_DB_PATH
 
 HISTORICAL_NAV_SCHEMA = """
 CREATE TABLE IF NOT EXISTS historical_nav (
@@ -58,7 +54,7 @@ HISTORICAL_NAV_COLUMNS = [
     "daily_pnl",
 ]
 
-LEGACY_TO_LIVE_POSITION_COLUMNS = {
+BROKER_TO_LIVE_POSITION_COLUMNS = {
     "Broker": "broker",
     "Ticker": "ticker",
     "AssetType": "asset_type",
@@ -73,17 +69,6 @@ LEGACY_TO_LIVE_POSITION_COLUMNS = {
 def default_portfolio_ledger_path() -> Path:
     configured = os.getenv("OQP_PORTFOLIO_LEDGER_PATH")
     return Path(configured).expanduser() if configured else DEFAULT_PORTFOLIO_DB_PATH
-
-
-def default_middle_office_ledger_path() -> Path:
-    """Backward-compatible alias for the unified portfolio ledger path."""
-
-    return default_portfolio_ledger_path()
-
-
-def legacy_middle_office_ledger_path() -> Path:
-    return LEGACY_MIDDLE_OFFICE_DB_PATH
-
 
 
 def ensure_portfolio_ledger_schema(db_path: str | Path) -> Path:
@@ -104,7 +89,7 @@ def normalize_live_positions_frame(
     """Return a frame that matches the shared `live_positions` table schema."""
 
     df = positions.copy()
-    df = df.rename(columns=LEGACY_TO_LIVE_POSITION_COLUMNS)
+    df = df.rename(columns=BROKER_TO_LIVE_POSITION_COLUMNS)
 
     if snapshot_date is not None:
         df["date"] = _date_text(snapshot_date)

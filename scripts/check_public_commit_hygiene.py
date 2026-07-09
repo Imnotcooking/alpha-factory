@@ -31,6 +31,7 @@ PRIVATE_RULES = (
         "departments/research/factors/**",
         "private alpha factor registry",
     ),
+    Rule("tests/test_*factor*.py", "tests that import private factor implementations"),
     Rule("alpha_research_lab/**/*candidate*", "research candidate artifact"),
     Rule("alpha_research_lab/**/*trial*", "research trial artifact"),
     Rule("alpha_research_lab/**/*promotion*", "research promotion artifact"),

@@ -12,7 +12,7 @@ ORACLE_TREND_RETURN_MIN = 0.02
 ORACLE_TREND_KER_MIN = 0.25
 ORACLE_PANIC_MDD_MAX = -0.08
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_ALPHA_RUNTIME_DATA_ROOT = _REPO_ROOT / "runtime" / "data" / "alpha_lab"
+_ALPHA_RUNTIME_DATA_ROOT = _REPO_ROOT / "runtime" / "data"
 DEFAULT_MATRIX_PATH = os.path.join(_ALPHA_RUNTIME_DATA_ROOT, "feature_store", "ML_Feature_Matrix.parquet")
 DEFAULT_PROBS_PATH = os.path.join(_ALPHA_RUNTIME_DATA_ROOT, "regime", "GMM_Rolling_Probabilities.parquet")
 

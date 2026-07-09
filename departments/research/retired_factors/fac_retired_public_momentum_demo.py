@@ -15,10 +15,9 @@ FACTOR_ID = "fac_retired_public_momentum_demo"
 
 FACTOR_METADATA = {
     "status": "retired_public_example",
-    "native_market": "SYNTHETIC_PUBLIC",
-    "suitable_markets": ["SYNTHETIC_PUBLIC"],
+    "native_market": "FUTURES_CN",
+    "supported_markets": ["FUTURES_CN"],
     "experimental_markets": [],
-    "unsupported_markets": [],
     "required_fields": ["date", "ticker", "close"],
     "optional_fields": [],
     "uses_open_interest": False,

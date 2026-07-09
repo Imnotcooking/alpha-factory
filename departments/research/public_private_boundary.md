@@ -24,11 +24,13 @@ These files should remain local/private unless explicitly sanitized:
 - Execution logs and return series.
 - Local trained model files or model JSONs.
 - Runtime alpha research matrices and regime outputs under
-  `runtime/data/alpha_lab/`.
+  `runtime/data/`.
+- Local CN futures vendor/static market data under
+  `runtime/data/futures_cn/`.
 - Local research memory databases such as `research_memory.db` and
   `optimization_memory.db`.
 - Tick/latent/regime model artifacts under
-  `runtime/artifacts/research/alpha_lab/`.
+  `runtime/artifacts/research/`.
 - Workbench/archive scripts that reveal current research process or edge.
 - Legacy archive factor files, strategy agents, and trained model bundles unless
   they have gone through the retired-factor publication process.

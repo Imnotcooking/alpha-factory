@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
 
+from oqp.contracts.market_vertical import normalize_market_vertical
+
 
 @dataclass(frozen=True)
 class ExecutionCapitalProfile:
@@ -50,6 +52,16 @@ DEFAULT_CAPITAL_PROFILES: dict[str, dict[str, tuple[float, str]]] = {
         "small_personal_equity_hk": (200_000.0, "HKD"),
         "institutional_equity_hk": (10_000_000.0, "HKD"),
     },
+    "OPTIONS_US": {
+        "default": (100_000.0, "USD"),
+        "small_personal_options_us": (25_000.0, "USD"),
+        "institutional_options_us": (1_000_000.0, "USD"),
+    },
+    "OPTIONS_CN": {
+        "default": (200_000.0, "CNY"),
+        "small_personal_options_cn": (50_000.0, "CNY"),
+        "institutional_options_cn": (2_000_000.0, "CNY"),
+    },
     "CRYPTO_PERP": {
         "default": (100_000.0, "USD"),
         "small_personal_crypto": (25_000.0, "USD"),
@@ -69,7 +81,7 @@ def resolve_execution_capital(
     capital_currency: str | None = None,
     capital_profile: str | None = None,
 ) -> ExecutionCapitalProfile:
-    asset_key = str(asset_class or "").upper()
+    asset_key = normalize_market_vertical(asset_class)
     profile_map = DEFAULT_CAPITAL_PROFILES.get(
         asset_key,
         {"default": (1_000_000.0, "USD")},

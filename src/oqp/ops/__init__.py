@@ -12,6 +12,8 @@ from oqp.ops.status import (
     host_health_items,
     ibkr_api_heartbeat_item,
     ibkr_api_heartbeat_items,
+    qmt_connector_status_item,
+    qmt_connector_status_items,
     socket_status_item,
 )
 from oqp.ops.notifications import (
@@ -55,6 +57,8 @@ __all__ = [
     "ibkr_api_heartbeat_item",
     "ibkr_api_heartbeat_items",
     "post_json_webhook",
+    "qmt_connector_status_item",
+    "qmt_connector_status_items",
     "run_ibkr_heartbeat_checks",
     "run_ibkr_readiness_checks",
     "run_paper_trading_health_checks",

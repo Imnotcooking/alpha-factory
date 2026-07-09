@@ -51,15 +51,34 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
 
         self.assertEqual(
             Path(config.ALPHA_RUNTIME_DATA_ROOT),
-            REPO_ROOT / "runtime" / "data" / "alpha_lab",
+            REPO_ROOT / "runtime" / "data",
         )
         self.assertEqual(
             Path(config.RESEARCH_ARTIFACT_ROOT),
-            REPO_ROOT / "runtime" / "artifacts" / "research" / "alpha_lab",
+            REPO_ROOT / "runtime" / "artifacts" / "research",
         )
         self.assertEqual(Path(config.LOGS_DIR), Path(config.RESEARCH_ARTIFACT_ROOT))
         self.assertTrue(Path(config.DB_PATH).parent.exists())
         self.assertTrue((REPO_ROOT / "runtime" / "logs").exists())
+
+    def test_runtime_estimator_summarizes_asset_routes(self) -> None:
+        estimator = _load_module(RESEARCH_APP / "runtime_estimator.py", "_research_runtime_estimator")
+        runs = pd.DataFrame(
+            {
+                "asset_class": ["EQUITY_CN", "OPTIONS_US"],
+                "validation_rows": [4_000_000, 100_000],
+                "holdout_rows": [4_000_000, 50_000],
+                "data_frequency": ["daily", "daily"],
+                "execution_mode": ["direct", "event_driven_options"],
+                "timestamp": ["2026-07-08", "2026-07-08"],
+            }
+        )
+
+        frame = estimator.runtime_estimate_frame(runs)
+
+        self.assertEqual(set(frame["Asset"]), {"EQUITY_CN", "OPTIONS_US"})
+        self.assertIn("8,000,000", frame.loc[frame["Asset"].eq("EQUITY_CN"), "Rows"].iloc[0])
+        self.assertIn("Event-driven", frame.loc[frame["Asset"].eq("OPTIONS_US"), "Notes"].iloc[0])
 
     def test_tick_pulse_backend_helpers_are_package_owned(self) -> None:
         self.assertTrue(CACHE_SCHEMA_VERSION.startswith("tick_pulse_research_cache_"))
@@ -109,8 +128,8 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         candidates["is_correct"] = [True, True]
 
         kwargs = {
-            "selected_file": "runtime/data/alpha_lab/market_data/tick/demo_tick_all_data.parquet",
-            "file_path": str(REPO_ROOT / "runtime" / "data" / "alpha_lab" / "market_data" / "tick" / "demo_tick_all_data.parquet"),
+            "selected_file": "runtime/data/futures_cn/tick/demo_tick_all_data.parquet",
+            "file_path": str(REPO_ROOT / "runtime" / "data" / "futures_cn" / "tick" / "demo_tick_all_data.parquet"),
             "selected_product": "au",
             "selected_symbol": "au2608",
             "selected_hypothesis": "relative_velocity",
@@ -227,6 +246,41 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         self.assertNotIn('default=st.session_state["tick_scope_hypothesis_source"]', tick_page)
         self.assertNotIn("default=threshold_mode", tick_page)
 
+    def test_homepage_ml_tab_is_artifact_gated(self) -> None:
+        homepage = (RESEARCH_APP / "Homepage.py").read_text()
+
+        self.assertIn("ml_view.should_render_tab", homepage)
+        self.assertIn('if "ml" in tabs:', homepage)
+        self.assertNotIn("with tabs[4]", homepage)
+        self.assertNotIn("with tabs[5]", homepage)
+
+    def test_homepage_analysis_tabs_follow_research_workflow_order(self) -> None:
+        homepage = (RESEARCH_APP / "Homepage.py").read_text()
+        expected_order = (
+            '("tearsheet", t["tab_tearsheet"])',
+            '("dna", t["tab_dna"])',
+            '("pareto", t["tab_pareto"])',
+            '("correlation", t["tab_correlation"])',
+            'tab_specs.append(("assumptions", t.get("tab_assumptions", "Assumptions")))',
+        )
+
+        positions = [homepage.index(item) for item in expected_order]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_homepage_tearsheet_hover_shows_exact_dates(self) -> None:
+        tearsheet = (RESEARCH_APP / "views" / "tearsheet_view.py").read_text()
+
+        self.assertIn('days = pd.to_datetime(df[\'date\'], errors="coerce")', tearsheet)
+        self.assertIn("Date: %{x|%Y-%m-%d}", tearsheet)
+        self.assertIn('fig.update_xaxes(hoverformat="%Y-%m-%d")', tearsheet)
+
+    def test_sidebar_global_controls_do_not_render_taxonomy_toggle(self) -> None:
+        ui_state = (RESEARCH_APP / "ui_state.py").read_text()
+
+        self.assertNotIn("_render_asset_taxonomy_sidebar", ui_state)
+        self.assertNotIn("st.sidebar.expander", ui_state)
+        self.assertNotIn("dashboard_taxonomy_frame", ui_state)
+
     def test_arbitrage_radar_uses_full_universe_without_extra_filters(self) -> None:
         arbitrage_page = (RESEARCH_APP / "pages" / "04_Arbitrage_Lab.py").read_text()
 
@@ -303,8 +357,23 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         self.assertNotIn('cols[4].metric(copy["latest_run"]', health_view)
         self.assertIn("def _render_latest_run", health_view)
         self.assertIn("def _render_api_readiness", health_view)
+        self.assertIn("def _api_provider_snapshot", health_view)
+        self.assertIn("def _render_data_folder_overview", health_view)
+        self.assertIn("def _runtime_data_folder_snapshot", health_view)
+        self.assertIn('"api_readiness": api_readiness_df', health_view)
         self.assertIn('"api_readiness": "API Readiness"', health_view)
-        self.assertIn('market_df["asset_class"].isin(["EQUITY_US", "OPTIONS_US"])', health_view)
+        self.assertIn('"provider_api": "Provider / API"', health_view)
+        self.assertIn('"data_folder_overview": "Runtime Data Folder Coverage"', health_view)
+        self.assertIn('"provider": "FMP"', health_view)
+        self.assertIn('"provider": "Massive"', health_view)
+        self.assertIn('"provider": "Yahoo Finance"', health_view)
+        self.assertIn('display_cols = [\n            "provider",\n            "asset_class",\n            "status"', health_view)
+        self.assertIn('copy["latest_update"]: st.column_config.TextColumn(width="medium")', health_view)
+        self.assertIn('copy["date_range"]: st.column_config.TextColumn(width="large")', health_view)
+        self.assertIn("def _whole_number_label", health_view)
+        self.assertNotIn('copy["runtime"],', health_view)
+        self.assertIn('asset_class="EQUITY_CN"', health_view)
+        self.assertIn('asset_class="OPTIONS_CN"', health_view)
 
     def test_research_dashboard_uses_current_streamlit_width_api(self) -> None:
         for path in RESEARCH_APP.rglob("*.py"):

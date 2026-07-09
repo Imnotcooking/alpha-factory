@@ -111,17 +111,23 @@ class CasinoCapEnforcer:
 
     def enforce(self, df: pd.DataFrame, weight_col: str) -> pd.DataFrame:
         out = df.copy()
-        out["capped_weight"] = out[weight_col].clip(
-            lower=-self.max_weight,
-            upper=self.max_weight,
-        )
+        weights = pd.to_numeric(out[weight_col], errors="coerce").fillna(0.0)
+        if self.max_weight is not None and self.max_weight > 0:
+            weights = weights.clip(lower=-self.max_weight, upper=self.max_weight)
+        out["capped_weight"] = weights
         daily_gross = out.groupby("date")["capped_weight"].transform(
             lambda values: values.abs().sum()
         )
+        max_leverage = max(float(self.max_leverage), 0.0)
         shrink_factor = np.where(
-            daily_gross > self.max_leverage,
-            self.max_leverage / daily_gross,
+            daily_gross > max_leverage,
+            max_leverage / daily_gross.replace(0.0, np.nan),
             1.0,
+        )
+        shrink_factor = (
+            pd.Series(shrink_factor, index=out.index)
+            .replace([np.inf, -np.inf], np.nan)
+            .fillna(0.0)
         )
         out["final_target_weight"] = out["capped_weight"] * shrink_factor
         return out.drop(columns=["capped_weight"])
@@ -130,10 +136,13 @@ class CasinoCapEnforcer:
 class PortfolioOptimizer:
     """Fuse Kelly alpha scaling with HRP risk budgets and portfolio caps."""
 
-    def __init__(self, kelly_fraction=0.5, max_weight=0.05):
+    def __init__(self, kelly_fraction=0.5, max_weight=0.05, max_gross_leverage=1.0):
         self.hrp = HierarchicalRiskParity()
         self.kelly = KellySizer(kelly_fraction=kelly_fraction)
-        self.cap = CasinoCapEnforcer(max_weight_per_asset=max_weight)
+        self.cap = CasinoCapEnforcer(
+            max_weight_per_asset=max_weight,
+            max_gross_leverage=max_gross_leverage,
+        )
 
     def optimize(
         self,

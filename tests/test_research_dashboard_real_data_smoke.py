@@ -33,6 +33,7 @@ from oqp.research.state_space import (  # noqa: E402
     normalize_daily_market_frame,
     run_opportunity_scan,
 )
+from oqp.data.runtime_paths import default_futures_cn_index_daily_file  # noqa: E402
 from oqp.risk.factor_breadth import RiskBreadthConfig, compute_risk_factor_breadth  # noqa: E402
 
 
@@ -118,12 +119,7 @@ class ResearchDashboardRealDataSmokeTests(unittest.TestCase):
         self.assertGreater(len(overlap), 0)
 
     def test_risk_breadth_and_health_runtime_data_smoke(self) -> None:
-        source = (
-            Path(ALPHA_RUNTIME_DATA_ROOT)
-            / "market_data"
-            / "daily"
-            / "全市场_1d_index_20180101_20260602.parquet"
-        )
+        source = default_futures_cn_index_daily_file()
         _skip_if_missing(source)
 
         breadth = compute_risk_factor_breadth(
@@ -140,6 +136,19 @@ class ResearchDashboardRealDataSmokeTests(unittest.TestCase):
         self.assertGreater(len(breadth["spectrum"]), 0)
         self.assertIn("checks", snapshot)
         self.assertIn("markets", snapshot)
+        self.assertIn("api_readiness", snapshot)
+        self.assertIn("data_folders", snapshot)
+        api_readiness = snapshot["api_readiness"]
+        self.assertIn("provider", api_readiness.columns)
+        self.assertIn("asset_class", api_readiness.columns)
+        self.assertTrue(api_readiness["provider"].isin(["FMP", "Massive", "Yahoo Finance"]).any())
+        folders = snapshot["data_folders"]
+        self.assertIn("asset_class", folders.columns)
+        self.assertIn("timeframe", folders.columns)
+        self.assertIn("latest_update", folders.columns)
+        self.assertTrue(
+            ((folders["asset_class"] == "FUTURES_CN") & (folders["timeframe"] == "daily")).any()
+        )
 
 
 if __name__ == "__main__":

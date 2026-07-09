@@ -54,6 +54,7 @@ from tick_pulse_lab.research_cache import (
 )
 from tick_pulse_lab.text import PAGE_TEXT as TICK_LAB_TEXT
 from tick_pulse_lab.views import _render_contract_health, _render_raw_row_viewer
+from oqp.data.runtime_paths import discover_futures_cn_tick_files
 from oqp.research.tick_pulse import (
     DEFAULT_TICK_FILE,
     contract_summary,
@@ -252,12 +253,9 @@ def _product_label(asset: str, t: dict) -> str:
 
 
 def _discover_tick_files() -> list[dict]:
-    data_dir = Path(ALPHA_RUNTIME_DATA_ROOT) / "market_data" / "tick"
     rows = []
-    if not data_dir.exists():
-        return rows
     for path in sorted(
-        data_dir.glob("*_tick_all_data.parquet"),
+        discover_futures_cn_tick_files(patterns=("*_tick_all_data.parquet",)),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     ):

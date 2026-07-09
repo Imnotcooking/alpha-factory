@@ -22,18 +22,17 @@ from ui_state import (
     init_global_ui_state,
     render_global_controls_in_sidebar,
 )
+from oqp.data.runtime_paths import (
+    default_futures_cn_index_daily_file,
+    discover_futures_cn_daily_files,
+)
 from oqp.risk.factor_breadth import (
     RiskBreadthConfig,
     compute_risk_factor_breadth,
 )
 
 
-DEFAULT_SOURCE = (
-    Path(ALPHA_RUNTIME_DATA_ROOT)
-    / "market_data"
-    / "daily"
-    / "全市场_1d_index_20180101_20260602.parquet"
-)
+DEFAULT_SOURCE = default_futures_cn_index_daily_file()
 CACHE_VERSION = "risk_breadth_v2_component_labels"
 
 
@@ -54,15 +53,14 @@ template = get_plotly_template(st.session_state.theme_mode)
 
 
 def _list_daily_files() -> list[Path]:
-    runtime_daily = Path(ALPHA_RUNTIME_DATA_ROOT) / "market_data" / "daily"
     runtime_feature_store = Path(ALPHA_RUNTIME_DATA_ROOT) / "feature_store"
-    patterns = ["*1d*index*.parquet", "*1d*main*.parquet", "ML_Feature_Matrix.parquet"]
     seen: dict[Path, None] = {}
-    for root in (runtime_daily, runtime_feature_store):
-        for pattern in patterns:
-            for path in sorted(root.glob(pattern) if root.exists() else []):
-                if path.is_file():
-                    seen[path.resolve()] = None
+    for path in discover_futures_cn_daily_files():
+        seen[path.resolve()] = None
+    for pattern in ("ML_Feature_Matrix.parquet",):
+        for path in sorted(runtime_feature_store.glob(pattern) if runtime_feature_store.exists() else []):
+            if path.is_file():
+                seen[path.resolve()] = None
     root_matrix = (
         Path(ALPHA_RUNTIME_DATA_ROOT) / "feature_store" / "ML_Feature_Matrix.parquet"
     )

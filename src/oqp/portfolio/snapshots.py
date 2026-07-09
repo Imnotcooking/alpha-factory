@@ -1,4 +1,4 @@
-"""Portfolio snapshot contracts for investing and middle-office views."""
+"""Portfolio snapshot contracts for portfolio ingestion and account views."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 
 
-LEGACY_POSITION_COLUMNS = [
+BROKER_POSITION_COLUMNS = [
     "Ticker",
     "Shares",
     "AvgPrice",
@@ -65,7 +65,7 @@ class PortfolioPositionSnapshot:
     def market_value(self) -> float:
         return self.shares * self.broker_price * self.multiplier
 
-    def to_legacy_row(self) -> dict[str, Any]:
+    def to_broker_position_row(self) -> dict[str, Any]:
         return {
             "Ticker": self.ticker,
             "Shares": self.shares,
@@ -116,11 +116,11 @@ class PortfolioSnapshot:
         return sum(abs(position.market_value) for position in self.positions)
 
 
-def position_snapshots_to_legacy_frame(
+def position_snapshots_to_broker_position_frame(
     positions: list[PortfolioPositionSnapshot] | tuple[PortfolioPositionSnapshot, ...],
 ) -> pd.DataFrame:
-    rows = [position.to_legacy_row() for position in positions]
-    return pd.DataFrame(rows, columns=LEGACY_POSITION_COLUMNS)
+    rows = [position.to_broker_position_row() for position in positions]
+    return pd.DataFrame(rows, columns=BROKER_POSITION_COLUMNS)
 
 
 def position_snapshots_to_live_positions_frame(

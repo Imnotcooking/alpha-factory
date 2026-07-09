@@ -52,10 +52,18 @@ from oqp.ui import (  # noqa: E402
     ops_tabs,
     ops_text,
     page_header,
+    qmt_connector_contract_frame,
+    qmt_safety_gate_frame,
+    qmt_strategy_route_frame,
     render_dark_area_chart,
     render_dark_bar_chart,
     render_dark_line_chart,
     render_dark_table,
+    render_market_lane_chips,
+    render_qmt_account_panel,
+    render_qmt_audit_panel,
+    render_qmt_connector_panel,
+    render_qmt_safety_panel,
 )
 
 
@@ -677,6 +685,11 @@ page_header(
     subtitle_zh="模拟账户健康、策略授权、安全审查与订单票据的控制室。",
     language=OPS_LANG,
 )
+render_market_lane_chips(
+    language=OPS_LANG,
+    lanes=("EQUITY_US", "OPTIONS_US", "EQUITY_CN", "OPTIONS_CN", "FUTURES_CN"),
+    caption="Paper trading currently routes through IBKR for US lanes; CN lanes are staged for 华源证券/QMT once adapters and guardrails are wired.",
+)
 
 render_metric_strip(
     [
@@ -795,6 +808,9 @@ with overview_tab:
     st.subheader("Paper Trading Flow")
     render_dark_table(workflow)
 
+    st.subheader("QMT Paper Connector")
+    render_qmt_connector_panel(settings, data["ops_snapshot"], compact=True)
+
 with account_tab:
     chart_left, chart_right = st.columns([1.25, 1])
     with chart_left:
@@ -851,6 +867,9 @@ with account_tab:
                 yaxis_title="Market Value",
             )
 
+    st.subheader("QMT Paper Account Slice")
+    render_qmt_account_panel(data["ops_snapshot"], positions, environment="paper")
+
     st.subheader("Exposure History")
     asset_chart = account_asset_exposure_pivot(asset_history)
     if asset_chart.empty:
@@ -878,6 +897,13 @@ with strategy_tab:
         with status_right:
             render_dark_table(display, max_height_px=420)
 
+    st.subheader("QMT Strategy Route Eligibility")
+    render_dark_table(
+        qmt_strategy_route_frame(registry),
+        empty_message="No paper strategies are registered for QMT route review yet.",
+        max_height_px=320,
+    )
+
 with reviews_tab:
     status_left, latest_right = st.columns([1, 2])
     with status_left:
@@ -895,6 +921,9 @@ with reviews_tab:
         else:
             render_dark_table(display, max_height_px=460)
 
+    st.subheader("QMT Review Gates")
+    render_dark_table(qmt_safety_gate_frame(settings), max_height_px=300)
+
 with tickets_tab:
     status_left, latest_right = st.columns([1, 2])
     with status_left:
@@ -911,6 +940,13 @@ with tickets_tab:
             st.info("No paper order tickets have been recorded yet.")
         else:
             render_dark_table(display, max_height_px=460)
+
+    st.subheader("QMT Ticket Route State")
+    render_dark_table(
+        qmt_strategy_route_frame(registry),
+        empty_message="No QMT route metadata is available for current paper tickets.",
+        max_height_px=260,
+    )
 
     st.subheader("Paper Events")
     if events.empty:
@@ -939,6 +975,12 @@ with ledger_tab:
             ]
         ),
     )
+
+    st.subheader("QMT Connector Contracts")
+    render_dark_table(qmt_connector_contract_frame(settings), max_height_px=260)
+
+    st.subheader("QMT Audit Logs")
+    render_qmt_audit_panel(settings, limit=15)
 
     st.subheader("Legacy Paper Positions")
     if legacy_positions.empty:
@@ -987,6 +1029,12 @@ with health_tab:
                 {"Gate": "Max Daily Notional", "Value": money(settings.paper_max_daily_notional)},
                 {"Gate": "Allowed Asset Classes", "Value": ", ".join(settings.paper_allowed_asset_classes)},
                 {"Gate": "Options Enabled", "Value": str(settings.paper_options_enabled).lower()},
+                {"Gate": "QMT Paper Submit", "Value": str(settings.allow_qmt_paper_order_submit).lower()},
+                {"Gate": "QMT Submit URL", "Value": settings.qmt_submit_connector_url},
+                {"Gate": "QMT HMAC Signing", "Value": "configured" if settings.qmt_request_signing_secret else "missing"},
             ]
         ),
     )
+
+    st.subheader("QMT Runtime Gates")
+    render_qmt_safety_panel(settings, max_height_px=360)

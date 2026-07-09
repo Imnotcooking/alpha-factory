@@ -1,0 +1,389 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import streamlit as st
+
+
+UI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if UI_DIR not in sys.path:
+    sys.path.insert(0, UI_DIR)
+
+from config import BASE_DIR, LOGS_DIR, TEXT  # noqa: E402
+
+try:
+    from oqp.contracts.market_vertical import ASSET_TAXONOMY
+except Exception:  # pragma: no cover - keeps standalone dashboard launches alive.
+    ASSET_TAXONOMY = {}
+
+
+class AssumptionsView:
+    """Render the recorded assumption manifest for a research run."""
+
+    def __init__(self, data_manager, assumptions_dir: str | os.PathLike[str] | None = None):
+        self.dm = data_manager
+        self.assumptions_dir = Path(assumptions_dir) if assumptions_dir else Path(LOGS_DIR) / "assumptions"
+
+    def render(self, run_id: str, run_metadata: pd.Series, lang: str = "EN") -> None:
+        copy = TEXT.get(lang, TEXT["EN"])
+        st.markdown(f"### {copy.get('assumptions_title', copy.get('tab_assumptions', 'Assumptions'))}")
+
+        index = self.manifest_index()
+        selected_manifest = self.load_manifest(run_id)
+        selected_run_id = run_id
+
+        if not index.empty:
+            options = index["run_id"].astype(str).tolist()
+            if run_id not in options:
+                options = [run_id, *options]
+            default_index = options.index(run_id) if run_id in options else 0
+            selected_run_id = st.selectbox(
+                copy.get("assumptions_select_run", "Inspect run"),
+                options=options,
+                index=default_index,
+                format_func=lambda value: self._format_run_option(value, index, run_metadata),
+                key=f"assumptions_manifest_select_{run_id}",
+            )
+            selected_manifest = self.load_manifest(selected_run_id)
+
+        if selected_manifest is None:
+            path_hint = self.candidate_paths(selected_run_id)[0]
+            reconstructed = self.reconstruct_legacy_manifest(selected_run_id, run_metadata)
+            if reconstructed is not None:
+                st.warning(
+                    copy.get(
+                        "assumptions_reconstructed",
+                        "No saved JSON manifest exists for this legacy run, so this view is reconstructed from the research ledger.",
+                    )
+                )
+                st.caption(f"{copy.get('assumptions_expected_path', 'Expected JSON path')}: `{self._display_path(path_hint)}`")
+                selected_manifest = reconstructed, path_hint
+            else:
+                st.warning(copy.get("assumptions_missing", "No assumption manifest found for this run."))
+                st.code(str(path_hint))
+                if not index.empty:
+                    st.markdown(f"#### {copy.get('assumptions_available', 'Available manifests')}")
+                    st.dataframe(
+                        index.loc[:, ["run_id", "factor_id", "asset_class", "execution_mode", "modified_at"]],
+                        width="stretch",
+                        hide_index=True,
+                        height=260,
+                    )
+                return
+
+        if selected_manifest is None:
+            return
+
+        manifest, manifest_path = selected_manifest
+        if not manifest_path.exists() and manifest.get("manifest_source") == "db_reconstructed_legacy":
+            st.caption(f"{copy.get('assumptions_manifest_path', 'Manifest')}: `{copy.get('assumptions_not_saved', 'not saved; reconstructed in memory')}`")
+        else:
+            st.caption(f"{copy.get('assumptions_manifest_path', 'Manifest')}: `{self._display_path(manifest_path)}`")
+
+        self._render_topline(manifest, copy)
+        if manifest.get("manifest_source") == "db_reconstructed_legacy":
+            self._render_section(
+                copy.get("assumptions_reconstruction", "Reconstruction Note"),
+                manifest.get("reconstruction_note", {}),
+                copy,
+            )
+        self._render_section(copy.get("assumptions_data", "Data"), manifest.get("data", {}), copy)
+        self._render_section(copy.get("assumptions_signal", "Signal & execution"), manifest.get("signal_and_execution_mode", {}), copy)
+        self._render_section(copy.get("assumptions_engine", "Execution engine"), manifest.get("execution_engine", {}), copy)
+        self._render_section(copy.get("assumptions_liquidity", "Liquidity policy"), manifest.get("liquidity_policy", {}), copy)
+
+        if manifest.get("option_contract_selection"):
+            self._render_section(
+                copy.get("assumptions_option_selection", "Option contract selection"),
+                manifest.get("option_contract_selection", {}),
+                copy,
+            )
+
+        self._render_section(copy.get("assumptions_realized", "Realized summary"), manifest.get("realized_summary", {}), copy)
+
+        raw_text = json.dumps(manifest, indent=2, sort_keys=True, default=str)
+        with st.expander(copy.get("assumptions_raw_json", "Raw JSON")):
+            st.download_button(
+                copy.get("assumptions_download", "Download manifest"),
+                data=raw_text,
+                file_name=manifest_path.name,
+                mime="application/json",
+                key=f"download_assumptions_{selected_run_id}",
+            )
+            st.json(manifest)
+
+    def manifest_index(self) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        seen: set[Path] = set()
+        for directory in self.assumption_directories():
+            if not directory.exists():
+                continue
+            for path in sorted(directory.glob("assumptions_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                payload = self._read_json(path)
+                if not isinstance(payload, dict):
+                    continue
+                rows.append(
+                    {
+                        "run_id": str(payload.get("run_id") or path.stem.removeprefix("assumptions_")),
+                        "factor_id": str(payload.get("factor_id") or ""),
+                        "asset_class": str(payload.get("asset_class") or ""),
+                        "execution_mode": str(
+                            (payload.get("signal_and_execution_mode") or {}).get("execution_mode")
+                            or ""
+                        ),
+                        "modified_at": pd.to_datetime(path.stat().st_mtime, unit="s"),
+                        "path": str(path),
+                    }
+                )
+        if not rows:
+            return pd.DataFrame(columns=["run_id", "factor_id", "asset_class", "execution_mode", "modified_at", "path"])
+        return pd.DataFrame(rows).sort_values("modified_at", ascending=False).reset_index(drop=True)
+
+    def load_manifest(self, run_id: str) -> tuple[dict[str, Any], Path] | None:
+        for path in self.candidate_paths(run_id):
+            payload = self._read_json(path)
+            if isinstance(payload, dict):
+                return payload, path
+        return None
+
+    def candidate_paths(self, run_id: str) -> list[Path]:
+        filename = f"assumptions_{run_id}.json"
+        return [directory / filename for directory in self.assumption_directories()]
+
+    def reconstruct_legacy_manifest(self, run_id: str, run_metadata: pd.Series) -> dict[str, Any] | None:
+        record = self._run_record(run_id, run_metadata)
+        if not record:
+            return None
+
+        factor_params = self._parse_json_dict(record.get("factor_params"))
+        asset_class = str(record.get("asset_class") or record.get("market_vertical") or "")
+        market_vertical = str(record.get("market_vertical") or asset_class)
+        signal = {
+            "alpha_signal_col": record.get("alpha_signal_col"),
+            "execution_weight_col": record.get("execution_weight_col"),
+            "execution_signal_col_used": record.get("execution_weight_col") or record.get("alpha_signal_col"),
+            "execution_mode": record.get("execution_mode"),
+            "execution_assumption": record.get("execution_assumption"),
+            "return_assumption": record.get("return_assumption"),
+            "execution_lag": record.get("execution_lag"),
+        }
+        traded_tickers = str(record.get("traded_tickers") or "")
+        traded_ticker_count = len([item for item in traded_tickers.split(",") if item.strip()])
+
+        return {
+            "manifest_source": "db_reconstructed_legacy",
+            "run_id": run_id,
+            "factor_id": record.get("factor_id"),
+            "asset_class": asset_class,
+            "factor_contract": {
+                "contract_source": record.get("factor_contract_source"),
+                "evaluation_geometry": record.get("evaluation_geometry"),
+                "alpha_signal_col": record.get("alpha_signal_col"),
+                "execution_weight_col": record.get("execution_weight_col"),
+                "execution_mode": record.get("execution_mode"),
+                "execution_lag": record.get("execution_lag"),
+                "return_assumption": record.get("return_assumption"),
+            },
+            "factor_params": factor_params,
+            "market_taxonomy": ASSET_TAXONOMY.get(market_vertical, ASSET_TAXONOMY.get(asset_class, {})),
+            "reconstruction_note": {
+                "source": "backtest_runs database row",
+                "reason": "This run was created before assumption JSON artifacts were enabled.",
+                "confidence": "High for fields stored in the run ledger; unknown engine internals are left blank.",
+            },
+            "data": {
+                "source_path": record.get("source_path"),
+                "frequency": record.get("data_frequency"),
+                "dataset_id": record.get("dataset_id"),
+                "universe_id": record.get("universe_id"),
+                "dataset_role": record.get("dataset_role"),
+                "tradability": record.get("data_tradability"),
+                "price_source": record.get("data_price_source"),
+                "roll_model": record.get("data_roll_model"),
+                "liquidity_model": record.get("data_liquidity_model"),
+                "execution_reality": record.get("data_execution_reality"),
+                "vendor": record.get("data_vendor"),
+            },
+            "signal_and_execution_mode": signal,
+            "execution_engine": {
+                "engine": "legacy_db_reconstruction",
+                "tca_model": "see realized cost fields",
+                "margin_model": "",
+                "price_limit_enabled": "",
+                "price_limit_model": "",
+                "t1_enabled": "",
+                "hurst_input_col": "",
+                "hurst_default": "",
+                "lot_mode": record.get("execution_lot_mode"),
+                "initial_capital": record.get("initial_capital"),
+                "capital_currency": record.get("capital_currency"),
+                "capital_profile": record.get("capital_profile"),
+                "capital_source": record.get("capital_source"),
+                "min_trade_weight_delta": record.get("min_trade_weight_delta"),
+            },
+            "liquidity_policy": {
+                "min_daily_traded_value": factor_params.get("min_avg_traded_value"),
+                "direct_weight_row_grid_preserved": record.get("execution_mode") == "direct",
+                "avg_daily_cost_bps": record.get("avg_daily_cost_bps"),
+                "total_exchange_fees": record.get("total_exchange_fees"),
+                "total_slippage_cost": record.get("total_slippage_cost"),
+                "total_execution_cost": record.get("total_execution_cost"),
+            },
+            "realized_summary": {
+                "returns_file_path": record.get("returns_file_path"),
+                "trading_days": "",
+                "annualized_return": record.get("annualized_return"),
+                "sharpe_ratio": record.get("sharpe_ratio"),
+                "max_drawdown": record.get("max_drawdown"),
+                "avg_daily_turnover": record.get("turnover_rate"),
+                "avg_daily_cost_bps": record.get("avg_daily_cost_bps"),
+                "total_trades": record.get("total_trades"),
+                "universe_size": record.get("universe_size"),
+                "traded_ticker_count": traded_ticker_count,
+                "traded_tickers_preview": self._preview_csv(traded_tickers),
+            },
+        }
+
+    def assumption_directories(self) -> list[Path]:
+        roots = [
+            self.assumptions_dir,
+            Path(LOGS_DIR) / "assumptions",
+            Path(LOGS_DIR) / "alpha_lab" / "assumptions",
+        ]
+        if Path(LOGS_DIR).name == "alpha_lab":
+            roots.append(Path(LOGS_DIR).parent / "assumptions")
+        unique: list[Path] = []
+        seen: set[Path] = set()
+        for root in roots:
+            resolved = root.expanduser().resolve()
+            if resolved not in seen:
+                unique.append(resolved)
+                seen.add(resolved)
+        return unique
+
+    @staticmethod
+    def _read_json(path: Path) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
+
+    def _run_record(self, run_id: str, run_metadata: pd.Series) -> dict[str, Any]:
+        record = pd.Series(dtype=object)
+        if self.dm is not None and hasattr(self.dm, "get_run_record"):
+            try:
+                record = self.dm.get_run_record(run_id)
+            except Exception:
+                record = pd.Series(dtype=object)
+        if record.empty:
+            record = run_metadata
+        return {
+            str(key): self._clean_value(value)
+            for key, value in record.to_dict().items()
+        }
+
+    @staticmethod
+    def _clean_value(value: Any) -> Any:
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+        if hasattr(value, "item"):
+            try:
+                return value.item()
+            except Exception:
+                return value
+        return value
+
+    @staticmethod
+    def _parse_json_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return {}
+        try:
+            payload = json.loads(value)
+            return payload if isinstance(payload, dict) else {"value": payload}
+        except Exception:
+            return {"value": value}
+
+    @staticmethod
+    def _preview_csv(value: str, limit: int = 18) -> str:
+        items = [item.strip() for item in str(value or "").split(",") if item.strip()]
+        if not items:
+            return ""
+        preview = ", ".join(items[:limit])
+        if len(items) > limit:
+            preview = f"{preview}, ... (+{len(items) - limit} more)"
+        return preview
+
+    def _render_topline(self, manifest: dict[str, Any], copy: dict[str, Any]) -> None:
+        signal = manifest.get("signal_and_execution_mode") or {}
+        realized = manifest.get("realized_summary") or {}
+        cols = st.columns(4)
+        cols[0].metric(copy.get("assumptions_asset", "Asset"), str(manifest.get("asset_class") or ""))
+        cols[1].metric(copy.get("assumptions_mode", "Mode"), str(signal.get("execution_mode") or ""))
+        cols[2].metric(copy.get("assumptions_alpha_col", "Alpha"), str(signal.get("alpha_signal_col") or ""))
+        cols[3].metric(copy.get("assumptions_trades", "Trades"), self._format_value(realized.get("total_trades", "")))
+
+    def _render_section(self, title: str, payload: Any, copy: dict[str, Any]) -> None:
+        st.markdown(f"#### {title}")
+        frame = self._key_value_frame(payload)
+        if frame.empty:
+            st.info(copy.get("assumptions_no_values", "No recorded values."))
+        else:
+            st.dataframe(frame, width="stretch", hide_index=True)
+
+    def _key_value_frame(self, payload: Any) -> pd.DataFrame:
+        if not isinstance(payload, dict) or not payload:
+            return pd.DataFrame(columns=["Assumption", "Value"])
+        rows = [
+            {"Assumption": str(key), "Value": self._format_value(value)}
+            for key, value in payload.items()
+        ]
+        return pd.DataFrame(rows)
+
+    def _format_run_option(self, run_id: str, index: pd.DataFrame, run_metadata: pd.Series) -> str:
+        rows = index[index["run_id"].astype(str).eq(str(run_id))]
+        if rows.empty:
+            factor = str(run_metadata.get("factor_id") or "")
+            name = str(run_metadata.get("name") or "")
+            return f"{run_id} | {factor or name or 'selected run'}"
+        row = rows.iloc[0]
+        return f"{row['run_id']} | {row['factor_id']} | {row['asset_class']} | {row['execution_mode']}"
+
+    @staticmethod
+    def _format_value(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        if isinstance(value, (dict, list, tuple)):
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        text = str(value)
+        if len(text) > 700:
+            return f"{text[:700]}..."
+        return text
+
+    @staticmethod
+    def _display_path(path: Path) -> str:
+        try:
+            return str(path.resolve().relative_to(Path(BASE_DIR).resolve()))
+        except Exception:
+            return str(path)

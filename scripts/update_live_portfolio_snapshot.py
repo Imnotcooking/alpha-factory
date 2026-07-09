@@ -62,11 +62,6 @@ def parse_args() -> argparse.Namespace:
         help="SQLite account ledger path for unified live/paper account snapshots.",
     )
     parser.add_argument(
-        "--no-legacy-raw-fallback",
-        action="store_true",
-        help="Do not read legacy Middle_Office/Portfolio/raw_data when raw-dir is empty.",
-    )
-    parser.add_argument(
         "--json",
         action="store_true",
         help="Print machine-readable JSON only.",
@@ -83,7 +78,6 @@ def main() -> int:
         state_dir=args.state_dir,
         backup_csv_dir=args.backup_csv_dir,
         account_ledger_path=args.account_ledger_path,
-        include_legacy_raw_fallback=not args.no_legacy_raw_fallback,
     )
     payload = result.to_dict()
     if args.json:

@@ -6,6 +6,8 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 
+from oqp.data.futures_cn import normalize_futures_cn_daily_frame
+from oqp.data.runtime_paths import futures_cn_daily_roots
 from oqp.risk.factor_breadth import extract_base_symbol, map_chinese_futures_sector
 
 
@@ -25,21 +27,7 @@ def load_daily_universe(path: str | Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Daily universe file not found: {path}")
 
-    df = pd.read_parquet(path)
-    missing = sorted(REQUIRED_DAILY_COLUMNS - set(df.columns))
-    if missing:
-        raise ValueError(f"Daily universe file missing required columns: {missing}")
-
-    out = df.copy()
-    out["date"] = pd.to_datetime(out["date"], errors="coerce")
-    out["ticker"] = out["ticker"].astype(str)
-    for column in ["open", "high", "low", "close", "volume", "oi"]:
-        if column in out.columns:
-            out[column] = pd.to_numeric(out[column], errors="coerce")
-
-    out = out.dropna(subset=["date", "ticker", "close"])
-    out = out[out["close"] > 0]
-    return out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    return normalize_futures_cn_daily_frame(pd.read_parquet(path))
 
 
 def discover_daily_universe_files(project_root: str | Path) -> list[dict]:
@@ -47,8 +35,8 @@ def discover_daily_universe_files(project_root: str | Path) -> list[dict]:
 
     candidates: dict[Path, None] = {}
     search_roots = (
-        repo_root / "runtime" / "data" / "alpha_lab" / "market_data" / "daily",
-        repo_root / "runtime" / "data" / "alpha_lab" / "universes",
+        *futures_cn_daily_roots(),
+        repo_root / "runtime" / "data" / "universes",
     )
     for data_dir in search_roots:
         for pattern in ["*1d*.parquet", "*universe*.parquet"]:

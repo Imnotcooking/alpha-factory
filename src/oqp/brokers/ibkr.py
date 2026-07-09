@@ -633,7 +633,7 @@ def fetch_ibkr_readonly_portfolio_snapshot(
     *,
     adapter: BrokerAdapter | None = None,
 ) -> IBKRReadOnlyPortfolioSnapshot:
-    """Connect read-only and return the IBKR extract used by portfolio ETL."""
+    """Connect read-only and return the IBKR extract used by portfolio ingestion."""
 
     broker = adapter or IBKRBrokerAdapter()
     health = broker.connect(config)
@@ -649,10 +649,10 @@ def fetch_ibkr_readonly_portfolio_snapshot(
         return IBKRReadOnlyPortfolioSnapshot(
             health=health,
             position_rows=tuple(
-                ibkr_position_to_middle_office_row(position)
+                ibkr_position_to_live_position_row(position)
                 for position in positions
             ),
-            metrics=ibkr_account_summary_to_middle_office_metrics(account),
+            metrics=ibkr_account_summary_to_live_metrics(account),
         )
     except Exception as exc:
         return IBKRReadOnlyPortfolioSnapshot(
@@ -663,10 +663,10 @@ def fetch_ibkr_readonly_portfolio_snapshot(
         broker.disconnect()
 
 
-def ibkr_account_summary_to_middle_office_metrics(
+def ibkr_account_summary_to_live_metrics(
     account: AccountSummary,
 ) -> dict[str, Any]:
-    """Convert generic account summary fields to the legacy metrics JSON."""
+    """Convert generic account summary fields to the live portfolio metrics JSON."""
 
     nav = _float_or_zero(account.net_liquidation)
     cash = _float_or_zero(account.cash)
@@ -681,15 +681,15 @@ def ibkr_account_summary_to_middle_office_metrics(
         "Total_NAV": nav,
         "Available_Cash": cash,
         "Margin_Buffer": margin_buffer,
-        # Legacy aliases retained for older jobs; prefer the currency-aware
-        # keys above for new account-ledger writes.
+        # Currency-qualified aliases remain for deployed snapshot jobs that
+        # consume these metrics directly.
         "Total_NAV_USD": nav,
         "Available_Cash_USD": cash,
         "Margin_Buffer_USD": margin_buffer,
     }
 
 
-def ibkr_position_to_middle_office_row(position: Position) -> dict[str, Any]:
+def ibkr_position_to_live_position_row(position: Position) -> dict[str, Any]:
     """Convert a generic IBKR position into the shared live-position shape."""
 
     instrument = position.instrument
@@ -704,13 +704,13 @@ def ibkr_position_to_middle_office_row(position: Position) -> dict[str, Any]:
         "Broker_Price": float(market_price),
         "Broker_PnL": _float_or_zero(position.metadata.get("unrealized_pnl")),
         "Currency": instrument.currency,
-        "AssetType": _middle_office_asset_type(instrument.asset_class),
+        "AssetType": _live_position_asset_type(instrument.asset_class),
         "Multiplier": float(instrument.multiplier),
         "Broker": "IBKR Live",
     }
 
 
-def _middle_office_asset_type(asset_class: AssetClass) -> str:
+def _live_position_asset_type(asset_class: AssetClass) -> str:
     if asset_class == AssetClass.OPTION:
         return "Option"
     if asset_class == AssetClass.FUTURE:

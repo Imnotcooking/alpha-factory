@@ -52,7 +52,9 @@ class AlphaPublicExampleTests(unittest.TestCase):
 
         self.assertEqual(FACTOR_ID, "fac_retired_public_momentum_demo")
         self.assertEqual(FACTOR_METADATA["status"], "retired_public_example")
+        self.assertEqual(FACTOR_METADATA["supported_markets"], ["FUTURES_CN"])
         self.assertEqual(FACTOR_CONTRACT["evaluation_geometry"], "cross_sectional")
+        self.assertEqual(FACTOR_CONTRACT["supported_markets"], ["FUTURES_CN"])
         self.assertEqual(list(result.columns), ["date", "ticker", "factor_score"])
         self.assertEqual(len(result), 16)
         self.assertFalse(result["factor_score"].isna().any())
@@ -76,6 +78,8 @@ class AlphaPublicExampleTests(unittest.TestCase):
 
             self.assertEqual(module.FACTOR_METADATA["status"], expected_status)
             self.assertEqual(module.FACTOR_CONTRACT["alpha_signal_col"], "factor_score")
+            if expected_status == "private_template":
+                self.assertTrue(callable(module.compute))
             self.assertEqual(list(result.columns), ["date", "ticker", "factor_score"])
             self.assertFalse(result["factor_score"].isna().any())
             self.assertEqual(result.attrs["factor_id"], module.FACTOR_ID)

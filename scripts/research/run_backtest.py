@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI wrapper for package-owned alpha backtest workflow."""
+"""Run heuristic or rules-based research backtests."""
 
 from __future__ import annotations
 

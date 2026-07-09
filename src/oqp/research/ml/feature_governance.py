@@ -60,7 +60,7 @@ def list_matrix_files(base_dir: str | Path) -> list[Path]:
     ]
     seen: dict[Path, None] = {}
     repo_root = base_path
-    runtime_feature_store = repo_root / "runtime" / "data" / "alpha_lab" / "feature_store"
+    runtime_feature_store = repo_root / "runtime" / "data" / "feature_store"
     for pattern in patterns:
         for path in sorted(runtime_feature_store.glob(pattern) if runtime_feature_store.exists() else []):
             if path.is_file():

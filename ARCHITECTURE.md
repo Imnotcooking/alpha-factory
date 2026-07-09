@@ -92,7 +92,6 @@ departments/
   data_platform/               storage map and data process notes
   middle_office/               account contracts, controls, reconciliation
   platform/                    deployment and scheduler runbooks
-  archive/                     retired legacy source references
 ```
 
 ## Paper Trading Pipeline

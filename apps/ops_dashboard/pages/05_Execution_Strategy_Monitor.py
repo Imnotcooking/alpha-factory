@@ -50,8 +50,17 @@ from oqp.ui import (  # noqa: E402
     ops_tabs,
     ops_text,
     page_header,
+    qmt_connector_contract_frame,
+    qmt_overall_status,
+    qmt_route_candidate_frame,
+    qmt_strategy_route_frame,
+    qmt_submit_state,
     render_dark_bar_chart,
     render_dark_table,
+    render_market_lane_chips,
+    render_qmt_audit_panel,
+    render_qmt_connector_panel,
+    render_qmt_safety_panel,
 )
 
 
@@ -707,6 +716,23 @@ def live_boundary_rows(settings: Any, registry: pd.DataFrame, daily_notional_use
                 "Detail": f"ALLOW_PAPER_ORDER_SUBMIT={str(settings.allow_paper_order_submit).lower()}",
             },
             {
+                "Gate": "QMT paper submit",
+                "State": "armed" if settings.allow_qmt_paper_order_submit else "locked",
+                "Detail": f"ALLOW_QMT_PAPER_ORDER_SUBMIT={str(settings.allow_qmt_paper_order_submit).lower()}",
+            },
+            {
+                "Gate": "QMT live submit",
+                "State": "armed" if settings.allow_qmt_live_trading else "locked",
+                "Detail": f"ALLOW_QMT_LIVE_TRADING={str(settings.allow_qmt_live_trading).lower()}",
+            },
+            {
+                "Gate": "QMT submit connector",
+                "State": "isolated"
+                if settings.qmt_submit_connector_url.rstrip("/") != settings.qmt_connector_url.rstrip("/")
+                else "shared",
+                "Detail": settings.qmt_submit_connector_url,
+            },
+            {
                 "Gate": "Daily paper notional",
                 "State": "tracking",
                 "Detail": f"{money(daily_notional_used)} used / {money(settings.paper_max_daily_notional)} max",
@@ -798,6 +824,11 @@ page_header(
     subtitle_zh="集中监控已毕业策略、交易提案流、订单状态、安全审查与执行边界。",
     language=OPS_LANG,
 )
+render_market_lane_chips(
+    language=OPS_LANG,
+    lanes=("EQUITY_US", "OPTIONS_US", "EQUITY_CN", "OPTIONS_CN", "FUTURES_CN"),
+    caption="Strategy graduation and execution review must stay market-scoped before a proposal can become a paper/live ticket.",
+)
 
 ready_reviews = _review_decision_count(reviews, "ready")
 blocked_reviews = _review_decision_count(reviews, "blocked")
@@ -819,7 +850,7 @@ submitted = int(
 running_strategies = _registry_status_count(registry, "paper_running")
 kill_switches = int(registry["kill_switch"].fillna(0).astype(bool).sum()) if "kill_switch" in registry else 0
 
-top = st.columns(8)
+top = st.columns(10)
 top[0].metric(T("registered", "Registered"), str(len(registry)))
 top[1].metric(T("running", "Running"), str(running_strategies))
 top[2].metric(T("kill_switches", "Kill Switches"), str(kill_switches))
@@ -828,6 +859,8 @@ top[4].metric(T("ready_reviews", "Ready Reviews"), str(ready_reviews))
 top[5].metric(T("blocked_reviews", "Blocked Reviews"), str(blocked_reviews))
 top[6].metric(T("dry_run_tickets"), str(dry_run))
 top[7].metric(T("submit_gate"), T("armed") if settings.allow_paper_order_submit else T("locked"))
+top[8].metric("QMT Heartbeat", qmt_overall_status(data["ops_snapshot"]))
+top[9].metric("QMT Submit", qmt_submit_state(settings))
 
 if settings.allow_live_trading:
     st.error(T("execution_live_enabled", "Live trading is enabled. Treat this as a production boundary until reviewed."))
@@ -873,9 +906,14 @@ with command_tab:
                 summary_table("Regime Snapshot", status_label(regime_result.status.value), regime_result.summary),
                 summary_table("Daily Paper Notional", money(data["daily_notional_used"]), "Paper ticket notional consumed today."),
                 summary_table("Paper Submit", "armed" if settings.allow_paper_order_submit else "locked", "Final broker submission gate."),
+                summary_table("QMT Submit", qmt_submit_state(settings), "Separate connector and HMAC gate for QMT routes."),
             ]
         ),
     )
+
+    st.subheader("QMT Command Read")
+    render_qmt_connector_panel(settings, data["ops_snapshot"], compact=True)
+    render_qmt_audit_panel(settings, limit=8)
 
 with strategy_tab:
     st.subheader("Graduated Strategy Roster")
@@ -911,6 +949,13 @@ with strategy_tab:
         st.info("No registered strategy has regime compatibility metadata yet.")
     else:
         render_dark_table(regime_compatibility, max_height_px=420)
+
+    st.subheader("QMT Strategy Route Eligibility")
+    render_dark_table(
+        qmt_strategy_route_frame(registry),
+        empty_message="No strategies are registered for QMT route review yet.",
+        max_height_px=360,
+    )
 
 with orders_tab:
     order_left, review_right = st.columns([1.15, 1])
@@ -957,6 +1002,9 @@ with orders_tab:
                 max_height_px=420,
             )
 
+    st.subheader("QMT Order Audit")
+    render_qmt_audit_panel(settings, limit=15)
+
 with signals_tab:
     st.subheader("Latest Operational Signals")
     if signals.empty:
@@ -991,6 +1039,20 @@ with signals_tab:
     else:
         render_dark_table(proposal_intents, max_height_px=420)
 
+    st.subheader("QMT Route Candidates")
+    if proposal_intents.empty or "Symbol" not in proposal_intents.columns:
+        render_dark_table(qmt_strategy_route_frame(registry), empty_message="No QMT route candidates are available yet.")
+    else:
+        symbols = proposal_intents["Symbol"].dropna().astype(str).head(12).tolist()
+        if not symbols:
+            st.info("No proposal symbols are available for QMT route classification.")
+        else:
+            route_rows = pd.concat(
+                [qmt_route_candidate_frame(symbol, settings).assign(Symbol=symbol) for symbol in symbols],
+                ignore_index=True,
+            )
+            render_dark_table(route_rows, max_height_px=360)
+
 with boundary_tab:
     boundary_left, alert_right = st.columns([1.1, 1])
     with boundary_left:
@@ -1022,3 +1084,9 @@ with boundary_tab:
             ]
         ),
     )
+
+    st.subheader("QMT Boundary Gates")
+    render_qmt_safety_panel(settings, max_height_px=360)
+
+    st.subheader("QMT Connector Contracts")
+    render_dark_table(qmt_connector_contract_frame(settings), max_height_px=260)

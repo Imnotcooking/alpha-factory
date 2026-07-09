@@ -89,21 +89,24 @@ Run the health check directly with:
 PYTHONPATH=src:. python scripts/check_portfolio_snapshot_health.py
 ```
 
-The combined job runs this automatically after real NAV writes. It exits nonzero
-if the ledger is missing, the latest NAV is stale, or the latest NAV is not
-positive. Warnings, such as a missing metrics JSON in a cash-only transition,
-are printed but do not fail the job.
+The combined job runs this automatically after real NAV writes. The unified live
+account ledger is authoritative once it has a fresh `unified_live` row. Legacy
+portfolio-ledger freshness is still printed for migration visibility, but it no
+longer fails the job when the unified live account snapshot is current.
 
 To post failure payloads to Discord, create a private server-only env file:
 
 ```bash
 cat > ~/.oqp_portfolio_health_env <<'EOF'
-export OQP_DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'
+export OQP_LIVE_DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'
 EOF
 chmod 600 ~/.oqp_portfolio_health_env
 ```
 
-The combined runner sources this file automatically. Keep it out of git.
+The combined runner sources this file automatically. If
+`OQP_LIVE_DISCORD_WEBHOOK_URL` is blank, the health checker falls back to
+`OQP_PORTFOLIO_DISCORD_WEBHOOK_URL`, then `OQP_DISCORD_WEBHOOK_URL`, then
+`OQP_HEALTH_WEBHOOK_URL`. Keep the env file out of git.
 
 ## IBKR Server Notes
 

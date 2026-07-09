@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from oqp.data.futures_cn import normalize_futures_cn_daily_frame
 from oqp.data.instruments import InstrumentMaster
 from oqp.risk.factor_breadth import extract_base_symbol, map_chinese_futures_sector
 from oqp.research.state_space.opportunity_scoring import liquidity_score_from_rank, score_opportunity
@@ -58,25 +59,7 @@ class DataAuditConfig:
 
 
 def normalize_daily_market_frame(df: pd.DataFrame) -> pd.DataFrame:
-    required = {"date", "ticker", "close"}
-    missing = sorted(required - set(df.columns))
-    if missing:
-        raise ValueError(f"Daily market frame missing required columns: {missing}")
-
-    cols = [
-        col
-        for col in ["date", "ticker", "open", "high", "low", "close", "volume", "oi", "open_interest", "sector"]
-        if col in df.columns
-    ]
-    out = df[cols].copy()
-    out["date"] = pd.to_datetime(out["date"], errors="coerce")
-    out["ticker"] = out["ticker"].astype(str)
-    for col in ["open", "high", "low", "close", "volume", "oi", "open_interest"]:
-        if col in out.columns:
-            out[col] = pd.to_numeric(out[col], errors="coerce")
-    out = out.dropna(subset=["date", "ticker", "close"])
-    out = out[out["close"] > 0]
-    return out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    return normalize_futures_cn_daily_frame(df)
 
 
 def build_asset_metadata(df: pd.DataFrame, asset_class: str = "FUTURES_CN") -> pd.DataFrame:

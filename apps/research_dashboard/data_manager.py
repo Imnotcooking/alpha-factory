@@ -47,7 +47,7 @@ class DataManager:
         order_by = "r.timestamp DESC" if "timestamp" in run_columns else "r.run_id DESC"
 
         query = f"""
-            SELECT r.run_id, r.factor_id, f.name,
+            SELECT r.run_id, r.factor_id, f.name, f.category AS factor_category,
                    {run_col("round_number")},
                    {run_col("validation_ic")},
                    {run_col("holdout_ic")},
@@ -64,8 +64,23 @@ class DataManager:
                    {run_col("data_vendor")},
                    {run_col("execution_assumption")},
                    {run_col("universe_size")},
+                   {run_col("validation_rows")},
+                   {run_col("holdout_rows")},
+                   {run_col("crisis_rows")},
                    {run_col("traded_tickers")},
                    {run_col("returns_file_path")},
+                   {run_col("evaluation_geometry")},
+                   {run_col("execution_mode")},
+                   {run_col("data_execution_reality")},
+                   {run_col("stat_research_family")},
+                   {run_col("research_family")},
+                   {run_col("backtest_engine")},
+                   {run_col("runner")},
+                   {run_col("runner_name")},
+                   {run_col("engine_type")},
+                   {run_col("model_type")},
+                   {run_col("model_family")},
+                   {run_col("strategy_type")},
                    {run_col("timestamp")},
                    d.failure_code, d.suggested_action
             FROM backtest_runs r
@@ -76,16 +91,35 @@ class DataManager:
         df = self._fetch_query(query)
         # Defensive schema normalization for legacy DBs / stale results
         expected_cols = [
-            "run_id", "factor_id", "name", "round_number", "validation_ic", "holdout_ic",
+            "run_id", "factor_id", "name", "factor_category", "round_number", "validation_ic", "holdout_ic",
             "total_trades", "annualized_return", "sharpe_ratio", "max_drawdown", "turnover_rate",
             "asset_class", "market_vertical", "dataset_id", "universe_id", "data_frequency",
-            "data_vendor", "execution_assumption", "universe_size", "traded_tickers", "returns_file_path",
+            "data_vendor", "execution_assumption", "universe_size", "validation_rows", "holdout_rows",
+            "crisis_rows", "traded_tickers", "returns_file_path",
+            "evaluation_geometry", "execution_mode", "data_execution_reality", "stat_research_family",
+            "research_family", "backtest_engine", "runner", "runner_name", "engine_type", "model_type",
+            "model_family", "strategy_type",
             "timestamp", "failure_code", "suggested_action"
         ]
         for col in expected_cols:
             if col not in df.columns:
                 df[col] = pd.NA
         return df
+
+    def get_run_record(self, run_id: str) -> pd.Series:
+        """Fetch a wide backtest run row for detail views."""
+        query = """
+            SELECT r.*, f.name AS factor_name, f.category AS factor_category,
+                   f.economic_rationale AS factor_rationale
+            FROM backtest_runs r
+            LEFT JOIN factors f ON r.factor_id = f.factor_id
+            WHERE r.run_id = ?
+            LIMIT 1
+        """
+        df = self._fetch_query(query, (run_id,))
+        if df.empty:
+            return pd.Series(dtype=object)
+        return df.iloc[0]
 
     def get_pareto_data(self, factor_name: str) -> pd.DataFrame:
         """Fetches bulletproofed data for the Pareto Frontier chart."""
@@ -132,16 +166,38 @@ class DataManager:
         if file_path is None or pd.isna(file_path) or not str(file_path).strip():
             return ""
 
-        file_path = str(file_path)
-        if os.path.isabs(file_path):
-            return file_path
-
         repo_root = os.fspath(BASE_DIR)
         base_dir = repo_root
-        runtime_alpha_artifacts = os.path.join(repo_root, "runtime", "artifacts", "research", "alpha_lab")
+        file_path = str(file_path)
+        legacy_artifact_root = os.path.join(
+            "runtime",
+            "artifacts",
+            "research",
+            "alpha_lab",
+        )
+        canonical_artifact_root = os.path.join(
+            "runtime",
+            "artifacts",
+            "research",
+        )
+
+        def legacy_rewrite(path: str) -> str:
+            return path.replace(legacy_artifact_root, canonical_artifact_root)
+
         candidates = []
+        if os.path.isabs(file_path):
+            candidates.append(file_path)
+            rewritten = legacy_rewrite(file_path)
+            if rewritten != file_path:
+                candidates.append(rewritten)
+        else:
+            rewritten = legacy_rewrite(file_path)
+            if rewritten != file_path:
+                candidates.append(os.path.join(repo_root, rewritten))
         if file_path.startswith("execution_logs/"):
-            candidates.append(os.path.join(runtime_alpha_artifacts, file_path.removeprefix("execution_logs/")))
+            candidates.append(
+                os.path.join(LOGS_DIR, file_path.removeprefix("execution_logs/"))
+            )
         candidates.extend(
             [
                 os.path.join(repo_root, file_path),
@@ -193,25 +249,61 @@ class DataManager:
             return pd.DataFrame(corr_data).dropna()
         return pd.DataFrame()
 
+    def feature_importance_paths(
+        self,
+        run_id: str,
+        factor_id: str | None = None,
+        *,
+        include_factor_level: bool = True,
+    ) -> list[str]:
+        """Return candidate feature-importance artifact paths in lookup order."""
+        identifiers = [str(run_id)] if run_id else []
+        if include_factor_level and factor_id:
+            factor_key = str(factor_id)
+            if factor_key not in identifiers:
+                identifiers.append(factor_key)
+
+        roots = [
+            os.path.join(LOGS_DIR, "feature_importance"),
+            os.path.join(LOGS_DIR, "returns", "feature_importance"),
+        ]
+        return [
+            os.path.join(root, f"feature_importance_{identifier}.csv")
+            for identifier in identifiers
+            for root in roots
+        ]
+
+    def has_feature_importance(
+        self,
+        run_id: str,
+        factor_id: str | None = None,
+        *,
+        include_factor_level: bool = True,
+    ) -> bool:
+        """True when a run or eligible legacy factor-level importance artifact exists."""
+        return any(
+            os.path.exists(path)
+            for path in self.feature_importance_paths(
+                run_id,
+                factor_id=factor_id,
+                include_factor_level=include_factor_level,
+            )
+        )
+
     def get_feature_importance(self, run_id: str, factor_id: str | None = None) -> pd.DataFrame:
         """Safely loads the ML Feature Importance CSV."""
-        candidates = [
-            os.path.join(LOGS_DIR, "feature_importance", f"feature_importance_{run_id}.csv"),
-        ]
-        if factor_id:
-            candidates.append(
-                os.path.join(LOGS_DIR, "feature_importance", f"feature_importance_{factor_id}.csv")
-            )
-
-        for file_path in candidates:
+        for file_path in self.feature_importance_paths(run_id, factor_id=factor_id):
             if os.path.exists(file_path):
                 return pd.read_csv(file_path)
         return pd.DataFrame()
 
     def get_shap_dna(self) -> pd.DataFrame:
         """Safely loads the Regime-based SHAP DNA matrix for the ML Autopsy."""
-        # Note: diagnostics/shap_engine.py saves runtime/artifacts/research/alpha_lab/diagnostics/shap_regime_dna.csv.
-        file_path = os.path.join(LOGS_DIR, "shap_regime_dna.csv")
-        if not os.path.exists(file_path):
-            return pd.DataFrame()
-        return pd.read_csv(file_path)
+        candidates = [
+            os.path.join(LOGS_DIR, "diagnostics", "shap_regime_dna.csv"),
+            os.path.join(LOGS_DIR, "shap_regime_dna.csv"),
+        ]
+        for file_path in candidates:
+            if os.path.exists(file_path):
+                return pd.read_csv(file_path)
+        return pd.DataFrame()

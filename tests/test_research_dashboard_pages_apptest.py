@@ -7,8 +7,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RESEARCH_APP = REPO_ROOT / "apps" / "research_dashboard"
-RUNTIME_DATA = REPO_ROOT / "runtime" / "data" / "alpha_lab"
-RUNTIME_DB = REPO_ROOT / "runtime" / "db" / "research" / "alpha_lab" / "research_memory.db"
+RUNTIME_DATA = REPO_ROOT / "runtime" / "data"
+FUTURES_CN_TICK_DATA = REPO_ROOT / "runtime" / "data" / "futures_cn" / "tick"
+RUNTIME_DB = REPO_ROOT / "runtime" / "db" / "research" / "research_memory.db"
 EXPECTED_PAGE_ORDER = [
     "01_Data_Health.py",
     "02_Pulse_Scan.py",
@@ -41,7 +42,7 @@ class ResearchDashboardPageAppTests(unittest.TestCase):
         missing = [str(path.relative_to(REPO_ROOT)) for path in required_paths if not path.exists()]
         if missing:
             raise unittest.SkipTest(f"local migrated research runtime data is missing: {', '.join(missing)}")
-        if not list((RUNTIME_DATA / "market_data" / "tick").glob("*tick*.parquet")):
+        if not list(FUTURES_CN_TICK_DATA.glob("*tick*.parquet")):
             raise unittest.SkipTest("local migrated tick parquet data is missing")
 
         try:
@@ -55,7 +56,7 @@ class ResearchDashboardPageAppTests(unittest.TestCase):
         page_paths = sorted((RESEARCH_APP / "pages").glob("*.py"))
         self.assertEqual(EXPECTED_PAGE_ORDER, [path.name for path in page_paths])
 
-        for page_path in page_paths:
+        for page_path in [RESEARCH_APP / "Homepage.py", *page_paths]:
             with self.subTest(page=page_path.name):
                 app = AppTest.from_file(str(page_path))
                 app.run(timeout=90)

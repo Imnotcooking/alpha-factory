@@ -26,12 +26,13 @@ from oqp.research.multiple_testing import (
 )
 from oqp.research.splits import build_chronological_split
 from oqp.research.statistical_tests import AlphaStatisticalTester, sharpe_p_value_from_returns
-from oqp.contracts.market_vertical import ASSET_TAXONOMY
+from oqp.contracts.market_vertical import ASSET_TAXONOMY, normalize_market_vertical
+from oqp.research.backtesting.models import ExecutionBacktestRequest, ExecutionBacktestResult
+from oqp.research.backtesting.python_backend import PythonBacktestBackend
 
 _legacy_native_dir = os.environ.get("OQP_LEGACY_QUANT_CORE_DIR", "").strip()
 qc = load_quant_core(
     (
-        "estimate_hurst",
         "CryptoOrderBookTCA",
         "SquareRootTCA",
         "StochasticTCAWrapper",
@@ -50,7 +51,6 @@ _DEFAULT_ALPHA_RESEARCH_DB_PATH = os.path.join(
     "runtime",
     "db",
     "research",
-    "alpha_lab",
     "research_memory.db",
 )
 _DEFAULT_ALPHA_ARTIFACT_ROOT = os.path.join(
@@ -58,7 +58,6 @@ _DEFAULT_ALPHA_ARTIFACT_ROOT = os.path.join(
     "runtime",
     "artifacts",
     "research",
-    "alpha_lab",
 )
 
 
@@ -122,7 +121,10 @@ class ExecutionDesk:
         capital_currency: str = "USD",
         min_trade_weight_delta: float | None = None,
     ):
-        self.asset_class = asset_class.upper()
+        self.asset_class = normalize_market_vertical(asset_class)
+        if self.asset_class not in ASSET_TAXONOMY:
+            print(f"⚠️ WARNING: '{self.asset_class}' not found in ASSET_TAXONOMY. Defaulting to FUTURES_CN.")
+            self.asset_class = "FUTURES_CN"
         self.max_leverage = max_leverage
         if min_trade_weight_delta is None:
             min_trade_weight_delta = (
@@ -147,20 +149,62 @@ class ExecutionDesk:
         profile_map = {ticker: master.get_profile(ticker) for ticker in tickers.unique()}
 
         df['base_ticker'] = tickers.map(lambda ticker: profile_map[ticker].ticker)
-        df['multiplier'] = tickers.map(lambda ticker: profile_map[ticker].multiplier).astype(float)
-        df['tick_size'] = tickers.map(lambda ticker: profile_map[ticker].tick_size).astype(float)
-        df['fee_type_code'] = tickers.map(
-            lambda ticker: self._fee_type_code(profile_map[ticker].fee_type)
-        ).astype(np.int32)
-        df['fee_open'] = tickers.map(lambda ticker: profile_map[ticker].fee_open).astype(float)
-        df['fee_close_history'] = tickers.map(
-            lambda ticker: profile_map[ticker].fee_close_history
-        ).astype(float)
-        df['fee_close_today'] = tickers.map(
-            lambda ticker: profile_map[ticker].fee_close_today
-        ).astype(float)
-        df['margin_rate'] = tickers.map(lambda ticker: profile_map[ticker].margin_rate).astype(float)
+        defaults = {
+            'multiplier': tickers.map(lambda ticker: profile_map[ticker].multiplier).astype(float),
+            'tick_size': tickers.map(lambda ticker: profile_map[ticker].tick_size).astype(float),
+            'fee_type_code': tickers.map(lambda ticker: self._fee_type_code(profile_map[ticker].fee_type)).astype(np.int32),
+            'fee_open': tickers.map(lambda ticker: profile_map[ticker].fee_open).astype(float),
+            'fee_close_history': tickers.map(lambda ticker: profile_map[ticker].fee_close_history).astype(float),
+            'fee_close_today': tickers.map(lambda ticker: profile_map[ticker].fee_close_today).astype(float),
+            'margin_rate': tickers.map(lambda ticker: profile_map[ticker].margin_rate).astype(float),
+        }
+        for column, values in defaults.items():
+            if column in df.columns:
+                df[column] = pd.to_numeric(df[column], errors='coerce').fillna(values)
+            else:
+                df[column] = values
+        df['fee_type_code'] = df['fee_type_code'].astype(np.int32)
         return df
+
+    @staticmethod
+    def _attach_backend_result(df: pd.DataFrame, result: ExecutionBacktestResult) -> None:
+        df['equity'] = np.asarray(result.equity_curve, dtype=float)
+        df['gross_equity'] = np.asarray(
+            result.gross_equity_curve if result.gross_equity_curve is not None else result.equity_curve,
+            dtype=float,
+        )
+        df['slippage_cost'] = np.asarray(
+            result.slippage_cost if result.slippage_cost is not None else np.zeros(len(df)),
+            dtype=float,
+        )
+        df['exchange_fee'] = np.asarray(
+            result.exchange_fee if result.exchange_fee is not None else np.zeros(len(df)),
+            dtype=float,
+        )
+        df['total_cost'] = np.asarray(
+            result.total_cost if result.total_cost is not None else np.zeros(len(df)),
+            dtype=float,
+        )
+        df['executed_weight'] = np.asarray(
+            result.executed_weight if result.executed_weight is not None else df['target_weight'].values,
+            dtype=float,
+        )
+        df['trade_notional'] = np.asarray(
+            result.trade_notional if result.trade_notional is not None else np.zeros(len(df)),
+            dtype=float,
+        )
+        df['trade_contracts'] = np.asarray(
+            result.trade_contracts if result.trade_contracts is not None else np.zeros(len(df)),
+            dtype=float,
+        )
+        df['portfolio_leverage'] = np.asarray(
+            result.portfolio_leverage
+            if result.portfolio_leverage is not None
+            else pd.Series(df['executed_weight']).abs().groupby(df['date']).transform('sum').values,
+            dtype=float,
+        )
+        for key, values in result.diagnostics.items():
+            df[key] = np.asarray(values, dtype=float)
 
     def _attach_explicit_execution_inputs(self, df: pd.DataFrame) -> pd.DataFrame:
         out = df.copy()
@@ -204,7 +248,10 @@ class ExecutionDesk:
 
         # Ensure volume exists for TCA
         if 'volume' not in df.columns:
-            df['volume'] = 1000.0  # Fallback
+            raise ValueError(
+                "ExecutionDesk requires a volume column for costed execution. "
+                "Add volume to the dataset or route through a no-cost diagnostic engine."
+            )
 
         # --- Map String Tickers to Integer IDs for C++ Memory Isolation ---
         df['asset_id'] = pd.factorize(df['ticker'])[0].astype(np.int32)
@@ -228,10 +275,12 @@ class ExecutionDesk:
         df['adjusted_price'] = df['close'] * df['multiplier']
         df = self._attach_explicit_execution_inputs(df)
 
-        print(f"   ⚡ [PRIME BROKER] Routing {len(df):,} rows to C++ Execution Engine...")
-        
-        # --- NEW: CALCULATE FRACTIONAL VOLATILITY (Hurst) ---
-        print("   -> 🌊 Calculating Fractional Wavelet Hurst Exponent via C++...")
+        config_data = ASSET_TAXONOMY.get(self.asset_class, ASSET_TAXONOMY.get("FUTURES_CN", {}))
+        backtest_route = str(config_data.get("backtest_route") or "vectorized")
+        vectorizable = bool(config_data.get("vectorizable", True))
+        engine_label = "C++ Execution Engine" if vectorizable else "Python event-driven execution path"
+        df.attrs["execution_engine_label"] = engine_label
+        print(f"   ⚡ [PRIME BROKER] Routing {len(df):,} rows to {engine_label}...")
         
         # Extract Volatility (Using Garman-Klass or Fallback to 1%)
         if 'f_macro_gk_vol' in df.columns:
@@ -239,49 +288,30 @@ class ExecutionDesk:
         else:
             vol_arr = np.ascontiguousarray(np.full(len(df), 0.01), dtype=np.float64)
 
-        is_intraday = infer_frame_frequency(df) in {"intraday", "tick"}
-        if is_intraday:
-            # Daily-style wavelet Hurst is not meaningful at tick resolution,
-            # and rolling it across millions of ticks is prohibitively slow.
-            df['hurst'] = 0.5
-        else:
-            # We must group by ticker to calculate rolling Hurst correctly per asset
-            def calc_hurst(group):
-                # Rolling 64-day window passed into the C++ Wavelet engine
-                return group['adjusted_price'].rolling(window=64).apply(
-                    lambda x: qc.estimate_hurst(x.values), raw=False
-                )
-
-            df['hurst'] = df.groupby('ticker', group_keys=False).apply(calc_hurst)
-        hurst_arr = np.ascontiguousarray(df['hurst'].fillna(0.5).values, dtype=np.float64)
-
-        # --- THE C++ ENGINE ASSEMBLY (Dependency Injection via Taxonomy) ---
-        config_data = ASSET_TAXONOMY.get(self.asset_class, ASSET_TAXONOMY.get("FUTURES_CN", {}))
-        
-        if "CRYPTO" in self.asset_class:
-            tca = qc.CryptoOrderBookTCA(bps=0.0005, penalty=2.0)
-            margin = qc.FuturesMargin(maintenance_req=0.10)
-        elif "EQUITY" in self.asset_class:
-            tca = qc.SquareRootTCA(bps=0.0001, gamma=0.05)
-            req = 1.0 if config_data.get("region") == "CN" else 0.25
-            margin = qc.EquitiesMargin(maintenance_req=req)
-        else: # FUTURES (Now uses Stochastic TCA)
-            # Default to Stochastic TCA for Futures (lambda=1e-4, eta=0.1, gamma=2.0, T=60)
-            tca = qc.StochasticTCAWrapper(1e-4, 0.1, 2.0, 60)
-            margin_req = float(df['margin_rate'].median()) if 'margin_rate' in df.columns else 0.05
-            margin = qc.FuturesMargin(maintenance_req=margin_req)
-
-        has_limits = config_data.get("price_limit", False)
-        is_t1 = True if config_data.get("t_settlement", 0) == 1 else False
-
-        engine = qc.ExecutionEngine(
-            tca_model=tca, 
-            margin_model=margin, 
-            initial_capital=self.initial_capital, 
-            deadband=self.min_trade_weight_delta,
-            enforce_price_limits=has_limits,
-            enforce_t1=is_t1
+        # Hurst is an optional feature-module input, not an engine-side
+        # calculation. If no module supplies it, use neutral Brownian behavior.
+        hurst_col = next(
+            (
+                col for col in ("hurst", "f_macro_hurst", "hurst_exponent")
+                if col in df.columns
+            ),
+            None,
         )
+        if hurst_col is not None:
+            df['hurst'] = (
+                pd.to_numeric(df[hurst_col], errors='coerce')
+                .clip(lower=0.1, upper=0.9)
+                .fillna(0.5)
+            )
+            df.attrs["hurst_input_col"] = hurst_col
+            df.attrs["hurst_default"] = None
+            print(f"   -> 🌊 Hurst input: using optional column '{hurst_col}'.")
+        else:
+            df['hurst'] = 0.5
+            df.attrs["hurst_input_col"] = None
+            df.attrs["hurst_default"] = 0.5
+            print("   -> 🌊 Hurst input: none supplied; using neutral 0.5.")
+        hurst_arr = np.ascontiguousarray(df['hurst'].values, dtype=np.float64)
 
         # --- THE MEMORY HANDOFF ---
         df['execution_date_id'] = pd.factorize(pd.to_datetime(df['date']).dt.normalize())[0].astype(np.int32)
@@ -303,7 +333,78 @@ class ExecutionDesk:
             and pd.to_numeric(df['execution_period_return'], errors='coerce').notna().any()
         )
 
-        if explicit_returns_available and hasattr(engine, "run_simulation_with_costs_and_returns"):
+        # --- THE ENGINE ASSEMBLY (Dependency Injection via Taxonomy) ---
+        if backtest_route == "event_driven_options" or not vectorizable:
+            print(f"   -> Routing {self.asset_class} through Python event-driven backtest path.")
+            period_returns = (
+                pd.to_numeric(df['execution_period_return'], errors='coerce').fillna(0.0).values
+                if 'execution_period_return' in df.columns
+                else None
+            )
+            result = PythonBacktestBackend().run(
+                ExecutionBacktestRequest(
+                    asset_ids=ids_arr,
+                    prices=np.ascontiguousarray(df['adjusted_execution_price'].fillna(df['adjusted_price']).values, dtype=np.float64),
+                    target_weights=weights_arr,
+                    volumes=volumes_arr,
+                    volatilities=vol_arr,
+                    hursts=hurst_arr,
+                    time_ids=times_arr,
+                    date_ids=dates_arr,
+                    period_returns=period_returns,
+                    multipliers=multipliers_arr,
+                    fee_types=fee_types_arr,
+                    fee_open=fee_open_arr,
+                    fee_close_history=fee_close_history_arr,
+                    fee_close_today=fee_close_today_arr,
+                    tick_sizes=tick_sizes_arr,
+                    asset_class=self.asset_class,
+                    initial_capital=self.initial_capital,
+                    deadband=self.min_trade_weight_delta,
+                    integer_lots=self.integer_lots,
+                    metadata={"source": "ExecutionDesk", "route": backtest_route},
+                )
+            )
+            self._attach_backend_result(df, result)
+            df.attrs["execution_backend"] = result.backend.backend_id
+            df.attrs["execution_backtest_route"] = result.backend.metadata.get("backtest_route", backtest_route)
+            self._attach_lot_diagnostics(df, result.diagnostics)
+        elif "CRYPTO" in self.asset_class:
+            tca = qc.CryptoOrderBookTCA(bps=0.0005, penalty=2.0)
+            margin = qc.FuturesMargin(maintenance_req=0.10)
+            df.attrs["tca_model"] = "CryptoOrderBookTCA(bps=0.0005, penalty=2.0)"
+            df.attrs["margin_model"] = "FuturesMargin(maintenance_req=0.10)"
+        elif "EQUITY" in self.asset_class:
+            tca = qc.SquareRootTCA(bps=0.0001, gamma=0.05)
+            req = 0.0 if config_data.get("region") == "CN" else 0.25
+            margin = qc.EquitiesMargin(maintenance_req=req)
+            df.attrs["tca_model"] = "SquareRootTCA(bps=0.0001, gamma=0.05)"
+            df.attrs["margin_model"] = f"EquitiesMargin(maintenance_req={req:g})"
+        else: # FUTURES (Now uses Stochastic TCA)
+            # Default to Stochastic TCA for Futures (lambda=1e-4, eta=0.1, gamma=2.0, T=60)
+            tca = qc.StochasticTCAWrapper(1e-4, 0.1, 2.0, 60)
+            margin_req = float(df['margin_rate'].median()) if 'margin_rate' in df.columns else 0.05
+            margin = qc.FuturesMargin(maintenance_req=margin_req)
+            df.attrs["tca_model"] = "StochasticTCAWrapper(lambda=1e-4, eta=0.1, gamma=2.0, T=60)"
+            df.attrs["margin_model"] = f"FuturesMargin(maintenance_req={margin_req:g})"
+
+        has_limits = config_data.get("price_limit", False)
+        is_t1 = True if config_data.get("t_settlement", 0) == 1 else False
+        df.attrs["price_limit_enabled"] = bool(has_limits)
+        df.attrs["price_limit_model"] = config_data.get("price_limit_model", "none")
+        df.attrs["t1_enabled"] = bool(is_t1)
+
+        if vectorizable:
+            engine = qc.ExecutionEngine(
+                tca_model=tca,
+                margin_model=margin,
+                initial_capital=self.initial_capital,
+                deadband=self.min_trade_weight_delta,
+                enforce_price_limits=has_limits,
+                enforce_t1=is_t1
+            )
+
+        if vectorizable and explicit_returns_available and hasattr(engine, "run_simulation_with_costs_and_returns"):
             print("   -> Using explicit period-return execution path.")
             period_returns_arr = np.ascontiguousarray(
                 pd.to_numeric(df['execution_period_return'], errors='coerce').fillna(0.0).values,
@@ -342,7 +443,7 @@ class ExecutionDesk:
             df['trade_contracts'] = np.asarray(execution_result["trade_contracts"], dtype=float)
             df['portfolio_leverage'] = np.asarray(execution_result["portfolio_leverage"], dtype=float)
             self._attach_lot_diagnostics(df, execution_result)
-        elif hasattr(engine, "run_simulation_with_costs"):
+        elif vectorizable and hasattr(engine, "run_simulation_with_costs"):
             if explicit_returns_available:
                 print("   ⚠️ quant_core lacks explicit-return execution; falling back to close-stream path.")
             execution_result = engine.run_simulation_with_costs(
@@ -371,7 +472,7 @@ class ExecutionDesk:
             df['trade_contracts'] = np.asarray(execution_result["trade_contracts"], dtype=float)
             df['portfolio_leverage'] = np.asarray(execution_result["portfolio_leverage"], dtype=float)
             self._attach_lot_diagnostics(df, execution_result)
-        else:
+        elif vectorizable:
             print("   ⚠️ quant_core lacks run_simulation_with_costs; exchange fees default to zero.")
             equity_curve = engine.run_simulation(
                 asset_ids=ids_arr,
@@ -432,8 +533,12 @@ class ExecutionDesk:
         portfolio['date'] = pd.to_datetime(portfolio['trading_day'])
         
         if benchmark_df is not None and not benchmark_df.empty:
-            portfolio = pd.merge(portfolio, benchmark_df[['date', 'benchmark_return']], on='date', how='left')
-            portfolio['benchmark_return'] = portfolio['benchmark_return'].fillna(0)
+            benchmark_cols = [
+                column for column in benchmark_df.columns if str(column).startswith("benchmark_return")
+            ]
+            portfolio = pd.merge(portfolio, benchmark_df[['date', *benchmark_cols]], on='date', how='left')
+            for column in benchmark_cols:
+                portfolio[column] = portfolio[column].fillna(0)
         else:
             portfolio['benchmark_return'] = 0.0
         
@@ -486,11 +591,12 @@ class AlphaEvaluator:
         self.statistical_tester = AlphaStatisticalTester()
         
         # 1. Validate against our rulebook
-        if asset_class not in ASSET_TAXONOMY:
+        normalized_asset_class = normalize_market_vertical(asset_class)
+        if normalized_asset_class not in ASSET_TAXONOMY:
             print(f"⚠️ WARNING: '{asset_class}' not found in ASSET_TAXONOMY. Defaulting to FUTURES_CN.")
             self.asset_class = "FUTURES_CN"
         else:
-            self.asset_class = asset_class
+            self.asset_class = normalized_asset_class
 
         db_parent = os.path.dirname(os.path.abspath(self.db_path))
         if db_parent:
@@ -807,13 +913,36 @@ class AlphaEvaluator:
         df.attrs["execution_lot_mode_requested"] = str(lot_mode or "auto")
         df.attrs["execution_lot_mode"] = resolved_lot_mode
 
+        factor_contract = df.attrs.get("factor_contract", {})
+        if not isinstance(factor_contract, dict):
+            factor_contract = {}
+        execution_mode = str(
+            df.attrs.get("execution_mode") or factor_contract.get("execution_mode") or ""
+        ).strip().lower()
+        market_policy = ASSET_TAXONOMY.get(self.asset_class, {})
+        min_daily_traded_value = float(
+            df.attrs.get("min_daily_traded_value")
+            or market_policy.get("min_daily_traded_value")
+            or 0.0
+        )
+
         if is_intraday:
             print("   🧱 Liquidity Filter: skipped for intraday/tick data.")
         elif 'close' in df.columns and 'volume' in df.columns:
             df['dollar_volume'] = df['close'] * df['volume']
-            df = df[df['dollar_volume'] >= 50_000_000]
-            dropped_pct = (original_len - len(df)) / original_len * 100
-            print(f"   🧱 Liquidity Filter: Dropped {dropped_pct:.1f}% of data (Micro-caps removed).")
+            if execution_mode == "direct":
+                print("   🧱 Liquidity Filter: preserved full row grid for direct-weight execution.")
+            elif min_daily_traded_value > 0:
+                df = df[df['dollar_volume'] >= min_daily_traded_value]
+                dropped_pct = (original_len - len(df)) / original_len * 100
+                print(
+                    "   🧱 Liquidity Filter: "
+                    f"Dropped {dropped_pct:.1f}% below "
+                    f"{min_daily_traded_value:,.0f} daily traded value "
+                    f"({self.asset_class} taxonomy)."
+                )
+            else:
+                print(f"   🧱 Liquidity Filter: no taxonomy threshold for {self.asset_class}.")
         else:
             print("   ⚠️ WARNING: 'close' or 'volume' columns missing. Cannot enforce Liquidity Wall.")
 
@@ -862,7 +991,7 @@ class AlphaEvaluator:
             geometry=metric_result.geometry,
         )
         
-        turnover_rate = np.random.uniform(0.1, 0.4) 
+        turnover_rate = 0.0
 
         print(
             f"   -> Alpha Geometry: {metric_result.geometry.value} "
@@ -929,7 +1058,7 @@ class AlphaEvaluator:
         if failure_code != "NONE":
             print(f"   ⚠️ DIAGNOSTIC FLAG: [{failure_code.upper()}]")
         else:
-            print(f"   🟢 PASSED ALL INSTITUTIONAL HURDLES.")
+            print(f"   🟢 Passed pre-execution alpha diagnostics.")
             
         self._log_to_db(
             factor_id,
@@ -944,6 +1073,323 @@ class AlphaEvaluator:
             split_result,
             stat_evidence,
         )
+
+    def log_option_backtest_result(
+        self,
+        *,
+        factor_id: str,
+        result,
+        factor_name: str | None = None,
+        factor_category: str = "Options",
+        factor_rationale: str = "",
+        factor_complexity: int = 0,
+        factor_contract: dict | None = None,
+        option_chain_path: str | None = None,
+        underlying_path: str | None = None,
+        initial_capital: float | None = None,
+        capital_currency: str = "USD",
+        metadata: dict | None = None,
+    ) -> str:
+        """Persist an event-driven option backtest as a research-dashboard run."""
+
+        factor_contract = dict(factor_contract or {})
+        metadata = dict(metadata or {})
+        market_vertical = normalize_market_vertical(metadata.get("market_vertical") or self.asset_class)
+        run_id = f"run_{uuid.uuid4().hex[:8]}"
+        equity = result.equity_curve.copy()
+        trades = result.trades.copy()
+        returns = result.to_returns_frame().copy()
+        positions = result.positions.copy()
+        initial_capital = float(
+            initial_capital
+            if initial_capital is not None
+            else metadata.get("initial_capital")
+            or (float(equity["equity"].iloc[0]) if not equity.empty and "equity" in equity else 100_000.0)
+        )
+        capital_currency = str(capital_currency or metadata.get("capital_currency") or "USD")
+
+        returns_dir = os.path.join(self.logs_dir, "returns")
+        trades_dir = os.path.join(self.logs_dir, "trades")
+        os.makedirs(returns_dir, exist_ok=True)
+        os.makedirs(trades_dir, exist_ok=True)
+        returns_path = os.path.join(returns_dir, f"returns_{run_id}.csv")
+        trades_path = os.path.join(trades_dir, f"trades_{run_id}.csv")
+
+        returns = self._standardize_option_returns(
+            returns,
+            trades,
+            initial_capital=initial_capital,
+            capital_currency=capital_currency,
+        )
+        returns.to_csv(returns_path, index=False)
+
+        trade_ledger = self._standardize_option_trade_ledger(trades)
+        trade_ledger.to_csv(trades_path, index=False)
+
+        net_returns = pd.to_numeric(returns.get("net_return", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+        annualized_return = self._annualized_return_from_result(equity, net_returns, initial_capital)
+        annualized_vol = float(net_returns.std(ddof=0) * np.sqrt(252)) if len(net_returns) else 0.0
+        sharpe = float(annualized_return / annualized_vol) if annualized_vol > 0 else 0.0
+        max_drawdown = self._max_drawdown_from_equity(equity, net_returns)
+        turnover_rate = float(pd.to_numeric(returns.get("daily_turnover", pd.Series(dtype=float)), errors="coerce").fillna(0.0).mean() or 0.0)
+        sharpe_p_value, sharpe_obs = sharpe_p_value_from_returns(net_returns)
+
+        traded_symbols = []
+        if "option_symbol" in trades.columns:
+            traded_symbols = sorted(trades["option_symbol"].dropna().astype(str).unique().tolist())
+        underlying_symbols = []
+        for frame in (trades, positions):
+            if "underlying_symbol" in frame.columns:
+                underlying_symbols.extend(frame["underlying_symbol"].dropna().astype(str).tolist())
+        underlying_symbols = sorted(set(underlying_symbols))
+        universe_size = int(metadata.get("universe_size") or len(underlying_symbols) or 0)
+        traded_tickers = ",".join(traded_symbols) if traded_symbols else "NONE"
+        total_trades = int(len(trades))
+        total_exchange_fees = float(
+            pd.to_numeric(trades.get("commission", pd.Series(dtype=float)), errors="coerce").fillna(0.0).sum()
+        )
+        total_slippage_cost = 0.0
+        total_execution_cost = total_exchange_fees + total_slippage_cost
+        avg_daily_cost_bps = self._option_cost_bps(total_execution_cost, returns, initial_capital)
+
+        dataset_id = str(
+            metadata.get("dataset_id")
+            or stable_trial_hash(
+                {
+                    "option_chain_path": option_chain_path or "",
+                    "underlying_path": underlying_path or "",
+                    "market_vertical": market_vertical,
+                    "chain_rows": result.diagnostics.get("chain_rows", 0),
+                    "signal_rows": result.diagnostics.get("signal_rows", 0),
+                }
+            )
+        )
+        universe_id = str(
+            metadata.get("universe_id")
+            or stable_trial_hash(
+                {
+                    "market_vertical": market_vertical,
+                    "underlying_symbols": underlying_symbols,
+                    "universe_size": universe_size,
+                }
+            )
+        )
+        factor_params = metadata.get("factor_params", {})
+        if not isinstance(factor_params, dict):
+            factor_params = {"value": factor_params}
+        research_family = str(metadata.get("research_family") or factor_id)
+        params_hash = stable_trial_hash({"factor_params": factor_params})
+        trial_signature_payload = {
+            "factor_id": factor_id,
+            "research_family": research_family,
+            "asset_class": self.asset_class,
+            "market_vertical": market_vertical,
+            "dataset_id": dataset_id,
+            "universe_id": universe_id,
+            "factor_params": factor_params,
+            "factor_contract_source": factor_contract.get("contract_source", ""),
+            "alpha_signal_col": factor_contract.get("alpha_signal_col", ""),
+            "execution_weight_col": factor_contract.get("execution_weight_col", ""),
+            "execution_mode": "event_driven_options",
+            "initial_capital": initial_capital,
+            "capital_currency": capital_currency,
+        }
+        trial_signature = stable_trial_hash(trial_signature_payload)
+        raw_p_value = float(sharpe_p_value) if np.isfinite(sharpe_p_value) else np.nan
+
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure_core_tables(conn)
+            self._ensure_backtest_run_columns(conn)
+            self._ensure_research_trial_columns(conn)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO factors
+                    (factor_id, name, category, economic_rationale, complexity_score)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    factor_id,
+                    factor_name or f"Auto-Gen {factor_id}",
+                    factor_category,
+                    factor_rationale or "Event-driven listed-options research factor.",
+                    int(factor_complexity or 0),
+                ),
+            )
+            cursor.execute("SELECT MAX(round_number) FROM backtest_runs WHERE factor_id = ?", (factor_id,))
+            res = cursor.fetchone()[0]
+            round_number = int(res + 1) if res else 1
+
+            backtest_row = {
+                "run_id": run_id,
+                "factor_id": factor_id,
+                "round_number": round_number,
+                "validation_ic": None,
+                "holdout_ic": None,
+                "crisis_ic": None,
+                "turnover_rate": turnover_rate,
+                "annualized_return": annualized_return,
+                "max_drawdown": max_drawdown,
+                "sharpe_ratio": sharpe,
+                "total_trades": total_trades,
+                "asset_class": self.asset_class,
+                "market_vertical": market_vertical,
+                "dataset_id": dataset_id,
+                "universe_id": universe_id,
+                "data_frequency": "daily",
+                "dataset_role": "option_chain",
+                "data_tradability": "executable_option_chain",
+                "data_price_source": "option_bid_ask_or_mark",
+                "data_roll_model": "contract_selection_by_signal",
+                "data_liquidity_model": "option_bid_ask_volume_oi_filter",
+                "data_execution_reality": "event_driven_options_v1",
+                "data_vendor": str(metadata.get("data_vendor") or "local_option_chain"),
+                "execution_assumption": "daily_signal_option_fill_then_mark",
+                "factor_contract_source": factor_contract.get("contract_source", "explicit"),
+                "alpha_signal_col": factor_contract.get("alpha_signal_col", "factor_score"),
+                "execution_weight_col": factor_contract.get("execution_weight_col", ""),
+                "execution_mode": "event_driven_options",
+                "execution_lag": factor_contract.get("execution_lag", "same_day_chain_snapshot"),
+                "return_assumption": "option_mark_to_market",
+                "universe_size": universe_size,
+                "traded_tickers": traded_tickers,
+                "returns_file_path": returns_path,
+                "evaluation_geometry": "event_driven_options",
+                "ic_metric": "not_applicable",
+                "validation_hit_rate": None,
+                "holdout_hit_rate": None,
+                "crisis_hit_rate": None,
+                "split_mode": "event_driven_full_sample",
+                "split_boundary": "",
+                "validation_rows": int(len(returns)),
+                "holdout_rows": 0,
+                "crisis_rows": 0,
+                "purge_periods": 0,
+                "embargo_periods": 0,
+                "purge_unit": "none",
+                "purged_rows": 0,
+                "embargoed_rows": 0,
+                "execution_lot_mode": "integer_option_contracts",
+                "execution_lot_mode_requested": "integer",
+                "initial_capital": initial_capital,
+                "capital_currency": capital_currency,
+                "capital_profile": str(metadata.get("capital_profile") or "options_research_default"),
+                "capital_source": str(metadata.get("capital_source") or "cli_or_default"),
+                "min_trade_weight_delta": 0.0,
+                "min_trade_weight_delta_source": "not_applicable_options_event_driven",
+                "avg_daily_cost_bps": avg_daily_cost_bps,
+                "total_exchange_fees": total_exchange_fees,
+                "total_slippage_cost": total_slippage_cost,
+                "total_execution_cost": total_execution_cost,
+                "lot_constrained_rate": 0.0,
+                "fee_constrained_rate": 0.0,
+                "avg_one_lot_weight": 0.0,
+                "avg_abs_rounding_error_weight": 0.0,
+                "avg_round_trip_fee_bps": 0.0,
+                "avg_round_trip_fee_ticks": 0.0,
+                "factor_params": json.dumps(factor_params, sort_keys=True),
+                "selected_product": str(metadata.get("selected_product") or ""),
+                "selected_symbol": str(metadata.get("selected_symbol") or ""),
+                "raw_event_count": int(result.diagnostics.get("signal_rows", 0) or 0),
+                "quality_event_count": total_trades,
+                "throttled_event_count": 0,
+                "active_tick_count": int(result.diagnostics.get("chain_rows", 0) or 0),
+                "stat_raw_p_value": raw_p_value,
+                "stat_metric_p_value": None,
+                "stat_hit_rate_p_value": None,
+                "stat_sharpe_p_value": raw_p_value,
+                "stat_adjusted_p_value": None,
+                "stat_holm_p_value": None,
+                "stat_fdr_q_value": None,
+                "stat_trial_count": 1,
+                "stat_metric_observations": int(len(returns)),
+                "stat_hit_rate_observations": None,
+                "stat_test_method": "sharpe_normal_approx",
+                "stat_significance": "pending",
+                "stat_research_family": research_family,
+                "stat_trial_signature": trial_signature,
+            }
+            self._insert_row(cursor, "backtest_runs", backtest_row)
+
+            trial_row = {
+                "run_id": run_id,
+                "factor_id": factor_id,
+                "research_family": research_family,
+                "trial_signature": trial_signature,
+                "params_hash": params_hash,
+                "asset_class": self.asset_class,
+                "market_vertical": market_vertical,
+                "dataset_id": dataset_id,
+                "universe_id": universe_id,
+                "data_frequency": "daily",
+                "dataset_role": "option_chain",
+                "data_tradability": "executable_option_chain",
+                "data_price_source": "option_bid_ask_or_mark",
+                "data_roll_model": "contract_selection_by_signal",
+                "data_liquidity_model": "option_bid_ask_volume_oi_filter",
+                "data_execution_reality": "event_driven_options_v1",
+                "data_vendor": str(metadata.get("data_vendor") or "local_option_chain"),
+                "execution_assumption": "daily_signal_option_fill_then_mark",
+                "factor_contract_source": factor_contract.get("contract_source", "explicit"),
+                "alpha_signal_col": factor_contract.get("alpha_signal_col", "factor_score"),
+                "execution_weight_col": factor_contract.get("execution_weight_col", ""),
+                "execution_mode": "event_driven_options",
+                "execution_lag": factor_contract.get("execution_lag", "same_day_chain_snapshot"),
+                "return_assumption": "option_mark_to_market",
+                "evaluation_geometry": "event_driven_options",
+                "metric_name": "option_net_return",
+                "raw_p_value": raw_p_value,
+                "metric_p_value": None,
+                "hit_rate_p_value": None,
+                "sharpe_p_value": raw_p_value,
+                "bonferroni_p_value": None,
+                "holm_p_value": None,
+                "fdr_q_value": None,
+                "trial_count_m": 1,
+                "significance": "pending",
+            }
+            self._insert_row(cursor, "research_trials", trial_row, replace=True)
+            if total_trades == 0:
+                cursor.execute(
+                    """
+                    INSERT INTO diagnostics (run_id, failure_code, suggested_action)
+                    VALUES (?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        "no_option_trades",
+                        "No option contracts passed signal, expiry, and liquidity filters. Check chain coverage, DTE, moneyness, and bid/ask rules.",
+                    ),
+                )
+            conn.commit()
+            self._refresh_multiple_testing_adjustments(conn, research_family)
+
+        self._write_option_assumption_manifest(
+            run_id=run_id,
+            factor_id=factor_id,
+            factor_contract=factor_contract,
+            factor_params=factor_params,
+            result=result,
+            metadata=metadata,
+            market_vertical=market_vertical,
+            option_chain_path=option_chain_path,
+            underlying_path=underlying_path,
+            returns_file_path=returns_path,
+            trades_file_path=trades_path,
+            initial_capital=initial_capital,
+            capital_currency=capital_currency,
+            annualized_return=annualized_return,
+            sharpe=sharpe,
+            max_drawdown=max_drawdown,
+            avg_daily_cost_bps=avg_daily_cost_bps,
+            total_exchange_fees=total_exchange_fees,
+            total_slippage_cost=total_slippage_cost,
+            total_execution_cost=total_execution_cost,
+        )
+        print(f"   💾 Saved option returns to {returns_path}")
+        print(f"   🧾 Saved option trade ledger to {trades_path}")
+        print(f"   💾 Logged option backtest run {run_id} to research database.")
+        return run_id
 
     @staticmethod
     def _select_alpha_signal_col(df: pd.DataFrame) -> str | None:
@@ -966,6 +1412,198 @@ class AlphaEvaluator:
     @staticmethod
     def _format_metric(value: float) -> str:
         return "N/A" if not np.isfinite(value) else f"{value:.4f}"
+
+    @staticmethod
+    def _standardize_option_returns(
+        returns: pd.DataFrame,
+        trades: pd.DataFrame,
+        *,
+        initial_capital: float,
+        capital_currency: str,
+    ) -> pd.DataFrame:
+        out = returns.copy()
+        export_cols = [
+            "date",
+            "gross_return",
+            "net_return",
+            "benchmark_return",
+            "daily_turnover",
+            "daily_slippage_cost",
+            "daily_exchange_fee",
+            "daily_total_cost",
+            "daily_cost_bps",
+            "portfolio_leverage",
+            "initial_capital",
+            "capital_currency",
+            "min_trade_weight_delta",
+            "lot_constrained_rate",
+            "fee_constrained_rate",
+            "avg_one_lot_weight",
+            "avg_abs_rounding_error_weight",
+            "avg_round_trip_fee_bps",
+            "avg_round_trip_fee_ticks",
+        ]
+        if out.empty:
+            return pd.DataFrame(columns=export_cols)
+        if "date" not in out.columns:
+            raise ValueError("Option returns frame requires a date column.")
+        out["date"] = pd.to_datetime(out["date"], errors="coerce")
+        for col in ("gross_return", "net_return", "daily_turnover", "portfolio_leverage"):
+            if col not in out.columns:
+                out[col] = 0.0
+            out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
+        out["benchmark_return"] = 0.0
+        out["daily_slippage_cost"] = 0.0
+        out["daily_exchange_fee"] = 0.0
+        if not trades.empty and {"date", "commission"}.issubset(trades.columns):
+            fee_frame = trades.loc[:, ["date", "commission"]].copy()
+            fee_frame["date_key"] = pd.to_datetime(fee_frame["date"], errors="coerce").dt.date
+            fee_frame["commission"] = pd.to_numeric(fee_frame["commission"], errors="coerce").fillna(0.0)
+            fees_by_date = fee_frame.groupby("date_key")["commission"].sum()
+            out["date_key"] = out["date"].dt.date
+            out["daily_exchange_fee"] = out["date_key"].map(fees_by_date).fillna(0.0)
+            out = out.drop(columns=["date_key"])
+        out["daily_total_cost"] = out["daily_slippage_cost"] + out["daily_exchange_fee"]
+        daily_capital = max(float(initial_capital or 0.0), 1.0)
+        out["daily_cost_bps"] = out["daily_total_cost"] / daily_capital * 10_000.0
+        out["initial_capital"] = float(initial_capital)
+        out["capital_currency"] = capital_currency
+        out["min_trade_weight_delta"] = 0.0
+        out["lot_constrained_rate"] = 0.0
+        out["fee_constrained_rate"] = 0.0
+        out["avg_one_lot_weight"] = 0.0
+        out["avg_abs_rounding_error_weight"] = 0.0
+        out["avg_round_trip_fee_bps"] = 0.0
+        out["avg_round_trip_fee_ticks"] = 0.0
+        out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+        return out.loc[:, export_cols]
+
+    @staticmethod
+    def _standardize_option_trade_ledger(trades: pd.DataFrame) -> pd.DataFrame:
+        generic_cols = [
+            "ticker",
+            "entry_time",
+            "exit_time",
+            "holding_period_hours",
+            "entry_price",
+            "exit_price",
+            "trade_pnl",
+            "win_loss_flag",
+            "direction",
+        ]
+        option_cols = [
+            "date",
+            "option_symbol",
+            "underlying_symbol",
+            "expiry",
+            "right",
+            "strike",
+            "quantity",
+            "price",
+            "cashflow",
+            "commission",
+            "reason",
+        ]
+        if trades.empty:
+            return pd.DataFrame(columns=generic_cols + option_cols)
+        out = trades.copy()
+        if "option_symbol" not in out.columns:
+            out["option_symbol"] = ""
+        if "underlying_symbol" not in out.columns:
+            out["underlying_symbol"] = ""
+        out["ticker"] = out["option_symbol"].where(out["option_symbol"].astype(str).str.len().gt(0), out["underlying_symbol"])
+        trade_dates = pd.to_datetime(out.get("date"), errors="coerce")
+        opened_at = pd.to_datetime(out.get("opened_at"), errors="coerce")
+        opened_at = opened_at.where(opened_at.notna(), trade_dates)
+        out["entry_time"] = opened_at.dt.strftime("%Y-%m-%d")
+        out["exit_time"] = trade_dates.dt.strftime("%Y-%m-%d")
+        holding_hours = (trade_dates - opened_at).dt.total_seconds() / 3600.0
+        out["holding_period_hours"] = holding_hours.fillna(0.0).clip(lower=0.0)
+        out["entry_price"] = pd.to_numeric(out.get("entry_price"), errors="coerce").fillna(
+            pd.to_numeric(out.get("price"), errors="coerce")
+        )
+        out["exit_price"] = pd.to_numeric(out.get("price"), errors="coerce").fillna(0.0)
+        out["trade_pnl"] = pd.to_numeric(out.get("cashflow"), errors="coerce").fillna(0.0)
+        out["win_loss_flag"] = np.where(out["trade_pnl"] > 0, "Win", "Loss")
+        quantity = pd.to_numeric(out.get("quantity"), errors="coerce").fillna(0.0)
+        out["direction"] = np.where(quantity >= 0, "Long Open", "Long Close")
+        for col in option_cols:
+            if col not in out.columns:
+                out[col] = pd.NA
+        return out.loc[:, generic_cols + option_cols]
+
+    @staticmethod
+    def _annualized_return_from_result(
+        equity: pd.DataFrame,
+        net_returns: pd.Series,
+        initial_capital: float,
+    ) -> float:
+        periods = len(net_returns)
+        if periods <= 0:
+            return 0.0
+        if not equity.empty and "equity" in equity.columns:
+            final_equity = float(pd.to_numeric(equity["equity"], errors="coerce").dropna().iloc[-1])
+            start_equity = max(float(initial_capital), 1e-12)
+            total_return = final_equity / start_equity
+        else:
+            total_return = float((1.0 + net_returns).prod())
+        if total_return <= 0:
+            return -1.0
+        return float(total_return ** (252 / periods) - 1)
+
+    @staticmethod
+    def _max_drawdown_from_equity(equity: pd.DataFrame, net_returns: pd.Series) -> float:
+        if not equity.empty and "equity" in equity.columns:
+            curve = pd.to_numeric(equity["equity"], errors="coerce").dropna()
+        else:
+            curve = (1.0 + net_returns.fillna(0.0)).cumprod()
+        if curve.empty:
+            return 0.0
+        running_max = curve.cummax().replace(0, np.nan)
+        drawdown = curve / running_max - 1.0
+        return float(drawdown.min()) if not drawdown.empty else 0.0
+
+    @staticmethod
+    def _option_cost_bps(total_execution_cost: float, returns: pd.DataFrame, initial_capital: float) -> float:
+        days = max(int(len(returns)), 1)
+        capital = max(float(initial_capital or 0.0), 1.0)
+        return float(total_execution_cost / days / capital * 10_000.0)
+
+    @staticmethod
+    def _insert_row(
+        cursor: sqlite3.Cursor,
+        table_name: str,
+        row: dict[str, object],
+        *,
+        replace: bool = False,
+    ) -> None:
+        existing_columns = {
+            item[1] for item in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        columns = [column for column in row if column in existing_columns]
+        placeholders = ", ".join("?" for _ in columns)
+        verb = "INSERT OR REPLACE" if replace else "INSERT"
+        cursor.execute(
+            f"{verb} INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})",
+            tuple(AlphaEvaluator._sqlite_scalar(row[column]) for column in columns),
+        )
+
+    @staticmethod
+    def _sqlite_scalar(value):
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(value, np.integer):
+            return int(value)
+        if isinstance(value, np.floating):
+            return float(value)
+        if isinstance(value, np.bool_):
+            return bool(value)
+        return value
 
     def _vertical_trial_metadata(
         self,
@@ -1052,6 +1690,8 @@ class AlphaEvaluator:
 
     @staticmethod
     def _infer_execution_assumption(df: pd.DataFrame) -> str:
+        if df.attrs.get("execution_assumption"):
+            return str(df.attrs.get("execution_assumption"))
         if "forward_return" not in df.columns:
             return "unknown"
         if AlphaEvaluator._infer_data_frequency(df) in {"intraday", "tick"}:
@@ -1163,6 +1803,314 @@ class AlphaEvaluator:
                 (trial_count, bonferroni, holm, fdr_q, significance, research_family, signature),
             )
         conn.commit()
+
+    def _write_assumption_manifest(
+        self,
+        *,
+        run_id: str,
+        factor_id: str,
+        df: pd.DataFrame,
+        asset_df: pd.DataFrame,
+        portfolio: pd.DataFrame,
+        execution_signal_col: str,
+        execution_lot_mode: str,
+        initial_capital: float,
+        capital_currency: str,
+        min_trade_weight_delta: float,
+        returns_file_path: str,
+        benchmark_policy: dict | None = None,
+        benchmark_df: pd.DataFrame | None = None,
+    ) -> str:
+        artifact_root = Path(self.logs_dir)
+        research_root = artifact_root.parent if artifact_root.name == "alpha_lab" else artifact_root
+        assumptions_dir = os.path.join(os.fspath(research_root), "assumptions")
+        os.makedirs(assumptions_dir, exist_ok=True)
+        path = os.path.join(assumptions_dir, f"assumptions_{run_id}.json")
+        market_policy = ASSET_TAXONOMY.get(self.asset_class, {})
+        factor_contract = df.attrs.get("factor_contract", {})
+        if not isinstance(factor_contract, dict):
+            factor_contract = {}
+        benchmark_policy = dict(benchmark_policy or {})
+        benchmark_summary = dict(benchmark_policy)
+        if benchmark_df is not None and not benchmark_df.empty:
+            benchmark_dates = pd.to_datetime(benchmark_df.get("date"), errors="coerce").dropna()
+            benchmark_return_cols = [
+                column for column in benchmark_df.columns if str(column).startswith("benchmark_return")
+            ]
+            benchmark_summary.update(
+                {
+                    "observations": int(len(benchmark_df)),
+                    "start_date": str(benchmark_dates.min().date()) if not benchmark_dates.empty else None,
+                    "end_date": str(benchmark_dates.max().date()) if not benchmark_dates.empty else None,
+                    "return_columns": benchmark_return_cols,
+                }
+            )
+        else:
+            benchmark_summary.update({"observations": 0, "start_date": None, "end_date": None})
+
+        manifest = {
+            "run_id": run_id,
+            "factor_id": factor_id,
+            "asset_class": self.asset_class,
+            "factor_contract": factor_contract,
+            "factor_params": df.attrs.get("factor_params", {}),
+            "market_taxonomy": market_policy,
+            "data": {
+                "source_path": df.attrs.get("source_path") or df.attrs.get("data_file"),
+                "frequency": df.attrs.get("data_frequency"),
+                "dataset_role": df.attrs.get("dataset_role"),
+                "tradability": df.attrs.get("data_tradability"),
+                "price_source": df.attrs.get("data_price_source"),
+                "roll_model": df.attrs.get("data_roll_model"),
+                "liquidity_model": df.attrs.get("data_liquidity_model"),
+                "execution_reality": df.attrs.get("data_execution_reality"),
+                "return_horizon": df.attrs.get("return_horizon"),
+                "return_horizon_description": df.attrs.get("return_horizon_description"),
+            },
+            "signal_and_execution_mode": {
+                "alpha_signal_col": df.attrs.get("alpha_signal_col"),
+                "execution_weight_col": df.attrs.get("execution_weight_col"),
+                "execution_signal_col_used": execution_signal_col,
+                "execution_mode": df.attrs.get("execution_mode"),
+                "execution_assumption": df.attrs.get("execution_assumption"),
+                "return_assumption": df.attrs.get("return_assumption"),
+                "benchmark_return_col": df.attrs.get("benchmark_return_col"),
+                "execution_lag": df.attrs.get("execution_lag"),
+            },
+            "execution_engine": {
+                "engine": asset_df.attrs.get("execution_engine_label"),
+                "tca_model": asset_df.attrs.get("tca_model"),
+                "margin_model": asset_df.attrs.get("margin_model"),
+                "price_limit_enabled": asset_df.attrs.get("price_limit_enabled"),
+                "price_limit_model": asset_df.attrs.get("price_limit_model"),
+                "t1_enabled": asset_df.attrs.get("t1_enabled"),
+                "hurst_input_col": asset_df.attrs.get("hurst_input_col"),
+                "hurst_default": asset_df.attrs.get("hurst_default"),
+                "lot_mode": execution_lot_mode,
+                "initial_capital": float(initial_capital),
+                "capital_currency": capital_currency,
+                "min_trade_weight_delta": float(min_trade_weight_delta),
+            },
+            "liquidity_policy": {
+                "min_daily_traded_value": market_policy.get("min_daily_traded_value", 0.0),
+                "direct_weight_row_grid_preserved": df.attrs.get("execution_mode") == "direct",
+            },
+            "benchmark": benchmark_summary,
+            "realized_summary": {
+                "returns_file_path": returns_file_path,
+                "trading_days": int(len(portfolio)),
+                "avg_daily_turnover": float(portfolio.get("daily_turnover", pd.Series([0.0])).mean()),
+                "avg_daily_cost_bps": float(portfolio.get("daily_cost_bps", pd.Series([0.0])).mean()),
+                "max_portfolio_leverage": float(portfolio.get("portfolio_leverage", pd.Series([0.0])).max()),
+            },
+        }
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True, default=str)
+        print(f"   🧾 Saved assumption manifest to {path}")
+        return path
+
+    @staticmethod
+    def _build_benchmark_frame(clean_df: pd.DataFrame, benchmark_policy: dict) -> pd.DataFrame:
+        from oqp.research.backtesting.benchmarks import (
+            BENCHMARK_RETURN_COL,
+            BenchmarkFactory,
+        )
+
+        def generate(policy_item: dict) -> pd.DataFrame:
+            benchmark_type = str(policy_item.get("benchmark_type") or "BUY_AND_HOLD")
+            benchmark_column = str(policy_item.get("benchmark_column") or BENCHMARK_RETURN_COL)
+            return_mode = str(policy_item.get("return_mode") or "passive_close_to_close")
+            kwargs = {"strict": bool(policy_item.get("strict", False))}
+            benchmark_tickers = policy_item.get("benchmark_tickers")
+            if benchmark_tickers:
+                kwargs["benchmark_tickers"] = benchmark_tickers
+            if policy_item.get("ann_rate") is not None:
+                kwargs["ann_rate"] = float(policy_item["ann_rate"])
+            benchmark_return_col = policy_item.get("return_col")
+            if not benchmark_return_col and return_mode == "same_horizon":
+                benchmark_return_col = (
+                    clean_df.attrs.get("benchmark_return_col")
+                    or ("execution_period_return" if "execution_period_return" in clean_df.columns else None)
+                )
+            if benchmark_return_col:
+                kwargs["return_col"] = str(benchmark_return_col)
+
+            engine = BenchmarkFactory.create_benchmark(
+                benchmark_type,
+                raw_df=clean_df,
+                **kwargs,
+            )
+            frame = engine.generate(clean_df)
+            if frame.empty or BENCHMARK_RETURN_COL not in frame.columns:
+                return pd.DataFrame(columns=["date", benchmark_column])
+            out = frame.loc[:, ["date", BENCHMARK_RETURN_COL]].copy()
+            out = out.rename(columns={BENCHMARK_RETURN_COL: benchmark_column})
+            return out
+
+        primary = generate(benchmark_policy)
+        if primary.empty:
+            dates = (
+                pd.to_datetime(clean_df["date"], errors="coerce")
+                .dt.normalize()
+                .dropna()
+                .unique()
+            )
+            primary = pd.DataFrame(
+                {
+                    "date": pd.to_datetime(sorted(dates)),
+                    BENCHMARK_RETURN_COL: 0.0,
+                }
+            )
+        elif BENCHMARK_RETURN_COL not in primary.columns:
+            primary = primary.rename(
+                columns={
+                    str(benchmark_policy.get("benchmark_column") or BENCHMARK_RETURN_COL): BENCHMARK_RETURN_COL
+                }
+            )
+
+        for secondary in benchmark_policy.get("secondary_benchmarks", []) or []:
+            if not isinstance(secondary, dict):
+                continue
+            secondary_frame = generate(secondary)
+            if secondary_frame.empty:
+                continue
+            primary = pd.merge(primary, secondary_frame, on="date", how="left")
+
+        for control in benchmark_policy.get("same_horizon_controls", []) or []:
+            if not isinstance(control, dict):
+                continue
+            control_frame = generate(control)
+            if control_frame.empty:
+                continue
+            primary = pd.merge(primary, control_frame, on="date", how="left")
+
+        for column in primary.columns:
+            if str(column).startswith("benchmark_return"):
+                primary[column] = pd.to_numeric(primary[column], errors="coerce").fillna(0.0)
+        return primary
+
+    def _write_option_assumption_manifest(
+        self,
+        *,
+        run_id: str,
+        factor_id: str,
+        factor_contract: dict,
+        factor_params: dict,
+        result,
+        metadata: dict,
+        market_vertical: str,
+        option_chain_path: str | None,
+        underlying_path: str | None,
+        returns_file_path: str,
+        trades_file_path: str,
+        initial_capital: float,
+        capital_currency: str,
+        annualized_return: float,
+        sharpe: float,
+        max_drawdown: float,
+        avg_daily_cost_bps: float,
+        total_exchange_fees: float,
+        total_slippage_cost: float,
+        total_execution_cost: float,
+    ) -> str:
+        artifact_root = Path(self.logs_dir)
+        research_root = artifact_root.parent if artifact_root.name == "alpha_lab" else artifact_root
+        assumptions_dir = os.path.join(os.fspath(research_root), "assumptions")
+        os.makedirs(assumptions_dir, exist_ok=True)
+        path = os.path.join(assumptions_dir, f"assumptions_{run_id}.json")
+
+        market_policy = ASSET_TAXONOMY.get(market_vertical, {})
+        diagnostics = getattr(result, "diagnostics", {}) or {}
+        equity_curve = getattr(result, "equity_curve", pd.DataFrame())
+        trades = getattr(result, "trades", pd.DataFrame())
+        positions = getattr(result, "positions", pd.DataFrame())
+
+        manifest = {
+            "run_id": run_id,
+            "factor_id": factor_id,
+            "asset_class": self.asset_class,
+            "factor_contract": factor_contract,
+            "factor_params": factor_params,
+            "market_taxonomy": market_policy,
+            "data": {
+                "source_path": option_chain_path,
+                "option_chain_path": option_chain_path,
+                "underlying_path": underlying_path,
+                "frequency": "daily",
+                "dataset_role": "option_chain",
+                "tradability": "executable_option_chain",
+                "price_source": "option_bid_ask_or_mark",
+                "roll_model": "contract_selection_by_signal",
+                "liquidity_model": "option_bid_ask_volume_oi_filter",
+                "execution_reality": "event_driven_options_v1",
+                "vendor": metadata.get("data_vendor") or "local_option_chain",
+            },
+            "signal_and_execution_mode": {
+                "alpha_signal_col": factor_contract.get("alpha_signal_col"),
+                "execution_weight_col": factor_contract.get("execution_weight_col"),
+                "execution_signal_col_used": "direction",
+                "execution_mode": "event_driven_options",
+                "execution_assumption": "daily_signal_option_fill_then_mark",
+                "return_assumption": "option_mark_to_market",
+                "execution_lag": factor_contract.get("execution_lag", "same_day_chain_snapshot"),
+            },
+            "execution_engine": {
+                "engine": "options_event_driven",
+                "tca_model": "bid_ask_fill_or_settlement_proxy",
+                "margin_model": "OptionMarginPolicy",
+                "price_limit_enabled": market_policy.get("price_limit", False),
+                "price_limit_model": market_policy.get("price_limit_model", "option_chain_route"),
+                "t1_enabled": False,
+                "hurst_input_col": None,
+                "hurst_default": None,
+                "lot_mode": "integer_option_contracts",
+                "initial_capital": float(initial_capital),
+                "capital_currency": capital_currency,
+                "min_trade_weight_delta": 0.0,
+            },
+            "option_contract_selection": {
+                "min_dte": metadata.get("option_min_dte"),
+                "max_dte": metadata.get("option_max_dte"),
+                "target_moneyness": metadata.get("option_target_moneyness"),
+                "contracts_per_signal": metadata.get("option_contracts_per_signal"),
+                "allow_multiple_positions_per_underlying": metadata.get(
+                    "option_allow_multiple_positions_per_underlying",
+                    False,
+                ),
+            },
+            "liquidity_policy": {
+                "min_volume": metadata.get("option_min_volume", 0.0),
+                "min_open_interest": metadata.get("option_min_open_interest", 0.0),
+                "max_spread_pct": metadata.get("option_max_spread_pct"),
+                "allow_settlement_proxy": metadata.get("option_allow_settlement_proxy"),
+                "commission_per_contract": metadata.get("option_commission_per_contract"),
+                "direct_weight_row_grid_preserved": False,
+            },
+            "diagnostics": {
+                "chain_rows": diagnostics.get("chain_rows"),
+                "underlying_rows": diagnostics.get("underlying_rows"),
+                "signal_rows": diagnostics.get("signal_rows"),
+                "equity_rows": int(len(equity_curve)),
+                "position_mark_rows": int(len(positions)),
+            },
+            "realized_summary": {
+                "returns_file_path": returns_file_path,
+                "trades_file_path": trades_file_path,
+                "trading_days": int(len(equity_curve)),
+                "total_trades": int(len(trades)),
+                "annualized_return": float(annualized_return),
+                "sharpe_ratio": float(sharpe),
+                "max_drawdown": float(max_drawdown),
+                "avg_daily_cost_bps": float(avg_daily_cost_bps),
+                "total_exchange_fees": float(total_exchange_fees),
+                "total_slippage_cost": float(total_slippage_cost),
+                "total_execution_cost": float(total_execution_cost),
+            },
+        }
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True, default=str)
+        print(f"   🧾 Saved option assumption manifest to {path}")
+        return path
 
     def _log_to_db(
         self,
@@ -1489,12 +2437,11 @@ class AlphaEvaluator:
         clean_df = df.dropna(subset=[execution_signal_col, 'forward_return']).copy()
         
         if not clean_df.empty:
-            from benchmark_engine.benchmark_factory import BenchmarkFactory
+            from oqp.research.backtesting.benchmarks import resolve_default_benchmark_policy
             
-            # Pass finalized Risk Desk weights through without applying another
-            # leverage multiplier. If no final signal exists, preserve the old
-            # factor_score scaling behavior for direct evaluator use.
-            execution_max_leverage = 1.0 if execution_signal_col == 'signal' else 5.0
+            # Target weights are already produced by the execution-mode layer.
+            # Any leverage must be explicit in the factor contract/config.
+            execution_max_leverage = 1.0
             print(
                 f"   -> Executing '{execution_signal_col}' "
                 f"with {execution_max_leverage:.1f}x leverage multiplier "
@@ -1511,15 +2458,51 @@ class AlphaEvaluator:
                 min_trade_weight_delta=min_trade_weight_delta,
             )
             
-            benchmark_engine = BenchmarkFactory.create_benchmark("BUY_AND_HOLD", raw_df=clean_df)
-            # 🛠️ FIX: Pass the entire DataFrame so the Smart Benchmark can audit the tickers
-            b_df = benchmark_engine.generate(clean_df)
+            benchmark_policy = resolve_default_benchmark_policy(
+                self.asset_class,
+                factor_metadata=df.attrs.get("factor_metadata", {}),
+                factor_id=factor_id,
+            )
+            benchmark_type = str(benchmark_policy.get("benchmark_type") or "BUY_AND_HOLD")
+            print(
+                "   -> Benchmark: "
+                f"{benchmark_policy.get('benchmark_label', benchmark_type)} "
+                f"[{benchmark_type}]"
+            )
+            for secondary in benchmark_policy.get("secondary_benchmarks", []) or []:
+                if isinstance(secondary, dict):
+                    print(
+                        "      + Secondary benchmark: "
+                        f"{secondary.get('benchmark_label', secondary.get('benchmark_type', ''))}"
+                    )
+            for control in benchmark_policy.get("same_horizon_controls", []) or []:
+                if isinstance(control, dict):
+                    print(
+                        "      + Same-horizon control: "
+                        f"{control.get('benchmark_label', control.get('benchmark_type', ''))}"
+                    )
+            b_df = self._build_benchmark_frame(clean_df, benchmark_policy)
             
             portfolio, avg_turnover, asset_df = desk.run_backtest(
                 clean_df,
                 benchmark_df=b_df,
                 signal_col=execution_signal_col,
             )
+            benchmark_return_cols = [
+                column
+                for column in portfolio.columns
+                if str(column).startswith("benchmark_return")
+            ]
+            for column in benchmark_return_cols:
+                benchmark_returns = pd.to_numeric(portfolio[column], errors="coerce").fillna(0.0)
+                if str(column) == "benchmark_return":
+                    excess_col = "excess_return"
+                else:
+                    excess_col = f"excess_return_{str(column).removeprefix('benchmark_return_')}"
+                portfolio[excess_col] = pd.to_numeric(
+                    portfolio["net_return"],
+                    errors="coerce",
+                ).fillna(0.0) - benchmark_returns
             
             daily_returns = portfolio['net_return'].fillna(0).values
             if len(daily_returns) > 0:
@@ -1556,6 +2539,7 @@ class AlphaEvaluator:
                 'gross_return',
                 'net_return',
                 'benchmark_return',
+                'excess_return',
                 'daily_turnover',
                 'daily_slippage_cost',
                 'daily_exchange_fee',
@@ -1572,6 +2556,22 @@ class AlphaEvaluator:
                 'avg_round_trip_fee_bps',
                 'avg_round_trip_fee_ticks',
             ]
+            extra_benchmark_cols = sorted(
+                column
+                for column in portfolio.columns
+                if str(column).startswith("benchmark_return_")
+            )
+            export_cols.extend(
+                column for column in extra_benchmark_cols if column not in export_cols
+            )
+            extra_excess_cols = sorted(
+                column
+                for column in portfolio.columns
+                if str(column).startswith("excess_return_")
+            )
+            export_cols.extend(
+                column for column in extra_excess_cols if column not in export_cols
+            )
             portfolio['initial_capital'] = initial_capital
             portfolio['capital_currency'] = capital_currency
             portfolio['min_trade_weight_delta'] = min_trade_weight_delta
@@ -1581,6 +2581,21 @@ class AlphaEvaluator:
             
             portfolio[export_cols].to_csv(file_path, index=False)
             print(f"   💾 Saved Ironclad portfolio returns to {file_path}")
+            self._write_assumption_manifest(
+                run_id=run_id,
+                factor_id=factor_id,
+                df=df,
+                asset_df=asset_df,
+                portfolio=portfolio,
+                execution_signal_col=execution_signal_col,
+                execution_lot_mode=execution_lot_mode or "fractional",
+                initial_capital=initial_capital,
+                capital_currency=capital_currency,
+                min_trade_weight_delta=min_trade_weight_delta,
+                returns_file_path=file_path,
+                benchmark_policy=benchmark_policy,
+                benchmark_df=b_df,
+            )
 
             update_conn = sqlite3.connect(self.db_path)
             update_conn.cursor().execute("""

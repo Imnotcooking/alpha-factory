@@ -16,12 +16,20 @@ from oqp.research.factor_presets import (
 
 FACTOR_ID = "fac_template_retired_public"
 
+# Public examples can declare pipeline policy too. This is intentionally simple:
+# the factor computes a score; the runner decides whether to add Kelly/HRP.
+EXECUTION_MODE_CONFIG = {
+    "sizing_modules": ["kelly", "hrp"],
+    "kelly_fraction": 0.5,
+    "max_gross_leverage": 1.0,
+    "max_weight_per_asset": 0.05,
+}
+
 FACTOR_METADATA = {
     "status": "retired_public_template",
-    "native_market": "SYNTHETIC_PUBLIC",
-    "suitable_markets": ["SYNTHETIC_PUBLIC"],
+    "native_market": "FUTURES_CN",
+    "supported_markets": ["FUTURES_CN"],
     "experimental_markets": [],
-    "unsupported_markets": [],
     "required_fields": ["date", "ticker", "close"],
     "optional_fields": [],
     "uses_open_interest": False,
@@ -62,6 +70,7 @@ def compute_factor(data: pd.DataFrame, *, lookback: int = 5) -> pd.DataFrame:
     result.attrs["factor_id"] = FACTOR_ID
     result.attrs["factor_metadata"] = FACTOR_METADATA
     result.attrs["factor_contract"] = FACTOR_CONTRACT
+    result.attrs["execution_mode_config"] = EXECUTION_MODE_CONFIG
     return result.reset_index(drop=True)
 
 

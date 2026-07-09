@@ -11,12 +11,14 @@ The former lab folder has been deleted. Its responsibilities now live here:
 
 | Former lab responsibility | Current architecture home |
 | --- | --- |
-| Market data caches | `runtime/data/alpha_lab/market_data/` |
-| Feature matrices | `runtime/data/alpha_lab/feature_store/` |
-| Regime probability outputs | `runtime/data/alpha_lab/regime/` |
-| Research metadata | `runtime/data/alpha_lab/metadata/` |
-| Research and optimization databases | `runtime/db/research/alpha_lab/` |
-| Backtest, model, diagnostic, and experiment artifacts | `runtime/artifacts/research/alpha_lab/` |
+| CN futures daily market data | `runtime/data/futures_cn/daily/` |
+| CN futures intraday market data | `runtime/data/futures_cn/intraday/` |
+| CN futures tick market data | `runtime/data/futures_cn/tick/` |
+| Feature matrices | `runtime/data/feature_store/` |
+| Regime probability outputs | `runtime/data/regime/` |
+| Research metadata | `runtime/data/metadata/` |
+| Research and optimization databases | `runtime/db/research/` |
+| Backtest, model, diagnostic, and experiment artifacts | `runtime/artifacts/research/` |
 | Operational logs | `runtime/logs/` |
 | Private factor recipes | `departments/research/factors/` |
 | Public retired examples | `departments/research/retired_factors/` |

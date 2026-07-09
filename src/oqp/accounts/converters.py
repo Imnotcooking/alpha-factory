@@ -16,7 +16,7 @@ from oqp.accounts.models import (
     TradeEvent,
     account_timestamp,
 )
-from oqp.brokers import IBKRReadOnlyPortfolioSnapshot
+from oqp.brokers import BrokerSnapshot, IBKRReadOnlyPortfolioSnapshot
 
 
 def account_snapshot_from_ibkr_readonly(
@@ -83,6 +83,72 @@ def account_snapshot_from_ibkr_readonly(
             "broker_label": broker_label,
             "account_currency": currency,
             "snapshot_date": _date_text(snapshot_date) if snapshot_date else None,
+        },
+    )
+
+
+def account_snapshot_from_broker_snapshot(
+    snapshot: BrokerSnapshot,
+    *,
+    environment: AccountEnvironment | str,
+    profile: str,
+    broker_label: str | None = None,
+    snapshot_date: str | date | datetime | None = None,
+    as_of: datetime | None = None,
+) -> AccountSnapshot:
+    """Convert a generic broker adapter snapshot into the account ledger shape."""
+
+    env = _environment(environment)
+    timestamp = as_of or snapshot.as_of or account_timestamp()
+    account = snapshot.account
+    positions = tuple(
+        _position_snapshot_from_domain(position)
+        for position in snapshot.positions
+        if str(position.instrument.symbol or "").strip()
+    )
+    cash_balances = tuple(
+        CashSnapshot(
+            currency=cash.currency,
+            cash=cash.cash,
+            settled_cash=cash.settled_cash,
+            buying_power=cash.buying_power,
+            metadata={
+                "source_broker": snapshot.broker,
+                "source_profile": profile,
+                **dict(cash.metadata or {}),
+            },
+        )
+        for cash in snapshot.cash_balances
+    )
+
+    return AccountSnapshot(
+        snapshot_id=_snapshot_id(
+            environment=env,
+            profile=profile,
+            account_id=account.account_id,
+            timestamp=timestamp,
+        ),
+        as_of=timestamp,
+        account_id=account.account_id,
+        broker=snapshot.broker,
+        profile=profile,
+        environment=env,
+        currency=account.currency,
+        net_liquidation=account.net_liquidation,
+        cash=account.cash,
+        buying_power=account.buying_power,
+        gross_position_value=account.gross_position_value or _gross_value(positions),
+        margin_buffer=_optional_float(account.metadata.get("margin_buffer")),
+        positions=positions,
+        cash_balances=cash_balances,
+        metadata={
+            "source": "broker_snapshot",
+            "broker_label": broker_label,
+            "account_currency": account.currency,
+            "snapshot_date": _date_text(snapshot_date) if snapshot_date else None,
+            "source_broker": snapshot.broker,
+            "source_profile": profile,
+            **dict(snapshot.metadata or {}),
         },
     )
 
@@ -261,6 +327,34 @@ def position_snapshot_from_legacy_row(row: dict[str, Any]) -> PositionSnapshot:
     )
 
 
+def _position_snapshot_from_domain(position: Any) -> PositionSnapshot:
+    instrument = position.instrument
+    metadata = {
+        "source_broker": position.broker,
+        "source_account_id": position.account_id,
+        **dict(position.metadata or {}),
+    }
+    market_value = _optional_float(metadata.get("market_value"))
+    if market_value is None:
+        market_value = position.market_value
+    unrealized_pnl = _optional_float(metadata.get("unrealized_pnl"))
+    if unrealized_pnl is None:
+        unrealized_pnl = position.unrealized_pnl
+
+    return PositionSnapshot(
+        symbol=instrument.broker_symbol or instrument.symbol,
+        asset_class=_asset_class(instrument.asset_class),
+        quantity=float(position.quantity),
+        average_cost=_optional_float(position.average_cost),
+        market_price=_optional_float(position.market_price),
+        market_value=market_value,
+        unrealized_pnl=unrealized_pnl,
+        currency=instrument.currency,
+        multiplier=float(instrument.multiplier),
+        metadata=metadata,
+    )
+
+
 def _environment(value: AccountEnvironment | str) -> AccountEnvironment:
     if isinstance(value, AccountEnvironment):
         return value
@@ -268,7 +362,8 @@ def _environment(value: AccountEnvironment | str) -> AccountEnvironment:
 
 
 def _asset_class(value: Any) -> str:
-    text = str(value or "equity").strip().lower()
+    raw = getattr(value, "value", value)
+    text = str(raw or "equity").strip().lower()
     return {
         "stock": "equity",
         "stk": "equity",

@@ -87,15 +87,23 @@ from oqp.intelligence.signal_engine import (  # noqa: E402
 from oqp.market import (  # noqa: E402
     DEFAULT_MARKET_CACHE_MAX_AGE_HOURS,
     DEFAULT_MARKET_CACHE_PATH,
+    DEFAULT_MARKET_EVENTS_PATH,
     DEFAULT_VOL_FORECAST_DB_PATH,
     DEFAULT_VOL_FORECAST_HORIZONS,
+    commodity_channel_index,
+    event_provider_plan,
     forecast_volatility_models,
     load_cached_market_history,
+    load_market_events,
     market_cache_status,
+    market_monitor_refresh_symbols,
+    market_monitor_snapshot,
     refresh_yahoo_market_cache,
     select_forecast_vol,
+    seed_market_events_template,
     write_volatility_forecasts,
 )
+from oqp.market.volatility import bollinger_squeeze_metrics  # noqa: E402
 from oqp.options import (  # noqa: E402
     black_scholes_price,
     choose_expiration,
@@ -117,7 +125,11 @@ from oqp.ui import (  # noqa: E402
     ops_tabs,
     ops_text,
     page_header,
+    qmt_connector_contract_frame,
+    qmt_route_candidate_frame,
+    qmt_submit_state,
     render_dark_table,
+    render_market_lane_chips,
     style_dark_plotly,
 )
 
@@ -140,7 +152,7 @@ def T(key: str, default: str | None = None, **format_values: Any) -> str:
     return ops_text(OPS_LANG, key, default, **format_values)
 
 
-WORKBENCH_VIEWS = ["Watchlist", "Opportunity Hub", "API Status"]
+WORKBENCH_VIEWS = ["Market Monitor", "Watchlist", "Opportunity Hub", "API Status"]
 
 
 def workbench_view_label(view: str) -> str:
@@ -877,6 +889,12 @@ def watchlist_opportunity_tag(row: dict[str, Any]) -> str:
     volume_surge = safe_num(row.get("Vol / 20D"), 1.0)
     dist_high = safe_num(row.get("From 52W High"), 0.0)
     dist_ma20 = safe_num(row.get("Vs 20D MA"), 0.0)
+    squeeze_pctile = safe_num(row.get("BB 6M %ile"), 1.0)
+    squeeze_low = bool(row.get("Squeeze"))
+    if squeeze_low:
+        return "6m squeeze"
+    if squeeze_pctile <= 0.10:
+        return "squeeze watch"
     if rsi < 35 and dist_high < -0.10:
         return "oversold watch"
     if ret_5d > 0.06 and volume_surge > 1.5:
@@ -1017,10 +1035,14 @@ def format_watchlist_display(frame: pd.DataFrame) -> pd.DataFrame:
         "Vs 20D MA": 2,
         "From 52W High": 2,
         "ATR %": 2,
+        "BB Width": 2,
+        "BB 6M %ile": 1,
     }
     number_formats: dict[str, tuple[int, str]] = {
         "Last": (2, ""),
         "RSI 14": (1, ""),
+        "CCI 20": (1, ""),
+        "BB Z": (2, ""),
         "Vol / 20D": (2, "x"),
     }
     for column, digits in percent_columns.items():
@@ -1029,6 +1051,8 @@ def format_watchlist_display(frame: pd.DataFrame) -> pd.DataFrame:
     for column, (digits, suffix) in number_formats.items():
         if column in display:
             display[column] = display[column].map(lambda value, d=digits, s=suffix: format_float(value, d, s))
+    if "Squeeze" in display:
+        display["Squeeze"] = display["Squeeze"].map(lambda value: "yes" if bool(value) else "")
     if "As Of" in display:
         display["As Of"] = pd.to_datetime(display["As Of"], errors="coerce").dt.date.astype("string")
         display["As Of"] = display["As Of"].replace("<NA>", "")
@@ -1109,14 +1133,18 @@ def watchlist_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "Vs 20D MA",
         "From 52W High",
         "ATR %",
+        "BB Width",
+        "BB 6M %ile",
     ]
     for column in percent_columns:
         if column in display:
             display[column] = pd.to_numeric(display[column], errors="coerce") * 100
-    numeric_columns = ["Last", "RSI 14", "Vol / 20D"]
+    numeric_columns = ["Last", "RSI 14", "CCI 20", "BB Z", "Vol / 20D"]
     for column in numeric_columns:
         if column in display:
             display[column] = pd.to_numeric(display[column], errors="coerce")
+    if "Squeeze" in display:
+        display["Squeeze"] = display["Squeeze"].map(lambda value: "yes" if bool(value) else "")
     if "As Of" in display:
         display["As Of"] = pd.to_datetime(display["As Of"], errors="coerce").dt.strftime("%Y-%m-%d")
         display["As Of"] = display["As Of"].fillna("")
@@ -1130,9 +1158,14 @@ def watchlist_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "HV 21D",
         "HV 63D",
         "RSI 14",
+        "CCI 20",
         "Vs 20D MA",
         "From 52W High",
         "ATR %",
+        "BB Width",
+        "BB 6M %ile",
+        "BB Z",
+        "Squeeze",
         "Vol / 20D",
         "As Of",
         "Opportunity",
@@ -1299,7 +1332,7 @@ def render_watchlist_aggrid(frame: pd.DataFrame) -> bool:
     )
     if "Last" in grid_frame:
         builder.configure_column("Last", type=["numericColumn"], valueFormatter=money_formatter, width=105)
-    for column in ["1D %", "5D %", "20D %", "Vs 20D MA", "ATR %"]:
+    for column in ["1D %", "5D %", "20D %", "Vs 20D MA", "ATR %", "BB Width", "BB 6M %ile"]:
         if column in grid_frame:
             builder.configure_column(column, type=["numericColumn"], valueFormatter=pct_formatter, width=112)
     if "From 52W High" in grid_frame:
@@ -1316,6 +1349,12 @@ def render_watchlist_aggrid(frame: pd.DataFrame) -> bool:
             builder.configure_column(column, type=["numericColumn"], valueFormatter=pct_1_formatter, width=105)
     if "RSI 14" in grid_frame:
         builder.configure_column("RSI 14", type=["numericColumn"], valueFormatter=num_1_formatter, width=92)
+    if "CCI 20" in grid_frame:
+        builder.configure_column("CCI 20", type=["numericColumn"], valueFormatter=num_1_formatter, width=105)
+    if "BB Z" in grid_frame:
+        builder.configure_column("BB Z", type=["numericColumn"], valueFormatter=num_1_formatter, width=90)
+    if "Squeeze" in grid_frame:
+        builder.configure_column("Squeeze", width=104, minWidth=96)
     if "Vol / 20D" in grid_frame:
         builder.configure_column("Vol / 20D", type=["numericColumn"], valueFormatter=ratio_formatter, width=105)
     if "As Of" in grid_frame:
@@ -1421,9 +1460,14 @@ def render_watchlist_dark_table(frame: pd.DataFrame) -> None:
         "HV 21D",
         "HV 63D",
         "RSI 14",
+        "CCI 20",
         "Vs 20D MA",
         "From 52W High",
         "ATR %",
+        "BB Width",
+        "BB 6M %ile",
+        "BB Z",
+        "Squeeze",
         "Vol / 20D",
         "As Of",
         "Opportunity",
@@ -1502,6 +1546,8 @@ def watchlist_editor_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "Vs 20D MA",
         "From 52W High",
         "ATR %",
+        "BB Width",
+        "BB 6M %ile",
     ]
     for column in percent_columns:
         if column in display:
@@ -1857,6 +1903,7 @@ def cached_watchlist_snapshot(symbols: tuple[str, ...]) -> pd.DataFrame:
         volume = pd.to_numeric(history.get("Volume", pd.Series(dtype=float)), errors="coerce").dropna()
         volume_20d = volume.tail(20).mean() if len(volume) >= 20 else float("nan")
         last_volume = volume.iloc[-1] if not volume.empty else float("nan")
+        squeeze = bollinger_squeeze_metrics(history, window=20, lookback=126)
         row: dict[str, Any] = {
             "Symbol": symbol,
             "Last": last_price,
@@ -1866,6 +1913,11 @@ def cached_watchlist_snapshot(symbols: tuple[str, ...]) -> pd.DataFrame:
             "HV 21D": annualized_hv(close, 21),
             "HV 63D": annualized_hv(close, 63),
             "RSI 14": snapshot.rsi_14,
+            "CCI 20": commodity_channel_index(history, window=20),
+            "BB Width": squeeze.get("bb_width_20d"),
+            "BB 6M %ile": squeeze.get("bb_width_6m_pctile"),
+            "BB Z": squeeze.get("bb_z_20d"),
+            "Squeeze": squeeze.get("bb_squeeze_6m"),
             "Vs 20D MA": (last_price / ma20) - 1 if ma20 and pd.notna(ma20) else float("nan"),
             "From 52W High": (last_price / high_52w) - 1 if high_52w and pd.notna(high_52w) else float("nan"),
             "ATR %": (snapshot.atr_14 / last_price) if last_price > 0 else float("nan"),
@@ -1875,6 +1927,194 @@ def cached_watchlist_snapshot(symbols: tuple[str, ...]) -> pd.DataFrame:
         row["Opportunity"] = watchlist_opportunity_tag(row)
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def cached_market_monitor_snapshot() -> pd.DataFrame:
+    return market_monitor_snapshot()
+
+
+def format_market_monitor_display(frame: pd.DataFrame) -> pd.DataFrame:
+    """Format the cross-market monitor for dark-table display."""
+
+    if frame.empty:
+        return frame
+    display = frame.copy()
+    if "Last" in display:
+        display["Last"] = display["Last"].map(lambda value: format_float(value, 2))
+    for column in ("1D %", "5D %", "20D %", "60D %", "From 52W High", "HV 20D"):
+        if column in display:
+            display[column] = display[column].map(lambda value: format_percent_cell(value, 1))
+    if "As Of" in display:
+        display["As Of"] = display["As Of"].astype(str).replace({"NaT": "", "nan": ""})
+    columns = [
+        "Region",
+        "Asset Class",
+        "Category",
+        "Instrument",
+        "Symbol",
+        "Last",
+        "1D %",
+        "5D %",
+        "20D %",
+        "60D %",
+        "From 52W High",
+        "HV 20D",
+        "Status",
+        "As Of",
+        "Source",
+        "Notes",
+    ]
+    return display[[column for column in columns if column in display.columns]]
+
+
+def format_market_events_display(frame: pd.DataFrame) -> pd.DataFrame:
+    """Format market events for the monitor tab."""
+
+    if frame.empty:
+        return frame
+    display = frame.copy()
+    if "Date" in display:
+        display["Date"] = pd.to_datetime(display["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        display["Date"] = display["Date"].fillna("")
+    columns = ["Date", "Market", "Category", "Event", "Symbols", "Status", "Source", "Notes"]
+    return display[[column for column in columns if column in display.columns]]
+
+
+def render_market_monitor_tab(settings: Any) -> None:
+    st.subheader("Market Monitor")
+    st.caption(
+        "Global cross-asset picture for discretionary context. Reads local cache first; "
+        "refresh uses the same market cache as the watchlist."
+    )
+    refreshable_symbols = market_monitor_refresh_symbols()
+    cache_status = market_cache_status(refreshable_symbols)
+    stale_symbols = cache_status.loc[
+        cache_status["State"].isin(["missing", "stale"]),
+        "Symbol",
+    ].astype(str).tolist()
+    counts = cache_status["State"].value_counts().to_dict() if not cache_status.empty else {}
+
+    controls = st.columns([1.1, 1.1, 3.4])
+    refresh_stale = controls[0].button(
+        "Refresh Stale Markets",
+        use_container_width=True,
+        disabled=not stale_symbols,
+    )
+    refresh_all = controls[1].button(
+        "Refresh All Markets",
+        use_container_width=True,
+        disabled=not refreshable_symbols,
+    )
+    controls[2].caption(
+        f"Yahoo-backed rows: fresh={counts.get('fresh', 0)} "
+        f"stale={counts.get('stale', 0)} missing={counts.get('missing', 0)}. "
+        "China 10Y is staged for Wind/QMT because a stable local provider is preferable."
+    )
+
+    symbols_to_refresh = stale_symbols if refresh_stale else (list(refreshable_symbols) if refresh_all else [])
+    if symbols_to_refresh:
+        estimated = max(12, min(120, len(symbols_to_refresh) * 5))
+        progress, status = progress_bar(
+            f"Refreshing {len(symbols_to_refresh)} market monitor symbol(s)",
+            estimate_seconds=estimated,
+        )
+        progress_step(progress, status, 15, "Fetching market history into SQLite cache...")
+        refresh_result = refresh_yahoo_market_cache(tuple(symbols_to_refresh), period="2y")
+        progress_step(progress, status, 92, "Recomputing market monitor snapshot...")
+        cached_market_monitor_snapshot.clear()
+        ok_count = int(refresh_result["Status"].eq("ok").sum()) if "Status" in refresh_result else 0
+        progress_step(progress, status, 100, f"Refresh complete: {ok_count}/{len(symbols_to_refresh)} updated.")
+        finish_progress(progress, status)
+        st.success(f"Market monitor refresh complete: {ok_count}/{len(symbols_to_refresh)} updated.")
+        render_dark_table(refresh_result, max_height_px=260)
+
+    frame = cached_market_monitor_snapshot()
+    ok = frame.loc[frame.get("Status", pd.Series(dtype=str)).eq("ok")].copy() if not frame.empty else pd.DataFrame()
+    metric_cols = st.columns(6)
+    if ok.empty:
+        metric_cols[0].metric("Live Rows", "0")
+        metric_cols[1].metric("Risk Breadth", "missing")
+        metric_cols[2].metric("Best 1D", "missing")
+        metric_cols[3].metric("Worst 1D", "missing")
+        metric_cols[4].metric("High Stress", "missing")
+        metric_cols[5].metric("Planned Rows", str(int(frame.get("Status", pd.Series()).eq("planned").sum()) if not frame.empty else 0))
+    else:
+        returns = pd.to_numeric(ok.get("1D %"), errors="coerce")
+        breadth = float((returns > 0).mean()) if returns.notna().any() else float("nan")
+        best_idx = returns.idxmax() if returns.notna().any() else None
+        worst_idx = returns.idxmin() if returns.notna().any() else None
+        hv = pd.to_numeric(ok.get("HV 20D"), errors="coerce")
+        metric_cols[0].metric("Live Rows", str(len(ok)))
+        metric_cols[1].metric("Risk Breadth", format_percent_cell(breadth, 0))
+        metric_cols[2].metric(
+            "Best 1D",
+            f"{ok.at[best_idx, 'Symbol']} {format_percent_cell(returns.loc[best_idx], 1)}" if best_idx is not None else "missing",
+        )
+        metric_cols[3].metric(
+            "Worst 1D",
+            f"{ok.at[worst_idx, 'Symbol']} {format_percent_cell(returns.loc[worst_idx], 1)}" if worst_idx is not None else "missing",
+        )
+        metric_cols[4].metric("Highest HV20", format_percent_cell(hv.max(), 1))
+        metric_cols[5].metric("Planned Rows", str(int(frame["Status"].eq("planned").sum())))
+
+    if not ok.empty:
+        plot_frame = ok.sort_values("1D %", ascending=True)
+        colors = ["#ff5a66" if float(value) < 0 else "#54d6c2" for value in pd.to_numeric(plot_frame["1D %"], errors="coerce").fillna(0)]
+        fig = go.Figure(
+            go.Bar(
+                x=pd.to_numeric(plot_frame["1D %"], errors="coerce") * 100,
+                y=plot_frame["Instrument"],
+                orientation="h",
+                marker_color=colors,
+                hovertemplate="%{y}<br>1D: %{x:.2f}%<extra></extra>",
+            )
+        )
+        fig.update_layout(height=440, xaxis_title="1D Change %", yaxis_title="")
+        style_dark_plotly(fig, hovermode="closest")
+        st.plotly_chart(fig, use_container_width=True, theme=None)
+
+    render_dark_table(format_market_monitor_display(frame), max_height_px=520)
+
+    if not ok.empty:
+        chart_symbols = ok["Symbol"].dropna().astype(str).tolist()
+        selected = st.selectbox("Inspect cached history", chart_symbols, index=0)
+        history = load_cached_market_history(selected, lookback_days=420)
+        if not history.empty and "Close" in history:
+            close = pd.to_numeric(history["Close"], errors="coerce")
+            fig = go.Figure(
+                go.Scatter(
+                    x=history.index,
+                    y=close,
+                    mode="lines",
+                    name=selected,
+                    line=dict(color="#54d6c2", width=2),
+                )
+            )
+            fig.update_layout(height=360, yaxis_title="Close", xaxis_title="")
+            style_dark_plotly(fig, hovermode="x unified")
+            st.plotly_chart(fig, use_container_width=True, theme=None)
+
+    st.subheader("Events Calendar")
+    st.caption(
+        "Upcoming macro and watchlist events. Exact dates should come from official/FMP/Wind/QMT sources; "
+        "GLM can summarize impact after the source calendar is loaded."
+    )
+    event_cols = st.columns([1.2, 1.2, 3.6])
+    if event_cols[0].button("Seed Event File", use_container_width=True):
+        seed_path = seed_market_events_template(load_stock_watchlist())
+        st.success(f"Event template ready at {display_path(seed_path)}")
+    event_cols[1].caption(f"Local source: `{display_path(DEFAULT_MARKET_EVENTS_PATH)}`")
+    event_cols[2].caption("Planned feeds: Fed/economic calendar, watchlist earnings, Wind/QMT China calendar, and GLM summaries.")
+    events = load_market_events(horizon_days=60)
+    if events.empty:
+        st.info("No dated event rows have been loaded yet. The provider plan below shows what will populate this calendar.")
+        render_dark_table(event_provider_plan(load_stock_watchlist()), max_height_px=320)
+    else:
+        render_dark_table(format_market_events_display(events), max_height_px=360)
+
+    with st.expander("Market cache status", expanded=False):
+        render_dark_table(format_cache_status_display(cache_status), max_height_px=360)
 
 
 def render_watchlist_tab() -> None:
@@ -3468,6 +3708,8 @@ def render_opportunity_hub(settings: Any) -> None:
         overview_cols[3].metric("Reference Expiry", reference_expiry or "n/a")
         render_dark_table(format_opportunity_lens_display(lens_frame), max_height_px=260)
         render_dark_table(format_vehicle_route_display(route_frame), max_height_px=260)
+        st.subheader("QMT Route Context")
+        render_dark_table(qmt_route_candidate_frame(loaded, settings), max_height_px=220)
         if data:
             render_stock_snapshot(loaded, data)
         else:
@@ -3547,6 +3789,8 @@ def render_opportunity_hub(settings: Any) -> None:
             settings=settings,
         )
     with decision_tab:
+        st.subheader("QMT Route Context")
+        render_dark_table(qmt_route_candidate_frame(loaded, settings), max_height_px=220)
         render_opportunity_decision_pad(
             symbol=loaded,
             action_bucket=action_bucket,
@@ -3701,8 +3945,16 @@ def render_api_status_tab(settings: Any) -> None:
             "Used By": f"{getattr(settings, 'llm_provider', 'missing')} / {getattr(settings, 'llm_model', 'missing')}",
         },
         {"Service": "News/NLP Cache", "Env Key": "n/a", "Status": "local", "Used By": display_path(DEFAULT_NEWS_NLP_DB_PATH)},
+        {
+            "Service": "QMT Connector",
+            "Env Key": "QMT_CONNECTOR_URL / QMT_SUBMIT_CONNECTOR_URL",
+            "Status": "enabled" if settings.qmt_connector_enabled else "locked",
+            "Used By": f"CN bridge route context; submit={qmt_submit_state(settings)}",
+        },
     ]
     render_dark_table(pd.DataFrame(rows))
+    st.subheader("QMT Connector Contract")
+    render_dark_table(qmt_connector_contract_frame(settings), max_height_px=260)
     st.subheader("Sentiment Provider Readiness")
     provider_frame = nlp_provider_status(
         fmp_key=settings.fmp_api_key,
@@ -3723,23 +3975,42 @@ page_header(
     subtitle_zh="日常主观决策驾驶舱：自选股、估值/期权/新闻一体化机会中心与 API 状态。",
     language=OPS_LANG,
 )
+render_market_lane_chips(
+    language=OPS_LANG,
+    lanes=("EQUITY_US", "OPTIONS_US", "EQUITY_CN", "OPTIONS_CN", "FUTURES_CN"),
+    caption="The workbench is the discretionary front door: US lanes are active today; CN equities/options/futures are staged for 华源证券/QMT.",
+)
 
 active_symbol = st.session_state.get("workbench_symbol", "AAPL")
-top = st.columns(5)
+top = st.columns(6)
 top[0].metric(T("active_symbol", "Active Symbol"), active_symbol)
 top[1].metric("FMP", present(settings.fmp_api_key))
 top[2].metric("Massive", present(settings.massive_api_key or settings.polygon_api_key or settings.options_api_key))
 top[3].metric(T("watchlist", "Watchlist"), str(len(load_stock_watchlist())))
 top[4].metric(T("saved_ideas", "Saved Ideas"), str(len(load_scratchpad())))
+top[5].metric("QMT Submit", qmt_submit_state(settings))
 
 if st.session_state.get("workbench_view") not in WORKBENCH_VIEWS:
-    st.session_state["workbench_view"] = "Watchlist"
+    st.session_state["workbench_view"] = "Market Monitor"
 
-active_view = st.session_state.get("workbench_view", "Watchlist")
+active_view = st.session_state.get("workbench_view", "Market Monitor")
 render_workbench_nav(active_view)
 
-if active_view == "Watchlist":
+if active_view == "Market Monitor":
+    render_market_monitor_tab(settings)
+elif active_view == "Watchlist":
     render_watchlist_tab()
+    st.subheader("QMT Market-Lane Staging")
+    render_dark_table(
+        pd.DataFrame(
+            [
+                {"Lane": "EQUITY_CN", "Route": "QMT candidate", "Dashboard Action": "Tag CN symbols and draft paper-only ideas."},
+                {"Lane": "OPTIONS_CN", "Route": "QMT future", "Dashboard Action": "Wait for real option contract normalization."},
+                {"Lane": "FUTURES_CN", "Route": "QMT candidate", "Dashboard Action": "Keep futures ideas route-tagged and simulation-only."},
+            ]
+        ),
+        max_height_px=220,
+    )
 elif active_view == "Opportunity Hub":
     render_opportunity_hub(settings)
 else:

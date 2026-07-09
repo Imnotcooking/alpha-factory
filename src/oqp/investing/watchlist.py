@@ -6,11 +6,10 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from oqp.config import REPO_ROOT, legacy_middle_office_root
+from oqp.config import REPO_ROOT
 
 DEFAULT_INVESTING_STATE_DIR = REPO_ROOT / "runtime" / "state" / "investing"
 DEFAULT_STOCK_WATCHLIST_PATH = DEFAULT_INVESTING_STATE_DIR / "stock_watchlist.json"
-LEGACY_STOCK_WATCHLIST_PATH = legacy_middle_office_root() / "pages" / "watchlist.json"
 
 
 def normalize_symbol(symbol: object) -> str:
@@ -45,20 +44,11 @@ def _read_watchlist(path: Path) -> list[str]:
     return []
 
 
-def load_stock_watchlist(
-    path: Path | None = None,
-    *,
-    legacy_path: Path | None = LEGACY_STOCK_WATCHLIST_PATH,
-) -> list[str]:
-    """Load the canonical runtime watchlist, falling back to legacy Middle Office."""
+def load_stock_watchlist(path: Path | None = None) -> list[str]:
+    """Load the canonical runtime watchlist."""
 
     target = path or DEFAULT_STOCK_WATCHLIST_PATH
-    watchlist = _read_watchlist(target)
-    if watchlist:
-        return watchlist
-    if legacy_path is not None:
-        return _read_watchlist(legacy_path)
-    return []
+    return _read_watchlist(target)
 
 
 def save_stock_watchlist(

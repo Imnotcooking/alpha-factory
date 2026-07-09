@@ -12,8 +12,6 @@ from oqp.portfolio.ingestion_job import (
     DEFAULT_IBKR_METRICS_PATH,
     DEFAULT_PORTFOLIO_EXPORTS_DIR,
     DEFAULT_PORTFOLIO_STATE_DIR,
-    LEGACY_MIDDLE_OFFICE_CLEAN_DIR,
-    LEGACY_MIDDLE_OFFICE_RAW_DIR,
     PortfolioIngestionResult,
     fetch_live_ibkr_portfolio,
     fetch_polygon_greeks,
@@ -24,15 +22,11 @@ from oqp.portfolio.ingestion_job import (
     save_ibkr_metrics,
 )
 from oqp.portfolio.ledger import (
-    DEFAULT_MIDDLE_OFFICE_DB_PATH,
     DEFAULT_PORTFOLIO_DB_PATH,
     HISTORICAL_NAV_SCHEMA,
     HISTORICAL_NAV_COLUMNS,
-    LEGACY_MIDDLE_OFFICE_DB_PATH,
     LIVE_POSITIONS_SCHEMA,
-    default_middle_office_ledger_path,
     default_portfolio_ledger_path,
-    legacy_middle_office_ledger_path,
     compute_nav_drawdowns,
     ensure_portfolio_ledger_schema,
     load_historical_nav,
@@ -64,11 +58,11 @@ from oqp.portfolio.nav_job import (
     update_portfolio_nav,
 )
 from oqp.portfolio.snapshots import (
-    LEGACY_POSITION_COLUMNS,
+    BROKER_POSITION_COLUMNS,
     LIVE_POSITION_COLUMNS,
     PortfolioPositionSnapshot,
     PortfolioSnapshot,
-    position_snapshots_to_legacy_frame,
+    position_snapshots_to_broker_position_frame,
     position_snapshots_to_live_positions_frame,
 )
 from oqp.portfolio.symbols import PORTFOLIO_TICKER_ALIASES, to_yahoo_ticker
@@ -79,7 +73,7 @@ from oqp.portfolio.valuation import (
 )
 
 __all__ = [
-    "LEGACY_POSITION_COLUMNS",
+    "BROKER_POSITION_COLUMNS",
     "LIVE_POSITION_COLUMNS",
     "PortfolioPositionSnapshot",
     "PortfolioSnapshot",
@@ -93,7 +87,6 @@ __all__ = [
     "DEFAULT_FX_TICKERS",
     "DEFAULT_MACRO_TICKERS",
     "DEFAULT_PORTFOLIO_MANUAL_INPUTS_PATH",
-    "DEFAULT_MIDDLE_OFFICE_DB_PATH",
     "DEFAULT_BANKED_PROFITS_PATH",
     "DEFAULT_BROKER_EXPORTS_DIR",
     "DEFAULT_IBKR_METRICS_PATH",
@@ -102,9 +95,6 @@ __all__ = [
     "DEFAULT_PORTFOLIO_STATE_DIR",
     "HISTORICAL_NAV_SCHEMA",
     "HISTORICAL_NAV_COLUMNS",
-    "LEGACY_MIDDLE_OFFICE_CLEAN_DIR",
-    "LEGACY_MIDDLE_OFFICE_DB_PATH",
-    "LEGACY_MIDDLE_OFFICE_RAW_DIR",
     "LIVE_POSITIONS_SCHEMA",
     "LIVE_HOLDINGS_COLUMNS",
     "asset_sleeve_mix",
@@ -112,7 +102,6 @@ __all__ = [
     "concentration_diagnostics_frame",
     "compute_nav_drawdowns",
     "currency_exposure_frame",
-    "default_middle_office_ledger_path",
     "default_portfolio_ledger_path",
     "enriched_live_holdings",
     "ensure_portfolio_ledger_schema",
@@ -121,7 +110,6 @@ __all__ = [
     "fetch_polygon_greeks",
     "futu_to_occ",
     "futubull_option_to_occ",
-    "legacy_middle_office_ledger_path",
     "load_historical_nav",
     "load_latest_live_positions",
     "load_portfolio_nav_job_settings",
@@ -130,7 +118,7 @@ __all__ = [
     "parse_futubull_csv",
     "parse_trading212_csv",
     "position_risk_frame",
-    "position_snapshots_to_legacy_frame",
+    "position_snapshots_to_broker_position_frame",
     "position_snapshots_to_live_positions_frame",
     "process_futu_csv",
     "process_t212_csv",

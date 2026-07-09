@@ -8,15 +8,19 @@ import pandas as pd
 from oqp.research import BenchmarkFactory as PublicBenchmarkFactory
 from oqp.research.backtesting import (
     BENCHMARK_RETURN_COL,
+    BENCHMARK_SAME_HORIZON_COL,
     AbsoluteReturnBenchmark,
+    AlphaEvaluator,
     BenchmarkFactory,
     BuyAndHoldBenchmark,
     CSI300Benchmark,
+    FullUniverseEqualWeightBenchmark,
     RiskFreeRateBenchmark,
     SPYBenchmark,
     SectorNeutralBenchmark,
     TickerBenchmark,
     dynamic_equal_weight_benchmark,
+    resolve_default_benchmark_policy,
 )
 
 
@@ -83,6 +87,28 @@ class ResearchBenchmarkTests(unittest.TestCase):
         np.testing.assert_allclose(
             benchmark[BENCHMARK_RETURN_COL].to_numpy(),
             [0.0, 0.10],
+            atol=1e-12,
+        )
+
+    def test_equal_weight_benchmark_can_use_explicit_return_column(self) -> None:
+        raw = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-01-01", "2026-01-01", "2026-01-02", "2026-01-02"]),
+                "ticker": ["A", "B", "A", "B"],
+                "close": [100.0, 200.0, 100.0, 200.0],
+                "execution_period_return": [0.10, -0.02, 0.03, 0.05],
+            }
+        )
+
+        benchmark = dynamic_equal_weight_benchmark(raw, return_col="execution_period_return")
+
+        self.assertEqual(
+            list(benchmark["date"].dt.strftime("%Y-%m-%d")),
+            ["2026-01-01", "2026-01-02"],
+        )
+        np.testing.assert_allclose(
+            benchmark[BENCHMARK_RETURN_COL].to_numpy(),
+            [0.04, 0.04],
             atol=1e-12,
         )
 
@@ -211,6 +237,147 @@ class ResearchBenchmarkTests(unittest.TestCase):
         self.assertIsInstance(csi300, CSI300Benchmark)
         self.assertIsInstance(custom, TickerBenchmark)
 
+    def test_equity_cn_default_benchmark_policy_uses_csi300(self) -> None:
+        policy = resolve_default_benchmark_policy("EQUITY_CN")
+
+        self.assertEqual(policy["benchmark_type"], "CSI300")
+        self.assertEqual(policy["benchmark_role"], "asset_class_market_index")
+        self.assertIn("SSE.000300", policy["benchmark_tickers"])
+        self.assertEqual(
+            policy["secondary_benchmarks"][0]["benchmark_type"],
+            "FULL_UNIVERSE_EQUAL_WEIGHT",
+        )
+
+    def test_equity_cn_broad_factor_can_prefer_full_universe_equal_weight(self) -> None:
+        policy = resolve_default_benchmark_policy(
+            "EQUITY_CN",
+            factor_metadata={"benchmark_preference": "FULL_UNIVERSE_EQUAL_WEIGHT"},
+        )
+
+        self.assertEqual(policy["benchmark_type"], "FULL_UNIVERSE_EQUAL_WEIGHT")
+        self.assertEqual(policy["benchmark_role"], "full_universe_equal_weight")
+        self.assertEqual(policy["secondary_benchmarks"][0]["benchmark_type"], "CSI300")
+        self.assertEqual(policy["secondary_benchmarks"][0]["benchmark_column"], "benchmark_return_csi300")
+        self.assertEqual(policy["same_horizon_controls"][0]["benchmark_column"], BENCHMARK_SAME_HORIZON_COL)
+        self.assertEqual(policy["same_horizon_controls"][0]["return_mode"], "same_horizon")
+
+    def test_benchmark_frame_keeps_passive_and_same_horizon_returns_separate(self) -> None:
+        raw = pd.DataFrame(
+            {
+                "date": pd.to_datetime(
+                    [
+                        "2026-01-01",
+                        "2026-01-01",
+                        "2026-01-01",
+                        "2026-01-02",
+                        "2026-01-02",
+                        "2026-01-02",
+                        "2026-01-03",
+                        "2026-01-03",
+                        "2026-01-03",
+                    ]
+                ),
+                "ticker": [
+                    "A",
+                    "B",
+                    "SSE.000300",
+                    "A",
+                    "B",
+                    "SSE.000300",
+                    "A",
+                    "B",
+                    "SSE.000300",
+                ],
+                "close": [100.0, 200.0, 3000.0, 110.0, 180.0, 3030.0, 121.0, 198.0, 3060.3],
+                "execution_period_return": [0.99, 0.99, 0.99, 0.03, 0.05, 0.01, -0.02, 0.04, 0.01],
+            }
+        )
+        raw.attrs["benchmark_return_col"] = "execution_period_return"
+        policy = resolve_default_benchmark_policy(
+            "EQUITY_CN",
+            factor_metadata={"benchmark_preference": "FULL_UNIVERSE_EQUAL_WEIGHT"},
+        )
+
+        benchmark = AlphaEvaluator._build_benchmark_frame(raw, policy)
+
+        self.assertIn(BENCHMARK_RETURN_COL, benchmark.columns)
+        self.assertIn(BENCHMARK_SAME_HORIZON_COL, benchmark.columns)
+        self.assertEqual(
+            list(benchmark["date"].dt.strftime("%Y-%m-%d")),
+            ["2026-01-02", "2026-01-03"],
+        )
+        np.testing.assert_allclose(
+            benchmark[BENCHMARK_RETURN_COL].to_numpy(),
+            [0.0, 0.10],
+            atol=1e-12,
+        )
+        np.testing.assert_allclose(
+            benchmark[BENCHMARK_SAME_HORIZON_COL].to_numpy(),
+            [0.04, 0.01],
+            atol=1e-12,
+        )
+
+    def test_full_universe_equal_weight_benchmark_excludes_embedded_index_rows(self) -> None:
+        raw = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-01", "2026-01-02"]),
+                "ticker": ["SSE.000300", "SSE.000300", "SSE.600000", "SSE.600000"],
+                "name": ["沪深300", "沪深300", "浦发银行", "浦发银行"],
+                "exchange": ["SSE", "SSE", "SSE", "SSE"],
+                "instrument": ["000300", "000300", "600000", "600000"],
+                "close": [100.0, 200.0, 100.0, 110.0],
+            }
+        )
+        strategy = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-01-01", "2026-01-02"]),
+                "ticker": ["SSE.600000", "SSE.600000"],
+                "target_weight": [1.0, 1.0],
+            }
+        )
+
+        benchmark = FullUniverseEqualWeightBenchmark(raw).generate(strategy)
+
+        self.assertEqual(list(benchmark["date"].dt.strftime("%Y-%m-%d")), ["2026-01-02"])
+        np.testing.assert_allclose(benchmark[BENCHMARK_RETURN_COL].to_numpy(), [0.10])
+
+    def test_default_benchmark_policy_is_asset_aware(self) -> None:
+        us_policy = resolve_default_benchmark_policy("EQUITY_US")
+        tech_policy = resolve_default_benchmark_policy(
+            "EQUITY_US",
+            factor_metadata={"category": "Tech Momentum"},
+        )
+        hk_policy = resolve_default_benchmark_policy("EQUITY_HK")
+        futures_policy = resolve_default_benchmark_policy("FUTURES_CN")
+        crypto_policy = resolve_default_benchmark_policy("CRYPTO_PERP")
+        fx_policy = resolve_default_benchmark_policy("FX_SPOT")
+
+        self.assertEqual(us_policy["benchmark_type"], "SPY")
+        self.assertEqual(tech_policy["benchmark_type"], "QQQ")
+        self.assertEqual(hk_policy["benchmark_type"], "HSI")
+        self.assertEqual(futures_policy["benchmark_type"], "BUY_AND_HOLD")
+        self.assertEqual(futures_policy["secondary_benchmarks"][0]["benchmark_type"], "NANHUA")
+        self.assertEqual(crypto_policy["benchmark_role"], "active_crypto_universe")
+        self.assertEqual(fx_policy["benchmark_type"], "ABSOLUTE")
+        self.assertEqual(fx_policy["ann_rate"], 0.0)
+
+    def test_csi300_benchmark_supports_sse_index_symbol(self) -> None:
+        raw = self._index_prices()
+        strategy = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-01-02", "2026-01-03"]),
+                "ticker": ["A", "A"],
+                "target_weight": [1.0, 1.0],
+            }
+        )
+
+        benchmark = BenchmarkFactory.create_benchmark("CSI300", raw_df=raw).generate(strategy)
+
+        np.testing.assert_allclose(
+            benchmark[BENCHMARK_RETURN_COL].to_numpy(),
+            [0.01, 0.01],
+        )
+
     def test_ticker_benchmark_raises_when_required_index_data_is_missing(self) -> None:
         strategy = pd.DataFrame({"date": pd.to_datetime(["2026-01-02"])})
 
@@ -272,9 +439,19 @@ class ResearchBenchmarkTests(unittest.TestCase):
         dates = pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"])
         return pd.DataFrame(
             {
-                "date": list(dates) * 2,
-                "ticker": ["SPY"] * 3 + ["000300.SH"] * 3,
-                "close": [100.0, 102.0, 101.49, 4000.0, 4040.0, 4080.4],
+                "date": list(dates) * 3,
+                "ticker": ["SPY"] * 3 + ["000300.SH"] * 3 + ["SSE.000300"] * 3,
+                "close": [
+                    100.0,
+                    102.0,
+                    101.49,
+                    4000.0,
+                    4040.0,
+                    4080.4,
+                    4000.0,
+                    4040.0,
+                    4080.4,
+                ],
             }
         )
 

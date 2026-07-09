@@ -123,7 +123,6 @@ departments/
   research/                   Alpha lab policy and public/private boundary
   risk/                       Options risk policy and promotion notes
   trading/                    Paper trading process and order examples
-  archive/                    Retired legacy apps and source references
 
 scripts/                      Server jobs and health checks
 tests/                        Unit tests for contracts, ledgers, dashboards

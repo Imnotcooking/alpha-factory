@@ -16,7 +16,7 @@ from typing import Any
 
 import pandas as pd
 
-from oqp.config.paths import REPO_ROOT, legacy_middle_office_root
+from oqp.config.paths import REPO_ROOT
 from oqp.portfolio.ledger import (
     default_portfolio_ledger_path,
     load_latest_live_positions,
@@ -29,12 +29,7 @@ from oqp.portfolio.valuation import ManualPortfolioInputs, value_portfolio_snaps
 DEFAULT_PORTFOLIO_STATE_DIR = REPO_ROOT / "runtime" / "state" / "portfolio"
 DEFAULT_DEFAULTS_PATH = DEFAULT_PORTFOLIO_STATE_DIR / "manual_inputs.json"
 DEFAULT_PORTFOLIO_MANUAL_INPUTS_PATH = DEFAULT_DEFAULTS_PATH
-LEGACY_DEFAULTS_PATH = legacy_middle_office_root() / "user_defaults.json"
-DEFAULT_CLEAN_DATA_DIR = DEFAULT_PORTFOLIO_STATE_DIR
-DEFAULT_IBKR_METRICS_PATH = DEFAULT_CLEAN_DATA_DIR / "ibkr_metrics.json"
-LEGACY_IBKR_METRICS_PATH = (
-    legacy_middle_office_root() / "Portfolio" / "clean_data" / "ibkr_metrics.json"
-)
+DEFAULT_IBKR_METRICS_PATH = DEFAULT_PORTFOLIO_STATE_DIR / "ibkr_metrics.json"
 
 DEFAULT_FX_TICKERS = ("EURUSD=X", "GBPUSD=X", "CNYUSD=X", "HKDUSD=X")
 DEFAULT_MACRO_TICKERS = (
@@ -170,15 +165,13 @@ def load_portfolio_nav_job_settings(
 ) -> PortfolioNavJobSettings:
     """Load non-secret manual portfolio inputs for server-side valuation."""
 
-    defaults = _read_json_object_with_fallback(
+    defaults = _read_json_object(
         Path(defaults_path) if defaults_path is not None else DEFAULT_DEFAULTS_PATH,
-        fallback=None if defaults_path is not None else LEGACY_DEFAULTS_PATH,
     )
-    ibkr_metrics = _read_json_object_with_fallback(
+    ibkr_metrics = _read_json_object(
         Path(ibkr_metrics_path)
         if ibkr_metrics_path is not None
         else DEFAULT_IBKR_METRICS_PATH,
-        fallback=None if ibkr_metrics_path is not None else LEGACY_IBKR_METRICS_PATH,
     )
 
     raw_preferences = defaults.get("asset_preferences", {})
@@ -277,17 +270,6 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         value = json.load(handle)
     return value if isinstance(value, dict) else {}
-
-
-def _read_json_object_with_fallback(
-    path: Path,
-    *,
-    fallback: Path | None = None,
-) -> dict[str, Any]:
-    payload = _read_json_object(path)
-    if payload or fallback is None or path.exists():
-        return payload
-    return _read_json_object(fallback)
 
 
 def _manual_inputs_have_value(manual: ManualPortfolioInputs) -> bool:

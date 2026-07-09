@@ -30,9 +30,9 @@ class XGBoostTrainingEngine:
 
     def __init__(
         self,
-        data_path: str = "runtime/data/alpha_lab/feature_store/ML_Feature_Matrix.parquet",
-        model_output_path: str = "runtime/artifacts/research/alpha_lab/models/xgb_base_model.json",
-        importance_output_path: str = "runtime/artifacts/research/alpha_lab/feature_importance/feature_importance_fac_057.csv",
+        data_path: str = "runtime/data/feature_store/ML_Feature_Matrix.parquet",
+        model_output_path: str = "runtime/artifacts/research/models/xgb_base_model.json",
+        importance_output_path: str = "runtime/artifacts/research/feature_importance/feature_importance_fac_057.csv",
         target_col: str = "target_4d_rank",
         split_date: str = "2024-01-01",
         model_name: str = "fac_057_xgboost_base",

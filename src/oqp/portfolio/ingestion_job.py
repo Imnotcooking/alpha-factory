@@ -1,8 +1,4 @@
-"""Unified live portfolio ingestion job.
-
-This module replaces the legacy Middle Office ETL script as the canonical
-server-side importer for live IBKR snapshots plus broker CSV exports.
-"""
+"""Unified live portfolio ingestion job."""
 
 from __future__ import annotations
 
@@ -24,7 +20,7 @@ from oqp.brokers import (
     get_broker_adapter,
     get_broker_profile_config,
 )
-from oqp.config import REPO_ROOT, legacy_middle_office_root, load_settings
+from oqp.config import REPO_ROOT, load_settings
 from oqp.data import PolygonOptionsSnapshotAdapter
 from oqp.portfolio.broker_imports import (
     futubull_option_to_occ,
@@ -39,8 +35,6 @@ DEFAULT_PORTFOLIO_STATE_DIR = REPO_ROOT / "runtime" / "state" / "portfolio"
 DEFAULT_PORTFOLIO_EXPORTS_DIR = REPO_ROOT / "runtime" / "exports" / "portfolio_snapshots"
 DEFAULT_IBKR_METRICS_PATH = DEFAULT_PORTFOLIO_STATE_DIR / "ibkr_metrics.json"
 DEFAULT_BANKED_PROFITS_PATH = DEFAULT_PORTFOLIO_STATE_DIR / "banked_profits.json"
-LEGACY_MIDDLE_OFFICE_RAW_DIR = legacy_middle_office_root() / "Portfolio" / "raw_data"
-LEGACY_MIDDLE_OFFICE_CLEAN_DIR = legacy_middle_office_root() / "Portfolio" / "clean_data"
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +161,6 @@ def run_portfolio_ingestion(
     state_dir: str | Path | None = None,
     backup_csv_dir: str | Path | None = None,
     account_ledger_path: str | Path | None = None,
-    include_legacy_raw_fallback: bool = True,
 ) -> PortfolioIngestionResult:
     date_value = _date_text(snapshot_date or date.today())
     ledger_path = Path(db_path) if db_path is not None else default_portfolio_ledger_path()
@@ -184,10 +177,7 @@ def run_portfolio_ingestion(
     state_path.mkdir(parents=True, exist_ok=True)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_files, source_raw_dir = _raw_files_for_ingestion(
-        import_dir,
-        include_legacy_raw_fallback=include_legacy_raw_fallback,
-    )
+    raw_files, source_raw_dir = _raw_files_for_ingestion(import_dir)
     t212_file = _latest_matching_file(raw_files, "t212")
     futu_file = _latest_matching_file(raw_files, "futu")
 
@@ -306,18 +296,10 @@ def _build_polygon_options_adapter() -> PolygonOptionsSnapshotAdapter | None:
     return PolygonOptionsSnapshotAdapter(api_key=api_key)
 
 
-def _raw_files_for_ingestion(
-    raw_dir: Path,
-    *,
-    include_legacy_raw_fallback: bool,
-) -> tuple[list[Path], Path | None]:
+def _raw_files_for_ingestion(raw_dir: Path) -> tuple[list[Path], Path | None]:
     raw_files = _csv_files(raw_dir)
     if raw_files:
         return raw_files, raw_dir
-    if include_legacy_raw_fallback and LEGACY_MIDDLE_OFFICE_RAW_DIR.exists():
-        legacy_files = _csv_files(LEGACY_MIDDLE_OFFICE_RAW_DIR)
-        if legacy_files:
-            return legacy_files, LEGACY_MIDDLE_OFFICE_RAW_DIR
     return [], raw_dir
 
 

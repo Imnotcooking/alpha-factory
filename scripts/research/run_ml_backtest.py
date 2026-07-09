@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI wrapper for package-owned alpha ML backtest workflow."""
+"""Run ML-driven research backtests."""
 
 from __future__ import annotations
 

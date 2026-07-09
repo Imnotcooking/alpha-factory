@@ -19,6 +19,11 @@ class PythonBacktestBackend:
         asset_ids = np.asarray(request.asset_ids, dtype=np.int32)
         prices = np.asarray(request.prices, dtype=np.float64)
         target_weights = np.asarray(request.target_weights, dtype=np.float64)
+        period_returns = (
+            np.asarray(request.period_returns, dtype=np.float64)
+            if request.period_returns is not None
+            else None
+        )
 
         equity_curve = np.empty(request.n_rows, dtype=np.float64)
         gross_equity_curve = np.empty(request.n_rows, dtype=np.float64)
@@ -35,7 +40,11 @@ class PythonBacktestBackend:
             asset_key = int(asset_id)
             price = float(prices[i])
             previous_price = last_price_by_asset.get(asset_key, price)
-            asset_return = price / previous_price - 1.0 if previous_price else 0.0
+            asset_return = (
+                float(period_returns[i])
+                if period_returns is not None
+                else price / previous_price - 1.0 if previous_price else 0.0
+            )
 
             previous_weight = weight_by_asset.get(asset_key, 0.0)
             desired_weight = float(target_weights[i])
@@ -64,7 +73,11 @@ class PythonBacktestBackend:
             backend=BacktestBackendMetadata(
                 backend_id=self.backend_id,
                 backend_name=self.backend_name,
-                metadata={"cost_model": "1bp turnover fallback"},
+                metadata={
+                    "asset_class": request.asset_class,
+                    "backtest_route": request.backtest_route,
+                    "cost_model": "1bp turnover fallback",
+                },
             ),
             gross_equity_curve=gross_equity_curve,
             total_cost=total_cost,

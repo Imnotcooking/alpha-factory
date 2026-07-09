@@ -177,7 +177,7 @@ OPS_TEXT: dict[str, dict[str, Any]] = {
             "AI",
             "Decision",
         ],
-        "workbench_nav_views": ["Watchlist", "Opportunity Hub", "API Status"],
+        "workbench_nav_views": ["Market Monitor", "Watchlist", "Opportunity Hub", "API Status"],
         "workbench_option_tabs": [
             "Playbook",
             "Strategy Fit",
@@ -367,7 +367,7 @@ OPS_TEXT: dict[str, dict[str, Any]] = {
         ],
         "execution_tabs": ["指挥", "策略", "订单", "信号", "边界"],
         "workbench_tabs": ["总览", "估值", "期权", "新闻", "AI", "决策"],
-        "workbench_nav_views": ["自选股", "机会中心", "API 状态"],
+        "workbench_nav_views": ["市场监控", "自选股", "机会中心", "API 状态"],
         "workbench_option_tabs": [
             "剧本",
             "策略匹配",
@@ -516,9 +516,41 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "in a non-reverting spread.<br><br>**PnL vs Time (Bottom Right):** The holy grail is 'Cut losses "
         "early, let profits run.' If your largest red bubbles (losses) are clustered on the far right "
         "(long holding times), your model is stubbornly holding onto bad trades.",
+        "dna_total_trades": "Trades",
+        "dna_win_rate": "Win Rate",
+        "dna_profit_factor": "Profit Factor",
+        "dna_median_hold": "Median Hold",
+        "dna_payoff_ratio": "Payoff Ratio",
+        "dna_avg_win": "Avg Win",
+        "dna_avg_loss": "Avg Loss",
+        "dna_profit_concentration": "80% Profit Tickers",
+        "dna_expectancy": "Expectancy / Trade",
         "tab_dna": "🧬 Strategy DNA",
         "tab_pareto": "📈 Pareto Frontier",
         "tab_ml": "🧠 ML Feature Importance",
+        "tab_assumptions": "🧾 Assumptions",
+        "assumptions_title": "🧾 Factor Assumptions",
+        "assumptions_select_run": "Inspect run",
+        "assumptions_missing": "No assumption manifest found for this run.",
+        "assumptions_reconstructed": "No saved JSON manifest exists for this legacy run, so this view is reconstructed from the research ledger.",
+        "assumptions_expected_path": "Expected JSON path",
+        "assumptions_not_saved": "not saved; reconstructed in memory",
+        "assumptions_reconstruction": "Reconstruction Note",
+        "assumptions_available": "Available manifests",
+        "assumptions_manifest_path": "Manifest",
+        "assumptions_data": "Data",
+        "assumptions_signal": "Signal & Execution",
+        "assumptions_engine": "Execution Engine",
+        "assumptions_liquidity": "Liquidity Policy",
+        "assumptions_option_selection": "Option Contract Selection",
+        "assumptions_realized": "Realized Summary",
+        "assumptions_raw_json": "Raw JSON",
+        "assumptions_download": "Download manifest",
+        "assumptions_asset": "Asset",
+        "assumptions_mode": "Mode",
+        "assumptions_alpha_col": "Alpha",
+        "assumptions_trades": "Trades",
+        "assumptions_no_values": "No recorded values.",
         "tab_oracle": "🔮 Oracle Regime Test",
         "oracle_title": "🔮 Oracle Regime Validation",
         "oracle_caption": "Compares GMM/HMM regime probabilities against hindsight trend/chop/panic labels. This "
@@ -643,9 +675,6 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "avg_turnover": "Avg Turnover",
         "holdout_ic": "Holdout IC",
         "total_trades": "Total Trades",
-        "copilot_title": "### 🤖 Alpha Architect Co-Pilot (Prompt Generator)",
-        "factor_passed": "🟢 Factor Passed! Use the prompt below to ask your agent for risk-adjusted optimization.",
-        "factor_failed": "🔴 Factor Failed",
         "leaderboard_title": "### 🏆 Alpha Leaderboard",
         "corr_select_factors": "🔍 Select Factors to Compare",
         "corr_select_min": "👆 Please select at least two factors from the dropdown above to view the correlation "
@@ -657,8 +686,14 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "dna_error": "⚠️ Error rendering trade analytics",
         "dna_no_returns": "⚠️ No return data found for this run.",
         "pareto_caption": "Visualizing the execution boundary of this factor across all historical iterations.",
-        "pareto_help": "💡 How to read this: The optimal iterations are in the Top-Right corner (High Return, Low "
-        "Drawdown). Color indicates Turnover. Bubble size indicates Out-of-Sample IC.",
+        "pareto_help": "💡 How to read this: prefer iterations with high return, low drawdown magnitude, low "
+        "turnover, and stronger holdout IC color. Bubble size indicates absolute Out-of-Sample IC.",
+        "pareto_axis_drawdown": "Drawdown Magnitude (%)",
+        "pareto_axis_return": "Return (%)",
+        "pareto_axis_turnover": "Turnover (%)",
+        "pareto_color_ic": "Holdout IC",
+        "pareto_size_abs_ic": "Abs(IC)",
+        "pareto_round": "Round",
         "pareto_error": "⚠️ Could not render Pareto Frontier due to data inconsistency",
         "pareto_missing": "⚠️ Not enough data. Run this factor at least two times to generate a Pareto Frontier.",
         "asset_zoo_title": "🦁 The Asset Zoo: Market Microstructure Clustering",
@@ -898,9 +933,41 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "dna_time": "**持仓时间 (右上):** 统计套利模型应该具有紧凑、一致的持仓时间（例如 24-48 "
         "小时）。如果你发现有一个长尾分布，包含持仓数百小时的交易，说明模型被困在了一个不回归的价差中。<br><br>**盈亏 vs 时间 (右下):** "
         "交易的圣杯是“截断亏损，让利润奔跑”。如果你最大的红色气泡（亏损）集中在图表的最右侧（长持仓时间），说明你的模型在顽固地死扛亏损单。",
+        "dna_total_trades": "交易笔数",
+        "dna_win_rate": "胜率",
+        "dna_profit_factor": "盈亏因子",
+        "dna_median_hold": "中位持仓",
+        "dna_payoff_ratio": "盈亏比",
+        "dna_avg_win": "平均盈利",
+        "dna_avg_loss": "平均亏损",
+        "dna_profit_concentration": "80%盈利标的",
+        "dna_expectancy": "单笔期望",
         "tab_dna": "🧬 策略 DNA",
         "tab_pareto": "📈 帕累托前沿 (Pareto)",
         "tab_ml": "🧠 机器学习特征重要性",
+        "tab_assumptions": "🧾 假设清单",
+        "assumptions_title": "🧾 因子假设清单",
+        "assumptions_select_run": "查看运行",
+        "assumptions_missing": "未找到该次运行的假设清单。",
+        "assumptions_reconstructed": "该旧运行没有保存的 JSON 假设清单，因此此视图由研究运行记录重建。",
+        "assumptions_expected_path": "预期 JSON 路径",
+        "assumptions_not_saved": "未保存；当前为内存重建",
+        "assumptions_reconstruction": "重建说明",
+        "assumptions_available": "可用假设清单",
+        "assumptions_manifest_path": "清单文件",
+        "assumptions_data": "数据",
+        "assumptions_signal": "信号与执行",
+        "assumptions_engine": "执行引擎",
+        "assumptions_liquidity": "流动性规则",
+        "assumptions_option_selection": "期权合约选择",
+        "assumptions_realized": "实际结果摘要",
+        "assumptions_raw_json": "原始 JSON",
+        "assumptions_download": "下载清单",
+        "assumptions_asset": "资产",
+        "assumptions_mode": "模式",
+        "assumptions_alpha_col": "Alpha",
+        "assumptions_trades": "交易数",
+        "assumptions_no_values": "没有记录值。",
         "tab_oracle": "🔮 Oracle 状态验证",
         "oracle_title": "🔮 Oracle 市场状态验证",
         "oracle_caption": "将 GMM/HMM 状态概率与事后趋势、震荡、恐慌标签进行对比。该模块验证状态引擎，而不是普通因子收益。",
@@ -994,9 +1061,6 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "avg_turnover": "平均换手率",
         "holdout_ic": "样本外 IC",
         "total_trades": "总交易笔数",
-        "copilot_title": "### 🤖 Alpha 架构师副驾驶（Prompt 生成器）",
-        "factor_passed": "🟢 因子已通过！可使用下方提示词让智能体继续做风险调整优化。",
-        "factor_failed": "🔴 因子未通过",
         "leaderboard_title": "### 🏆 Alpha 排行榜",
         "corr_select_factors": "🔍 选择要对比的因子",
         "corr_select_min": "👆 请至少选择两个因子以查看相关性矩阵。",
@@ -1006,7 +1070,13 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "dna_error": "⚠️ 交易分析渲染失败",
         "dna_no_returns": "⚠️ 未找到该次运行的收益数据。",
         "pareto_caption": "可视化该因子在历史迭代中的执行边界。",
-        "pareto_help": "💡 解读：最优迭代位于右上角（高收益、低回撤）。颜色代表换手率，气泡大小代表样本外 IC。",
+        "pareto_help": "💡 解读：优先关注高收益、低回撤幅度、低换手率，并且样本外 IC 颜色更强的迭代。气泡大小代表样本外 IC 的绝对值。",
+        "pareto_axis_drawdown": "回撤幅度 (%)",
+        "pareto_axis_return": "收益率 (%)",
+        "pareto_axis_turnover": "换手率 (%)",
+        "pareto_color_ic": "样本外 IC",
+        "pareto_size_abs_ic": "IC绝对值",
+        "pareto_round": "轮次",
         "pareto_error": "⚠️ 帕累托前沿渲染失败，数据可能不一致",
         "pareto_missing": "⚠️ 数据不足。请至少运行该因子两次以生成帕累托前沿。",
         "asset_zoo_title": "🦁 资产动物园：市场微观结构聚类",
@@ -1602,7 +1672,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "math_cache_store": "Saving horizon sweep cache...",
             "math_cache_backend": "Math sweep cache",
             "no_tick_files": "No tick_all_data parquet files found in "
-            "runtime/data/alpha_lab/market_data/tick.",
+            "runtime/data/futures_cn/tick.",
             "product": "Product",
             "symbol": "Contract",
             "hypothesis": "Hypothesis",
@@ -2261,7 +2331,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "math_cache_miss": "正在计算 horizon 扫描并写入 SQLite 缓存...",
             "math_cache_store": "正在保存 horizon 扫描缓存...",
             "math_cache_backend": "Math 扫描缓存",
-            "no_tick_files": "在 runtime/data/alpha_lab/market_data/tick 中没有找到 tick_all_data parquet 文件。",
+            "no_tick_files": "在 runtime/data/futures_cn/tick 中没有找到 tick_all_data parquet 文件。",
             "product": "品种",
             "symbol": "合约",
             "hypothesis": "假设",
@@ -2906,7 +2976,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "validity_ok": "Usable discovery sample: there is enough structure to inspect events, "
             "but treat it as research evidence rather than a trading signal.",
             "no_tick_files": "No tick_all_data parquet files found in "
-            "runtime/data/alpha_lab/market_data/tick.",
+            "runtime/data/futures_cn/tick.",
             "contract_universe_title": "Contract Universe",
             "contract_universe_help": "Use this before pulse research to verify what contracts "
             "exist in the selected tick file, which contract is most "
@@ -3314,7 +3384,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "validity_tiny_threshold": "阈值偏弱：尾部分位对应的跳动小于一个 tick，通常缺少经济意义。",
             "validity_promising": "有潜力的发现样本：独立脉冲数量足够，阈值也有意义。下一步是视觉检查和 Tick Event Study 检验。",
             "validity_ok": "可用的发现样本：已经有足够结构可以检查事件，但仍应视为研究证据，而不是交易信号。",
-            "no_tick_files": "在 runtime/data/alpha_lab/market_data/tick 中没有找到 tick_all_data "
+            "no_tick_files": "在 runtime/data/futures_cn/tick 中没有找到 tick_all_data "
             "parquet 文件。",
             "contract_universe_title": "合约池",
             "contract_universe_help": "在研究脉冲之前，先用这里确认当前 tick 文件里有哪些合约、哪个合约最活跃，以及原始字段长什么样。",
@@ -4072,7 +4142,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "Current status:\n"
             "\n"
             "- Raw engineered features: available now from "
-            "`runtime/data/alpha_lab/feature_store/ML_Feature_Matrix.parquet`.\n"
+            "`runtime/data/feature_store/ML_Feature_Matrix.parquet`.\n"
             "- Correlation-cluster representatives: available now from "
             "this page's shortlist.\n"
             "- PCA components: available now as a linear compression "
@@ -4085,7 +4155,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "each feature set and compare OOS IC, Sharpe, max drawdown, "
             "average turnover, and transaction-cost-adjusted return.\n",
             "no_file": "No ML feature parquet file was found in "
-            "runtime/data/alpha_lab/feature_store.",
+            "runtime/data/feature_store.",
             "load_error": "Feature governance failed",
         },
         "zh": {
@@ -4209,7 +4279,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "当前状态：\n"
             "\n"
             "- 原始工程化特征：已经可从 "
-            "`runtime/data/alpha_lab/feature_store/ML_Feature_Matrix.parquet` "
+            "`runtime/data/feature_store/ML_Feature_Matrix.parquet` "
             "读取。\n"
             "- 相关性簇代表特征：本页面的候选表已经给出。\n"
             "- PCA 主成分：已经作为线性压缩基线展示。\n"
@@ -4218,7 +4288,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "\n"
             "下一步最干净的实验，是用完全相同的机器学习模型分别训练这些特征集合，并比较样本外 "
             "IC、夏普、最大回撤、平均换手率、以及扣除交易成本后的收益。\n",
-            "no_file": "runtime/data/alpha_lab/feature_store 下未找到 ML 特征 parquet 文件。",
+            "no_file": "runtime/data/feature_store 下未找到 ML 特征 parquet 文件。",
             "load_error": "特征治理计算失败",
         },
     },

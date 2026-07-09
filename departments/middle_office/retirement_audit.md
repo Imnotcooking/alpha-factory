@@ -1,107 +1,68 @@
 # Middle Office Retirement Audit
 
-Date: 2026-06-25
+Date: 2026-07-08
 
 ## Result
 
-The root `Middle_Office/` folder has been archived to:
+The standalone Middle Office app has been fully retired from active runtime
+architecture. The previous legacy archive has been removed after the useful
+logic was extracted into shared modules.
 
-`departments/archive/legacy_middle_office/`
+Active code now uses:
 
-The live portfolio command center now uses the unified Ops Dashboard and shared
-modules:
-
-- `apps/ops_dashboard/Homepage.py`
+- `apps/ops_dashboard/`
+- `src/oqp/accounts/`
 - `src/oqp/portfolio/`
 - `src/oqp/investing/`
 - `src/oqp/risk/`
 - `src/oqp/options/`
+- runtime paths under `runtime/`
 
-The retired Money and Paper dashboard archive was deleted after the active Ops
-Dashboard and paper-trading dashboard absorbed the useful code paths.
+## Runtime-Only Policy
+
+The codebase no longer resolves or reads the old `Middle_Office/` root, the
+deleted archive folder, or old Middle Office JSON/database files as fallbacks.
+
+Runtime data must be placed in:
+
+- `runtime/imports/broker_exports/`
+- `runtime/db/portfolio/`
+- `runtime/db/accounts/`
+- `runtime/state/portfolio/`
+- `runtime/state/investing/`
+- `runtime/exports/portfolio_snapshots/`
 
 ## Active References
 
-No active Streamlit page imports or executes the archived Middle Office app or
-legacy pages.
+No active Streamlit page imports or executes the retired Middle Office app or
+legacy pages. Remaining generic terms such as `middle_office/` in department
+docs refer to this active operational department, not to the old app archive.
 
-Remaining `middle_office` references are intentionally retained for one of four
-reasons:
+Other `legacy_path` fields in research/model code are unrelated metadata for
+native backends and model registry provenance. They are not Middle Office
+fallbacks.
 
-- Compatibility names in the IBKR adapter that still produce the legacy row
-  shape consumed by portfolio ingestion.
-- Legacy fallback paths for old watchlists, FMP/Gemini key JSON files, manual
-  inputs, raw broker CSV exports, and old ledger state.
-- Backward-compatible exported constants and aliases in `src/oqp/portfolio/`.
-- Documentation describing the migration.
+## Removed During Retirement
 
-## Archive-Aware Fallback
-
-`src/oqp/config/paths.py` now resolves the legacy Middle Office root in this
-order:
-
-1. `OQP_LEGACY_MIDDLE_OFFICE_ROOT`
-2. `Middle_Office/`, if it exists
-3. `departments/archive/legacy_middle_office/`
-
-This keeps migration fallbacks working locally after the archive move and keeps
-server deployments safe if the old root folder still exists there.
-
-## Removed Shadow Files
-
-The following stale duplicate files were removed because they could appear as
-extra Streamlit pages or stale modules:
-
-- retired shadow files formerly under Money/Paper dashboards
-- `src/oqp/brokers/ibkr 2.py`
-- `src/oqp/risk/__init__ 2.py`
-- `tests/test_middle_office_etl 2.py`
-- `Middle_Office/Portfolio/etl_engine 2.py`
-- `Middle_Office/db_setup 2.py`
-
-## Phase 2A Ported
-
-- The legacy options strategy router from `pages/3_Options_Desk.py` has been
-  extracted into `src/oqp/options/analytics.py` as `score_option_strategies`.
-- The archived Money dashboard Options Desk had a Strategy Fit tab before
-  individual contract scans.
-- The router ranks strategy families only. It does not create orders, write
-  trade proposals, or bypass the paper-trading safety layer.
-
-## Phase 2B Ported
-
-- Multi-leg option payoff simulation now lives in `src/oqp/options/analytics.py`
-  via `OptionLeg` and `simulate_multi_leg_options`.
-- The native Options Desk now scans calendars, iron condors, call butterflies,
-  call/put ratio spreads, call/put backspreads, and bull/bear vertical spreads.
-- These scanners return candidate analytics only: debit/credit, max profit,
-  max loss where defined, probability of profit, expected value, VaR 95, and
-  structure text. They do not create orders.
-
-## Phase 2C Ported
-
-- Options scanner candidates can now become paper-trading proposal drafts via
-  `src/oqp/execution/options_bridge.py`.
-- The native Options Desk writes proposal artifacts into the same
-  `runtime/artifacts/trade_proposals/` queue used by research exports.
-- This is still non-executing. Current paper policy blocks option asset classes
-  unless explicitly enabled, and every draft must pass paper guardrails before
-  anything could be routed.
-- Option paper guardrails are config-driven through `PAPER_OPTIONS_ENABLED`,
-  allowed underlyings, allowed strategies, max contracts, max premium, max
-  defined risk, and max spread width.
+- Old Streamlit Middle Office app and pages.
+- Old `Portfolio/etl_engine.py` compatibility wrapper.
+- Old Middle Office Streamlit config/theme files.
+- Old local fallback paths for FMP/Gemini key JSON.
+- Old fallback path for Middle Office watchlists.
+- Old fallback path for broker CSV imports.
+- Old fallback path for manual NAV inputs and `ibkr_metrics.json`.
+- Old exported portfolio aliases from the retired app.
+- Duplicate `tests/test_middle_office_etl.py`, now covered by canonical
+  portfolio ingestion tests.
 
 ## Still Worth Porting Later
 
-- The ML macro oracle from `pages/2_Risk_Management.py`.
-- Deep-value LEAPS fundamental filters from `pages/3_Options_Desk.py`, if they
-  still fit the new FMP data contract.
-- Optional later expansion of option execution policy by strategy family, such
-  as different limits for condors, calendars, and debit spreads.
-- Any reusable visual styling from `utils/theme.py`, if desired.
+- A redesigned macro/regime oracle if the old idea is still useful.
+- More specialized options structures, but only through `src/oqp/options/`.
+- Any reusable styling idea, but only through active UI helpers.
 
 ## Private Data
 
-The archived folder still contains local/private ignored files such as secrets,
-old broker exports, old SQLite databases, and manual input JSON. These remain
-excluded by `.gitignore` and should not be published.
+The deleted archive contained local/private ignored files such as secrets, old
+broker exports, old SQLite databases, and manual input JSON. They must stay out
+of public Git history. The active runtime equivalents remain ignored.

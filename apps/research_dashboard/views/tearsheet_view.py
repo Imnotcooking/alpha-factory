@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+from pathlib import Path
 
 import streamlit as st
 import numpy as np
@@ -11,7 +13,7 @@ UI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if UI_DIR not in sys.path:
     sys.path.insert(0, UI_DIR)
 
-from config import TEXT
+from config import LOGS_DIR, TEXT
 
 class TearSheetView:
     def __init__(self, data_manager):
@@ -39,7 +41,7 @@ class TearSheetView:
             st.warning(t["ts_no_returns"])
             return
 
-        days = df['date']
+        days = pd.to_datetime(df['date'], errors="coerce")
         daily_returns = df['net_return'].values
         daily_returns_bench = df['benchmark_return'].values
         daily_leverage = df['portfolio_leverage'].values
@@ -58,6 +60,12 @@ class TearSheetView:
 
         # 3. Risk Math (Benchmark)
         cum_returns_bench = (1 + daily_returns_bench).cumprod()
+        extra_benchmark_curves = {}
+        for column in df.columns:
+            if not str(column).startswith("benchmark_return_"):
+                continue
+            returns = pd.to_numeric(df[column], errors="coerce").fillna(0.0).to_numpy()
+            extra_benchmark_curves[self._benchmark_column_label(column)] = (1 + returns).cumprod()
         ann_ret_bench = (cum_returns_bench[-1]) ** (252 / len(days)) - 1 if len(days) > 0 else 0
         ann_vol_bench = np.std(daily_returns_bench) * np.sqrt(252)
         sharpe_bench = ann_ret_bench / ann_vol_bench if ann_vol_bench != 0 else 0
@@ -85,7 +93,7 @@ class TearSheetView:
         r7.metric(t["holdout_ic"], f"{holdout_ic:.4f}")
         r8.metric(t["total_trades"], f"{total_trades}")
 
-        st.markdown(t["benchmark_eq"])
+        st.markdown(self._benchmark_title(run_id, t))
         b1, b2, b3, b4 = st.columns(4)
         b1.metric(t["risk_metrics"][0], f"{ann_ret_bench * 100:.2f}%")
         b2.metric(t["risk_metrics"][1], f"{ann_vol_bench * 100:.2f}%")
@@ -100,10 +108,6 @@ class TearSheetView:
 
         st.markdown("---")
 
-        # --- RENDER AI CO-PILOT PROMPT ---
-        self._render_copilot(run_metadata, ann_return, ann_vol, sharpe, max_dd, calmar, t)
-        st.markdown("---")
-
         # --- RENDER MAIN PLOTLY CHARTS ---
         self._render_charts(
             days,
@@ -114,31 +118,31 @@ class TearSheetView:
             daily_returns,
             ann_vol,
             t,
+            extra_benchmark_curves=extra_benchmark_curves,
         )
 
-    def _render_copilot(self, meta, ann_ret, ann_vol, sharpe, max_dd, calmar, t):
-        st.markdown(t["copilot_title"])
-        
-        failure_code = meta.get('failure_code', 'NONE')
-        suggested_action = meta.get('suggested_action', 'N/A')
-        
-        metrics_text = f"""Current Portfolio Metrics:
-- Validation IC (In-Sample): {meta['validation_ic']:.4f}
-- Holdout IC (Out-of-Sample): {meta['holdout_ic']:.4f}
-- Annualized Return: {ann_ret * 100:.2f}%
-- Annualized Volatility: {ann_vol * 100:.2f}%
-- Sharpe Ratio: {sharpe:.2f}
-- Max Drawdown: {max_dd * 100:.2f}%
-- Calmar Ratio: {calmar:.2f}"""
+    def _benchmark_title(self, run_id: str, copy: dict) -> str:
+        manifest_path = Path(LOGS_DIR) / "assumptions" / f"assumptions_{run_id}.json"
+        if not manifest_path.exists():
+            return copy["benchmark_eq"]
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return copy["benchmark_eq"]
+        benchmark = payload.get("benchmark")
+        if not isinstance(benchmark, dict):
+            return copy["benchmark_eq"]
+        label = str(benchmark.get("benchmark_label") or "").strip()
+        if not label:
+            return copy["benchmark_eq"]
+        return f"### 🟡 Benchmark ({label})"
 
-        if pd.isna(failure_code) or failure_code == "NONE":
-            st.success(t["factor_passed"])
-            prompt = f"I am optimizing the institutional CTA factor '{meta['name']}'.\n\nIt successfully passed the Rank IC tests. Here are the exact simulation results:\n\n{metrics_text}\n\nBased purely on the quantitative metrics above, please rewrite the Polars `compute(df)` function to optimize its risk-adjusted performance. Diagnose its weaknesses and introduce mathematical controls to improve execution without destroying the Holdout IC."
-        else:
-            st.error(f"{t['factor_failed']}: [{failure_code}]")
-            prompt = f"I am backtesting the institutional CTA factor '{meta['name']}'.\n\nThe Alpha Pipeline rejected the latest iteration with the following diagnostic code: `{failure_code}`.\nThe automated engine's suggested action is: \"{suggested_action}\"\n\n{metrics_text}\n\nPlease rewrite the Polars `compute(df)` function to address this exact mathematical failure. Fix the execution flaw to improve the Out-of-Sample performance."
-
-        st.code(prompt, language="markdown")
+    @staticmethod
+    def _benchmark_column_label(column: str) -> str:
+        suffix = str(column).removeprefix("benchmark_return_").replace("_", " ").strip()
+        if not suffix:
+            return "Benchmark"
+        return suffix.upper() if len(suffix) <= 4 else suffix.title()
 
     def _render_charts(
         self,
@@ -150,15 +154,77 @@ class TearSheetView:
         daily_returns,
         ann_vol,
         t,
+        extra_benchmark_curves=None,
     ):
         # 1. Main Tear Sheet Grid
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
-        fig.add_trace(go.Scatter(x=days, y=(cum_returns - 1) * 100, name="Net Strategy", line=dict(color='#00E676', width=2)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=days, y=(cum_returns_bench - 1) * 100, name="Benchmark", line=dict(color='#FFCA28', width=2, dash='dash')), row=1, col=1)
-        fig.add_trace(go.Scatter(x=days, y=drawdown * 100, name="Drawdown", fill='tozeroy', line=dict(color='#D32F2F', width=1), fillcolor='rgba(211, 47, 47, 0.3)'), row=2, col=1)
-        fig.add_trace(go.Scatter(x=days, y=daily_leverage, name="Gross Leverage", fill='tozeroy', line=dict(color='#2196F3', width=1), fillcolor='rgba(33, 150, 243, 0.2)'), row=3, col=1)
+        fig.add_trace(
+            go.Scatter(
+                x=days,
+                y=(cum_returns - 1) * 100,
+                name="Net Strategy",
+                line=dict(color='#00E676', width=2),
+                hovertemplate="<b>Net Strategy</b><br>Date: %{x|%Y-%m-%d}<br>Return: %{y:.2f}%<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=days,
+                y=(cum_returns_bench - 1) * 100,
+                name="Benchmark",
+                line=dict(color='#FFCA28', width=2, dash='dash'),
+                hovertemplate="<b>Benchmark</b><br>Date: %{x|%Y-%m-%d}<br>Return: %{y:.2f}%<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        palette = ["#42A5F5", "#AB47BC", "#26A69A", "#EF5350"]
+        for idx, (label, curve) in enumerate((extra_benchmark_curves or {}).items()):
+            fig.add_trace(
+                go.Scatter(
+                    x=days,
+                    y=(curve - 1) * 100,
+                    name=f"Benchmark {label}",
+                    line=dict(color=palette[idx % len(palette)], width=1.6, dash='dot'),
+                    hovertemplate=(
+                        f"<b>Benchmark {label}</b><br>"
+                        "Date: %{x|%Y-%m-%d}<br>Return: %{y:.2f}%<extra></extra>"
+                    ),
+                ),
+                row=1,
+                col=1,
+            )
+        fig.add_trace(
+            go.Scatter(
+                x=days,
+                y=drawdown * 100,
+                name="Drawdown",
+                fill='tozeroy',
+                line=dict(color='#D32F2F', width=1),
+                fillcolor='rgba(211, 47, 47, 0.3)',
+                hovertemplate="<b>Drawdown</b><br>Date: %{x|%Y-%m-%d}<br>Drawdown: %{y:.2f}%<extra></extra>",
+            ),
+            row=2,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=days,
+                y=daily_leverage,
+                name="Gross Leverage",
+                fill='tozeroy',
+                line=dict(color='#2196F3', width=1),
+                fillcolor='rgba(33, 150, 243, 0.2)',
+                hovertemplate="<b>Gross Leverage</b><br>Date: %{x|%Y-%m-%d}<br>Leverage: %{y:.2f}x<extra></extra>",
+            ),
+            row=3,
+            col=1,
+        )
 
         fig.update_layout(template="plotly_dark", height=700, margin=dict(l=10, r=10, t=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        fig.update_xaxes(hoverformat="%Y-%m-%d")
         st.plotly_chart(fig, width="stretch")
         st.markdown("---")
 

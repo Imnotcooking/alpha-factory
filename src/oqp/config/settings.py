@@ -7,10 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oqp.config.credentials import JsonCredentialSource, load_credential
-from oqp.config.paths import REPO_ROOT, legacy_middle_office_root
-
-
-MIDDLE_OFFICE_ROOT = legacy_middle_office_root()
+from oqp.config.paths import REPO_ROOT
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -87,6 +84,12 @@ def _setting_bool(name: str, env_values: dict[str, str], default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _setting_path(name: str, env_values: dict[str, str], default: str) -> Path:
+    raw = _setting(name, env_values, default) or default
+    path = Path(raw)
+    return path if path.is_absolute() else REPO_ROOT / path
+
+
 @dataclass(frozen=True, slots=True)
 class OQPSettings:
     fmp_api_key: str | None
@@ -116,6 +119,22 @@ class OQPSettings:
     ibkr_paper_submit_client_id: int
     ibkr_live_client_id: int
     ibkr_live_monitor_enabled: bool
+    qmt_connector_enabled: bool
+    qmt_connector_url: str
+    qmt_submit_connector_url: str
+    qmt_api_token: str | None
+    qmt_request_signing_secret: str | None
+    qmt_audit_log_path: Path
+    qmt_require_private_connector: bool
+    qmt_account_id: str | None
+    qmt_paper_account_id: str | None
+    qmt_live_account_id: str | None
+    qmt_account_type: str
+    qmt_session_id: int
+    qmt_timeout_seconds: float
+    qmt_live_monitor_enabled: bool
+    allow_qmt_paper_order_submit: bool
+    allow_qmt_live_trading: bool
     ops_status_source: str
     allow_paper_trading: bool
     allow_paper_order_submit: bool
@@ -162,13 +181,6 @@ class OQPSettings:
 def load_settings(env_file: Path | str | None = None) -> OQPSettings:
     env_path = Path(env_file) if env_file is not None else REPO_ROOT / ".env"
     env_values = _read_env_file(env_path)
-    fmp_json_sources = (
-        (MIDDLE_OFFICE_ROOT / "fmp_config.json", ("FMP_API_KEY", "fmp_key")),
-        (MIDDLE_OFFICE_ROOT / "pages" / "api_keys.json", ("fmp_key", "FMP_API_KEY")),
-    )
-    gemini_json_sources = (
-        (MIDDLE_OFFICE_ROOT / "pages" / "api_keys.json", ("gemini_key", "GEMINI_KEY")),
-    )
     openai_api_key = _credential(("OPENAI_API_KEY",), env_values)
     zai_api_key = _credential(("ZAI_API_KEY", "GLM_API_KEY"), env_values)
     llm_provider = _setting(
@@ -185,7 +197,7 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
     default_llm_model = "gpt-4.1-mini" if llm_provider_key == "openai" else "glm-5.2"
 
     return OQPSettings(
-        fmp_api_key=_credential(("FMP_API_KEY", "FMP_KEY"), env_values, fmp_json_sources),
+        fmp_api_key=_credential(("FMP_API_KEY", "FMP_KEY"), env_values),
         polygon_api_key=_credential(
             ("MASSIVE_API_KEY", "OPTIONS_API_KEY", "POLYGON_API_KEY"),
             env_values,
@@ -195,9 +207,7 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
         rapid_api_key=_credential(("RAPID_API_KEY",), env_values),
         zai_api_key=zai_api_key,
         openai_api_key=openai_api_key,
-        gemini_api_key=_credential(
-            ("GEMINI_API_KEY", "GEMINI_KEY"), env_values, gemini_json_sources
-        ),
+        gemini_api_key=_credential(("GEMINI_API_KEY", "GEMINI_KEY"), env_values),
         anthropic_api_key=_credential(("ANTHROPIC_API_KEY",), env_values),
         llm_provider=llm_provider,
         llm_base_url=_setting("LLM_BASE_URL", env_values, default_llm_base_url)
@@ -250,6 +260,56 @@ def load_settings(env_file: Path | str | None = None) -> OQPSettings:
         ),
         ibkr_live_monitor_enabled=_setting_bool(
             "IBKR_LIVE_MONITOR_ENABLED", env_values, False
+        ),
+        qmt_connector_enabled=_setting_bool("QMT_CONNECTOR_ENABLED", env_values, False),
+        qmt_connector_url=_setting(
+            "QMT_CONNECTOR_URL",
+            env_values,
+            "http://127.0.0.1:58668",
+        )
+        or "http://127.0.0.1:58668",
+        qmt_submit_connector_url=_setting(
+            "QMT_SUBMIT_CONNECTOR_URL",
+            env_values,
+            "http://127.0.0.1:58669",
+        )
+        or "http://127.0.0.1:58669",
+        qmt_api_token=_credential(("QMT_API_TOKEN",), env_values),
+        qmt_request_signing_secret=_credential(
+            ("QMT_REQUEST_SIGNING_SECRET",),
+            env_values,
+        ),
+        qmt_audit_log_path=_setting_path(
+            "QMT_AUDIT_LOG_PATH",
+            env_values,
+            "runtime/logs/qmt_connector_audit.jsonl",
+        ),
+        qmt_require_private_connector=_setting_bool(
+            "QMT_REQUIRE_PRIVATE_CONNECTOR",
+            env_values,
+            True,
+        ),
+        qmt_account_id=_setting("QMT_ACCOUNT_ID", env_values),
+        qmt_paper_account_id=_setting("QMT_PAPER_ACCOUNT_ID", env_values),
+        qmt_live_account_id=_setting("QMT_LIVE_ACCOUNT_ID", env_values),
+        qmt_account_type=(
+            _setting("QMT_ACCOUNT_TYPE", env_values, "STOCK") or "STOCK"
+        ).strip().upper(),
+        qmt_session_id=_setting_int("QMT_SESSION_ID", env_values, 880001),
+        qmt_timeout_seconds=_setting_float_default(
+            "QMT_TIMEOUT_SECONDS",
+            env_values,
+            5.0,
+        )
+        or 5.0,
+        qmt_live_monitor_enabled=_setting_bool(
+            "QMT_LIVE_MONITOR_ENABLED", env_values, False
+        ),
+        allow_qmt_paper_order_submit=_setting_bool(
+            "ALLOW_QMT_PAPER_ORDER_SUBMIT", env_values, False
+        ),
+        allow_qmt_live_trading=_setting_bool(
+            "ALLOW_QMT_LIVE_TRADING", env_values, False
         ),
         ops_status_source=(
             _setting("OQP_OPS_STATUS_SOURCE", env_values, "snapshot" if os.uname().sysname == "Darwin" else "direct")

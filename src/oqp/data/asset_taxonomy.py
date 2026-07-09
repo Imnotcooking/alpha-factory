@@ -9,6 +9,13 @@ from oqp.contracts.market_vertical import ASSET_TAXONOMY, normalize_market_verti
 
 
 DEFAULT_ASSET_CLASS = "FUTURES_CN"
+CORE_DASHBOARD_ASSET_CLASSES = (
+    "EQUITY_US",
+    "OPTIONS_US",
+    "EQUITY_CN",
+    "OPTIONS_CN",
+    "FUTURES_CN",
+)
 
 FALLBACK_ASSET_TAXONOMY: dict[str, dict[str, Any]] = {
     key: dict(value) for key, value in ASSET_TAXONOMY.items()
@@ -16,19 +23,103 @@ FALLBACK_ASSET_TAXONOMY: dict[str, dict[str, Any]] = {
 
 LANE_METADATA: dict[str, dict[str, str]] = {
     "FUTURES_CN": {
-        "role": "Current local/static research dataset",
-        "data_mode": "Local parquet matrices + tick cache",
-        "provider": "Bundled/static files",
+        "label": "Chinese Futures",
+        "label_zh": "中国期货",
+        "role": "Live research lane; QMT execution lane next",
+        "data_mode": "Local daily parquet + tick cache; QMT/Wind ready later",
+        "provider": "Local runtime files; Wind/QMT later",
+        "broker": "华源证券 via QMT",
+        "execution": "Planned QMT execution",
+        "dashboard_scope": "Research, risk, future CN trading",
+        "status": "active_data_planned_execution",
+    },
+    "FUTURES_US": {
+        "label": "US Futures",
+        "label_zh": "美国期货",
+        "role": "Configured US futures lane",
+        "data_mode": "Vendor/API-backed futures bars",
+        "provider": "TBD",
+        "broker": "TBD",
+        "execution": "Not wired",
+        "dashboard_scope": "Future extension",
+        "status": "planned",
     },
     "EQUITY_US": {
-        "role": "Next-phase US equities lane",
-        "data_mode": "API-backed; no public data bundled",
-        "provider": "FMP",
+        "label": "US Equities",
+        "label_zh": "美国股票",
+        "role": "Active discretionary/live portfolio lane",
+        "data_mode": "API-backed quotes, fundamentals, watchlists, ledgers",
+        "provider": "FMP + Yahoo; Massive where available",
+        "broker": "IBKR",
+        "execution": "IBKR paper/live guardrails",
+        "dashboard_scope": "Ops, discretionary, paper/live accounts",
+        "status": "active",
+    },
+    "EQUITY_CN": {
+        "label": "Chinese Equities",
+        "label_zh": "中国股票",
+        "role": "QMT broker lane for A-share discretionary/systematic flow",
+        "data_mode": "QMT/Wind-backed A-share bars and positions",
+        "provider": "Wind/QMT planned",
+        "broker": "华源证券 via QMT",
+        "execution": "Planned QMT execution",
+        "dashboard_scope": "Ops, discretionary, future CN portfolios",
+        "status": "planned_qmt",
+    },
+    "EQUITY_HK": {
+        "label": "Hong Kong Equities",
+        "label_zh": "港股",
+        "role": "Configured Hong Kong equities lane",
+        "data_mode": "API-backed HK equity bars",
+        "provider": "Yahoo/FMP/Wind as available",
+        "broker": "IBKR or external broker",
+        "execution": "Manual/external for now",
+        "dashboard_scope": "Live portfolio holdings bridge",
+        "status": "bridge",
     },
     "OPTIONS_US": {
-        "role": "Next-phase US options lane",
-        "data_mode": "API-backed option chains; event-driven/non-vectorized",
-        "provider": "Massive",
+        "label": "US Options",
+        "label_zh": "美国期权",
+        "role": "Active discretionary options lane",
+        "data_mode": "Option chains, marks, IV/Greeks, payoff labs",
+        "provider": "Massive primary; Yahoo fallback",
+        "broker": "IBKR",
+        "execution": "IBKR paper/live guardrails",
+        "dashboard_scope": "Ops options hub, workbench, risk",
+        "status": "active",
+    },
+    "OPTIONS_CN": {
+        "label": "Chinese Options",
+        "label_zh": "中国期权",
+        "role": "QMT lane for ETF/index/commodity options",
+        "data_mode": "QMT/Wind option chains, marks, Greeks",
+        "provider": "Wind/QMT planned",
+        "broker": "华源证券 via QMT",
+        "execution": "Planned QMT execution",
+        "dashboard_scope": "Ops options hub, risk, future CN trading",
+        "status": "planned_qmt",
+    },
+    "FX_SPOT": {
+        "label": "FX Spot",
+        "label_zh": "外汇现货",
+        "role": "Configured FX spot lane",
+        "data_mode": "Vendor/API-backed spot bars",
+        "provider": "TBD",
+        "broker": "TBD",
+        "execution": "Not wired",
+        "dashboard_scope": "Future extension",
+        "status": "planned",
+    },
+    "CRYPTO_PERP": {
+        "label": "Crypto Perpetuals",
+        "label_zh": "加密永续",
+        "role": "Configured crypto perpetual lane",
+        "data_mode": "Exchange/API-backed perpetual bars",
+        "provider": "TBD",
+        "broker": "TBD",
+        "execution": "Not wired",
+        "dashboard_scope": "Future extension",
+        "status": "planned",
     },
 }
 
@@ -61,6 +152,27 @@ def taxonomy_options(
         if key and key not in ordered:
             ordered.append(key)
     return ordered
+
+
+def core_dashboard_asset_classes() -> list[str]:
+    """Return the market lanes that should be visible across dashboards."""
+
+    return [normalize_market_vertical(value) for value in CORE_DASHBOARD_ASSET_CLASSES]
+
+
+def is_options_asset_class(asset_class: str) -> bool:
+    meta = FALLBACK_ASSET_TAXONOMY.get(normalize_market_vertical(asset_class), {})
+    return meta.get("instrument_family") == "option"
+
+
+def is_vectorizable_asset_class(asset_class: str) -> bool:
+    meta = FALLBACK_ASSET_TAXONOMY.get(normalize_market_vertical(asset_class), {})
+    return bool(meta.get("vectorizable", False))
+
+
+def backtest_route(asset_class: str) -> str:
+    meta = FALLBACK_ASSET_TAXONOMY.get(normalize_market_vertical(asset_class), {})
+    return str(meta.get("backtest_route") or "vectorized")
 
 
 def attach_asset_class(
@@ -117,13 +229,35 @@ def taxonomy_row(
         "asset_class": asset_class,
         "description": meta.get("description", ""),
         "region": meta.get("region", ""),
+        "instrument_family": meta.get("instrument_family", ""),
+        "default_currency": meta.get("default_currency", ""),
+        "backtest_route": meta.get("backtest_route", ""),
         "t_settlement": meta.get("t_settlement", ""),
         "price_limit": bool(meta.get("price_limit", False)),
         "vectorizable": bool(meta.get("vectorizable", False)),
+        "label": lane.get("label", asset_class),
+        "label_zh": lane.get("label_zh", lane.get("label", asset_class)),
         "role": lane.get("role", "Configured taxonomy lane"),
         "data_mode": lane.get("data_mode", "No lane metadata configured"),
         "provider": lane.get("provider", "TBD"),
+        "broker": lane.get("broker", "TBD"),
+        "execution": lane.get("execution", "TBD"),
+        "dashboard_scope": lane.get("dashboard_scope", "TBD"),
+        "lane_status": lane.get("status", "configured"),
         "local_rows": int(local_rows),
         "local_assets": int(local_assets),
         "has_local_regime_data": bool(local_rows and local_assets),
     }
+
+
+def taxonomy_frame(
+    *,
+    asset_classes: list[str] | tuple[str, ...] | None = None,
+    taxonomy: dict[str, dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Return dashboard-friendly taxonomy rows for the requested lanes."""
+
+    taxonomy = taxonomy or load_asset_taxonomy()
+    classes = list(asset_classes or CORE_DASHBOARD_ASSET_CLASSES)
+    rows = [taxonomy_row(asset_class, taxonomy) for asset_class in classes]
+    return pd.DataFrame(rows)

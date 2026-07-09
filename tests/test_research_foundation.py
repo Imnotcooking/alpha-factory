@@ -13,6 +13,7 @@ from oqp.research import (
     infer_dataset_tradability,
     resolve_factor_contract,
     stable_trial_hash,
+    validate_factor_market_compatibility,
 )
 from oqp.research.factor_presets import CROSS_SECTIONAL_DAILY_NEXT_OPEN
 from oqp.research.statistics import AlphaStatisticalTester, bonferroni_p_value
@@ -35,6 +36,47 @@ class ResearchFoundationTests(unittest.TestCase):
         self.assertEqual(contract.evaluation_geometry, "cross_sectional")
         self.assertEqual(contract.execution_lag, "next_open")
         self.assertEqual(contract.alpha_signal_col, "factor_score")
+        self.assertEqual(contract.supported_markets, ("FUTURES_CN",))
+
+    def test_factor_contract_rejects_unsupported_market_vertical(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-01-01", "2026-01-01"]),
+                "ticker": ["AAA", "BBB"],
+                "factor_score": [0.3, -0.2],
+                "forward_return": [0.01, -0.01],
+            }
+        )
+        module = SimpleNamespace(
+            FACTOR_CONTRACT={
+                **CROSS_SECTIONAL_DAILY_NEXT_OPEN,
+                "supported_markets": ["FUTURES_CN"],
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "not declared for OPTIONS_US"):
+            resolve_factor_contract(
+                module,
+                frame,
+                factor_id="fac_futures_only",
+                market_vertical="US options",
+                strict=True,
+            )
+
+    def test_factor_market_compatibility_accepts_metadata_aliases(self) -> None:
+        module = SimpleNamespace(
+            FACTOR_METADATA={
+                "supported_markets": ["US equities", "Chinese options"],
+            }
+        )
+
+        supported = validate_factor_market_compatibility(
+            module,
+            "usa equity",
+            factor_id="fac_alias_demo",
+        )
+
+        self.assertEqual(supported, ("EQUITY_US", "OPTIONS_CN"))
 
     def test_dataset_policy_labels_tick_contract_data_as_executable(self) -> None:
         frame = pd.DataFrame(

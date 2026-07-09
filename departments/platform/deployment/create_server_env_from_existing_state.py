@@ -118,6 +118,14 @@ def main() -> int:
         "OQP_DISCORD_WEBHOOK_URL": portfolio_env.get(
             "OQP_DISCORD_WEBHOOK_URL", repo_env.get("OQP_DISCORD_WEBHOOK_URL", "")
         ),
+        "OQP_LIVE_DISCORD_WEBHOOK_URL": portfolio_env.get(
+            "OQP_LIVE_DISCORD_WEBHOOK_URL",
+            repo_env.get("OQP_LIVE_DISCORD_WEBHOOK_URL", ""),
+        ),
+        "OQP_PORTFOLIO_DISCORD_WEBHOOK_URL": portfolio_env.get(
+            "OQP_PORTFOLIO_DISCORD_WEBHOOK_URL",
+            repo_env.get("OQP_PORTFOLIO_DISCORD_WEBHOOK_URL", ""),
+        ),
         "OQP_PAPER_DISCORD_WEBHOOK_URL": paper_notify_env.get(
             "OQP_PAPER_DISCORD_WEBHOOK_URL",
             repo_env.get("OQP_PAPER_DISCORD_WEBHOOK_URL", ""),
@@ -164,6 +172,11 @@ def main() -> int:
         "mode": oct(TARGET.stat().st_mode & 0o777),
         "keys_written": len(values),
         "discord_configured": bool(values.get("OQP_DISCORD_WEBHOOK_URL")),
+        "live_discord_configured": bool(
+            values.get("OQP_LIVE_DISCORD_WEBHOOK_URL")
+            or values.get("OQP_PORTFOLIO_DISCORD_WEBHOOK_URL")
+            or values.get("OQP_DISCORD_WEBHOOK_URL")
+        ),
         "paper_discord_configured": bool(values.get("OQP_PAPER_DISCORD_WEBHOOK_URL")),
         "vendor_keys_present": sorted(
             key

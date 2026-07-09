@@ -11,7 +11,6 @@ class MatrixView:
     def render_leaderboard(self, lang: str = "EN"):
         """Renders the top Candidate Matrix and Alpha Leaderboard on the main page."""
         t = TEXT[lang]
-        st.markdown(t["matrix_title"])
 
         runs_df = self.dm.get_all_runs()
         if runs_df.empty:

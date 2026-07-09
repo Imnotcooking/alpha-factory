@@ -167,6 +167,7 @@ def collect_ops_status(
             ]
         )
         items.extend(ibkr_api_heartbeat_items(active_settings))
+    items.extend(qmt_connector_status_items(active_settings))
     items.extend(account_freshness_items(account_rows, max_age_hours=max_age_hours))
     items.extend(account_event_items(event_rows))
     items.extend(
@@ -475,6 +476,102 @@ def ibkr_api_heartbeat_item(
     )
 
 
+def qmt_connector_status_items(settings: OQPSettings) -> list[OpsStatusItem]:
+    if not settings.qmt_connector_enabled:
+        return [
+            OpsStatusItem(
+                "Broker Heartbeat",
+                "QMT connector",
+                "pass",
+                "QMT_CONNECTOR_ENABLED=false; QMT bridge skeleton is installed but not armed.",
+                {"Profile": "qmt_paper_readonly"},
+            )
+        ]
+
+    items = [
+        qmt_connector_status_item(
+            "QMT paper connector heartbeat",
+            "qmt_paper_readonly",
+            settings,
+        )
+    ]
+    if settings.qmt_live_monitor_enabled:
+        items.append(
+            qmt_connector_status_item(
+                "QMT live connector heartbeat",
+                "qmt_live_readonly",
+                settings,
+            )
+        )
+    return items
+
+
+def qmt_connector_status_item(
+    name: str,
+    profile: str,
+    settings: OQPSettings,
+) -> OpsStatusItem:
+    try:
+        config = get_broker_profile_config(profile, settings=settings)
+    except Exception as exc:
+        return OpsStatusItem(
+            "Broker Heartbeat",
+            name,
+            "warn",
+            f"Skipped: {exc}",
+            {"Profile": profile},
+        )
+
+    broker = None
+    try:
+        broker = get_broker_adapter("qmt", settings=settings)
+        health = broker.connect(config)
+    except Exception as exc:
+        return OpsStatusItem(
+            "Broker Heartbeat",
+            name,
+            "fail",
+            f"QMT connector exception: {exc}",
+            {
+                "Profile": profile,
+                "Host": config.host,
+                "Port": config.port,
+                "Environment": config.environment.value,
+            },
+        )
+    finally:
+        if broker is not None:
+            try:
+                broker.disconnect()
+            except Exception:
+                pass
+
+    metadata = {
+        "Profile": profile,
+        "Host": config.host,
+        "Port": config.port,
+        "Environment": config.environment.value,
+        "Read Only": config.readonly,
+        "Account": _redact_account(health.account_id),
+    }
+    if health.status != BrokerConnectionStatus.CONNECTED:
+        return OpsStatusItem(
+            "Broker Heartbeat",
+            name,
+            "fail",
+            health.message or "QMT connector did not connect.",
+            metadata,
+        )
+
+    return OpsStatusItem(
+        "Broker Heartbeat",
+        name,
+        "pass",
+        health.message or "Connected to QMT connector.",
+        metadata,
+    )
+
+
 def _heartbeat_config(
     config: BrokerConnectionConfig,
     *,
@@ -730,6 +827,9 @@ def safety_status_items(
     *,
     snapshot_mode: bool = False,
 ) -> list[OpsStatusItem]:
+    qmt_submit_armed = (
+        settings.allow_qmt_paper_order_submit or settings.allow_qmt_live_trading
+    )
     items = [
         OpsStatusItem(
             "Safety",
@@ -751,6 +851,51 @@ def safety_status_items(
                 "ALLOW_PAPER_ORDER_SUBMIT="
                 f"{str(settings.allow_paper_order_submit).lower()}"
             ),
+        ),
+        OpsStatusItem(
+            "Safety",
+            "QMT paper submit disabled",
+            "pass" if not settings.allow_qmt_paper_order_submit else "warn",
+            (
+                "ALLOW_QMT_PAPER_ORDER_SUBMIT="
+                f"{str(settings.allow_qmt_paper_order_submit).lower()}"
+            ),
+        ),
+        OpsStatusItem(
+            "Safety",
+            "QMT live trading disabled",
+            "pass" if not settings.allow_qmt_live_trading else "fail",
+            f"ALLOW_QMT_LIVE_TRADING={str(settings.allow_qmt_live_trading).lower()}",
+        ),
+        OpsStatusItem(
+            "Safety",
+            "QMT private connector required",
+            "pass" if settings.qmt_require_private_connector else "fail",
+            f"QMT_REQUIRE_PRIVATE_CONNECTOR={str(settings.qmt_require_private_connector).lower()}",
+        ),
+        OpsStatusItem(
+            "Safety",
+            "QMT submit token configured",
+            "pass" if (not qmt_submit_armed or settings.qmt_api_token) else "fail",
+            "Required when any QMT submit flag is enabled.",
+        ),
+        OpsStatusItem(
+            "Safety",
+            "QMT submit HMAC signing configured",
+            "pass" if (not qmt_submit_armed or settings.qmt_request_signing_secret) else "fail",
+            "Required when any QMT submit flag is enabled.",
+        ),
+        OpsStatusItem(
+            "Safety",
+            "QMT submit connector isolated",
+            "pass"
+            if (
+                not qmt_submit_armed
+                or settings.qmt_submit_connector_url.rstrip("/")
+                != settings.qmt_connector_url.rstrip("/")
+            )
+            else "fail",
+            "QMT_SUBMIT_CONNECTOR_URL must differ from QMT_CONNECTOR_URL when submit is armed.",
         ),
     ]
     if snapshot_mode:

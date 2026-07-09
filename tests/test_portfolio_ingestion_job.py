@@ -76,7 +76,6 @@ class PortfolioIngestionJobTests(unittest.TestCase):
                     state_dir=state_dir,
                     backup_csv_dir=backup_dir,
                     account_ledger_path=account_db_path,
-                    include_legacy_raw_fallback=False,
                 )
             latest = load_latest_live_positions(db_path)
             latest_account_nav = load_latest_account_nav(

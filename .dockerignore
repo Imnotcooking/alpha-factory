@@ -84,11 +84,7 @@ alpha_research_lab/**/*candidate*
 alpha_research_lab/**/*trial*
 alpha_research_lab/**/*promotion*
 departments/research/strategy_registry/alpha_lab/private_factors/
-
-# Legacy alpha archive private edge
-departments/archive/legacy_alpha_factory/**/factor_library/fac_*.py
-departments/archive/legacy_alpha_factory/**/models/
-departments/archive/legacy_alpha_factory/strategy_agents/agent_*.py
+tests/test_*factor*.py
 
 # Native build outputs
 *.so

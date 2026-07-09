@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import pandas as pd
 
 from oqp.config.paths import REPO_ROOT
@@ -104,6 +105,105 @@ def historical_volatility_frame(
     return pd.DataFrame(rows, columns=columns)
 
 
+def commodity_channel_index(
+    history: pd.DataFrame,
+    *,
+    window: int = 20,
+) -> float | None:
+    """Latest Commodity Channel Index value from OHLC history."""
+
+    if history is None or history.empty:
+        return None
+
+    columns = {str(column).lower().replace("_", " ").strip(): column for column in history.columns}
+    high_col = _first_existing(columns, ("high",))
+    low_col = _first_existing(columns, ("low",))
+    close_col = _first_existing(columns, ("close", "adj close", "adj_close", "price"))
+    if high_col is None or low_col is None or close_col is None:
+        return None
+
+    frame = pd.DataFrame(
+        {
+            "high": pd.to_numeric(history[high_col], errors="coerce"),
+            "low": pd.to_numeric(history[low_col], errors="coerce"),
+            "close": pd.to_numeric(history[close_col], errors="coerce"),
+        }
+    ).dropna()
+    if len(frame) < int(window):
+        return None
+
+    typical_price = (frame["high"] + frame["low"] + frame["close"]) / 3.0
+    rolling_mean = typical_price.rolling(int(window)).mean()
+    mean_deviation = typical_price.rolling(int(window)).apply(
+        lambda values: float(np.mean(np.abs(values - values.mean()))),
+        raw=False,
+    )
+    denominator = 0.015 * mean_deviation.replace(0, np.nan)
+    cci = ((typical_price - rolling_mean) / denominator).dropna()
+    if cci.empty:
+        return None
+    return float(cci.iloc[-1])
+
+
+def bollinger_squeeze_metrics(
+    history: pd.DataFrame,
+    *,
+    window: int = 20,
+    lookback: int = 126,
+    num_std: float = 2.0,
+) -> dict[str, float | bool | None]:
+    """Latest Bollinger bandwidth, compression percentile, and z-score.
+
+    Bandwidth is the Bollinger band width divided by the middle band. The
+    percentile is computed against roughly six months of prior bandwidth
+    observations, so low values highlight volatility compression.
+    """
+
+    empty = {
+        "bb_width_20d": None,
+        "bb_width_6m_pctile": None,
+        "bb_z_20d": None,
+        "bb_squeeze_6m": None,
+    }
+    if history is None or history.empty:
+        return empty
+
+    columns = {str(column).lower().replace("_", " ").strip(): column for column in history.columns}
+    close_col = _first_existing(columns, ("close", "adj close", "adj_close", "price"))
+    if close_col is None:
+        return empty
+
+    close = pd.to_numeric(history[close_col], errors="coerce").dropna()
+    if len(close) < int(window):
+        return empty
+
+    window = int(window)
+    lookback = int(lookback)
+    middle = close.rolling(window).mean()
+    sigma = close.rolling(window).std(ddof=0)
+    denominator = middle.replace(0, np.nan)
+    bandwidth = ((2.0 * float(num_std) * sigma) / denominator).replace([np.inf, -np.inf], np.nan).dropna()
+    z_score = ((close - middle) / sigma.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
+    if bandwidth.empty:
+        return empty
+
+    current_width = float(bandwidth.iloc[-1])
+    sample = bandwidth.tail(max(lookback, window)).dropna()
+    if sample.empty:
+        width_pctile = None
+        squeeze_6m = None
+    else:
+        width_pctile = float((sample <= current_width).mean())
+        squeeze_6m = bool(current_width <= float(sample.min()) * 1.000001)
+
+    return {
+        "bb_width_20d": current_width,
+        "bb_width_6m_pctile": width_pctile,
+        "bb_z_20d": None if z_score.empty else float(z_score.iloc[-1]),
+        "bb_squeeze_6m": squeeze_6m,
+    }
+
+
 def enrich_with_historical_volatility(
     positions: pd.DataFrame,
     volatility: pd.DataFrame,
@@ -131,7 +231,7 @@ def enrich_with_historical_volatility(
     )
     fallback_keys = out.get(symbol_col, pd.Series("", index=out.index)).astype(str).str.upper().str.strip()
 
-    for column in [col for col in vol.columns if col.startswith("hv_")]:
+    for column in [col for col in vol.columns if col.startswith(("hv_", "cci_", "bb_"))]:
         primary = keys.map(lookup[column])
         fallback = fallback_keys.map(lookup[column])
         out[column] = primary.fillna(fallback)

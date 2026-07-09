@@ -74,12 +74,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--webhook-url",
         default=(
-            os.getenv("OQP_DISCORD_WEBHOOK_URL")
+            os.getenv("OQP_LIVE_DISCORD_WEBHOOK_URL")
+            or os.getenv("OQP_PORTFOLIO_DISCORD_WEBHOOK_URL")
+            or os.getenv("OQP_DISCORD_WEBHOOK_URL")
             or os.getenv("OQP_HEALTH_WEBHOOK_URL")
         ),
         help=(
             "Optional Discord webhook URL. Also read from "
-            "OQP_DISCORD_WEBHOOK_URL or OQP_HEALTH_WEBHOOK_URL."
+            "OQP_LIVE_DISCORD_WEBHOOK_URL, OQP_PORTFOLIO_DISCORD_WEBHOOK_URL, "
+            "OQP_DISCORD_WEBHOOK_URL, or OQP_HEALTH_WEBHOOK_URL."
         ),
     )
     parser.add_argument(
@@ -105,10 +108,16 @@ def main() -> int:
         max_age_hours=args.max_age_hours,
         expect_date=args.expect_date,
     )
-    failed = any(check.failed() for check in checks)
+    summary = _live_account_summary(
+        Path(args.account_ledger_path),
+        account_profile=args.account_profile,
+    )
+    failed = _effective_failed(checks, summary, max_age_hours=args.max_age_hours)
     payload = {
         "status": "fail" if failed else "pass",
         "checked_at": datetime.now(timezone.utc).isoformat(),
+        "max_age_hours": args.max_age_hours,
+        "summary": summary,
         "checks": [asdict(check) for check in checks],
     }
 
@@ -145,28 +154,25 @@ def run_checks(
             f"Found {db_path}." if db_path.exists() else f"Missing {db_path}.",
         )
     )
-    if not db_path.exists():
-        checks.append(_file_freshness_check("ibkr metrics", ibkr_metrics_path, max_age_hours))
-        return checks
+    if db_path.exists():
+        try:
+            with sqlite3.connect(db_path) as conn:
+                tables = _tables(conn)
+                checks.append(_table_check(tables, "historical_nav"))
+                checks.append(_table_check(tables, "live_positions"))
 
-    try:
-        with sqlite3.connect(db_path) as conn:
-            tables = _tables(conn)
-            checks.append(_table_check(tables, "historical_nav"))
-            checks.append(_table_check(tables, "live_positions"))
-
-            if "historical_nav" in tables:
-                checks.extend(
-                    _historical_nav_checks(
-                        conn,
-                        max_age_hours=max_age_hours,
-                        expect_date=expect_date,
+                if "historical_nav" in tables:
+                    checks.extend(
+                        _historical_nav_checks(
+                            conn,
+                            max_age_hours=max_age_hours,
+                            expect_date=expect_date,
+                        )
                     )
-                )
-            if "live_positions" in tables:
-                checks.append(_live_positions_check(conn))
-    except sqlite3.Error as exc:
-        checks.append(HealthCheck("sqlite read", "fail", str(exc)))
+                if "live_positions" in tables:
+                    checks.append(_live_positions_check(conn))
+        except sqlite3.Error as exc:
+            checks.append(HealthCheck("sqlite read", "fail", str(exc)))
 
     if account_ledger_path is not None:
         checks.extend(
@@ -179,6 +185,45 @@ def run_checks(
         )
     checks.append(_file_freshness_check("ibkr metrics", ibkr_metrics_path, max_age_hours))
     return checks
+
+
+LEGACY_LIVE_CHECK_NAMES = {
+    "portfolio ledger",
+    "historical_nav",
+    "live_positions",
+    "latest NAV",
+    "NAV positive",
+    "NAV freshness",
+    "expected NAV date",
+    "latest positions",
+    "sqlite read",
+}
+
+
+def _effective_failed(
+    checks: list[HealthCheck],
+    summary: dict[str, Any],
+    *,
+    max_age_hours: float,
+) -> bool:
+    """Treat the unified live account ledger as authoritative once it is fresh."""
+
+    unified_current = _summary_is_current(summary, max_age_hours=max_age_hours)
+    for check in checks:
+        if not check.failed():
+            continue
+        if unified_current and check.name in LEGACY_LIVE_CHECK_NAMES:
+            continue
+        return True
+    return False
+
+
+def _summary_is_current(summary: dict[str, Any], *, max_age_hours: float) -> bool:
+    if not summary:
+        return False
+    nav = _float(summary.get("net_liquidation"))
+    age_hours = _datetime_age_hours(str(summary.get("as_of", "")))
+    return nav > 0 and age_hours is not None and age_hours <= max_age_hours
 
 
 def print_checks(checks: list[HealthCheck]) -> None:
@@ -195,7 +240,20 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 
 
 def _table_has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    return column in {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+    return column in _table_columns(conn, table)
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _ordered_existing_columns(
+    conn: sqlite3.Connection,
+    table: str,
+    candidates: tuple[str, ...],
+) -> tuple[str, ...]:
+    columns = _table_columns(conn, table)
+    return tuple(column for column in candidates if column in columns)
 
 
 def _table_check(tables: set[str], table: str) -> HealthCheck:
@@ -463,6 +521,154 @@ def _account_positions_check(
     )
 
 
+def _live_account_summary(
+    account_ledger_path: Path,
+    *,
+    account_profile: str,
+) -> dict[str, Any]:
+    """Return the latest live account facts for the Discord daily report."""
+
+    if not account_ledger_path.exists():
+        return {}
+
+    try:
+        with sqlite3.connect(account_ledger_path) as conn:
+            tables = _tables(conn)
+            if "account_nav" not in tables:
+                return {}
+            currency_expr = (
+                "currency"
+                if _table_has_column(conn, "account_nav", "currency")
+                else "'USD' AS currency"
+            )
+            latest = conn.execute(
+                f"""
+                SELECT date, account_key, account_id, broker, profile, environment,
+                       as_of, {currency_expr}, net_liquidation, cash, daily_pnl,
+                       position_count, snapshot_id
+                FROM account_nav
+                WHERE environment = 'live' AND profile = ?
+                ORDER BY as_of DESC
+                LIMIT 1
+                """,
+                (account_profile,),
+            ).fetchone()
+            if latest is None:
+                return {}
+
+            account_key = str(latest[1] or "")
+            as_of = str(latest[6] or "")
+            nav = _float(latest[8])
+            daily_pnl = _float(latest[10])
+            summary: dict[str, Any] = {
+                "date": latest[0],
+                "account_key": account_key,
+                "account_id": _redact_account(latest[2]),
+                "broker": latest[3],
+                "profile": latest[4],
+                "environment": latest[5],
+                "as_of": as_of,
+                "currency": str(latest[7] or "USD").upper(),
+                "net_liquidation": nav,
+                "cash": _float(latest[9]),
+                "daily_pnl": daily_pnl,
+                "position_count": int(_float(latest[11])),
+                "snapshot_id": latest[12],
+            }
+
+            previous = conn.execute(
+                """
+                SELECT net_liquidation
+                FROM account_nav
+                WHERE account_key = ? AND environment = 'live' AND profile = ? AND as_of < ?
+                ORDER BY as_of DESC
+                LIMIT 1
+                """,
+                (account_key, account_profile, as_of),
+            ).fetchone()
+            if previous is not None and _float(previous[0]) != 0:
+                summary["daily_return"] = daily_pnl / _float(previous[0])
+
+            first = conn.execute(
+                """
+                SELECT net_liquidation
+                FROM account_nav
+                WHERE account_key = ? AND environment = 'live' AND profile = ?
+                ORDER BY as_of ASC
+                LIMIT 1
+                """,
+                (account_key, account_profile),
+            ).fetchone()
+            if first is not None and _float(first[0]) != 0:
+                summary["cumulative_return"] = nav / _float(first[0]) - 1.0
+
+            if "account_positions" in tables:
+                _add_live_position_summary(conn, summary)
+            return summary
+    except sqlite3.Error:
+        return {}
+
+
+def _add_live_position_summary(
+    conn: sqlite3.Connection,
+    summary: dict[str, Any],
+) -> None:
+    snapshot_id = summary.get("snapshot_id")
+    if not snapshot_id:
+        return
+    columns = _ordered_existing_columns(
+        conn,
+        "account_positions",
+        (
+            "symbol",
+            "asset_class",
+            "quantity",
+            "market_value",
+            "unrealized_pnl",
+            "currency",
+            "broker",
+        ),
+    )
+    if not columns:
+        return
+    rows = conn.execute(
+        f"""
+        SELECT {", ".join(columns)}
+        FROM account_positions
+        WHERE snapshot_id = ?
+        """,
+        (snapshot_id,),
+    ).fetchall()
+    names = list(columns)
+    positions = [dict(zip(names, row)) for row in rows]
+    if not positions:
+        summary["latest_position_rows"] = 0
+        return
+
+    summary["latest_position_rows"] = len(positions)
+    summary["gross_exposure"] = sum(abs(_float(row.get("market_value"))) for row in positions)
+    summary["unrealized_pnl"] = sum(_float(row.get("unrealized_pnl")) for row in positions)
+    top = sorted(
+        positions,
+        key=lambda row: abs(_float(row.get("market_value"))),
+        reverse=True,
+    )[:5]
+    summary["top_positions"] = [
+        {
+            "symbol": str(row.get("symbol") or "n/a"),
+            "asset_class": str(row.get("asset_class") or "n/a"),
+            "market_value": _float(row.get("market_value")),
+            "currency": str(row.get("currency") or summary.get("currency") or "USD").upper(),
+        }
+        for row in top
+    ]
+    asset_mix: dict[str, float] = {}
+    for row in positions:
+        key = str(row.get("asset_class") or "unknown")
+        asset_mix[key] = asset_mix.get(key, 0.0) + abs(_float(row.get("market_value")))
+    summary["asset_mix"] = dict(sorted(asset_mix.items(), key=lambda item: item[1], reverse=True))
+
+
 def _file_freshness_check(name: str, path: Path, max_age_hours: float) -> HealthCheck:
     if not path.exists():
         return HealthCheck(name, "warn", f"Missing {path}.")
@@ -501,6 +707,40 @@ def _float(value: Any) -> float:
         return 0.0
 
 
+def _money(value: Any, currency: Any = "USD") -> str:
+    if value in (None, "n/a", ""):
+        return "n/a"
+    return f"{str(currency or 'USD').upper()} {_float(value):,.2f}"
+
+
+def _pct(value: Any) -> str:
+    if value in (None, "n/a", ""):
+        return "n/a"
+    return f"{_float(value) * 100:.2f}%"
+
+
+def _human_datetime(value: Any) -> str:
+    if value in (None, ""):
+        return "n/a"
+    text = str(value)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).strftime("%b %d %H:%M UTC")
+
+
+def _redact_account(account_id: Any) -> str:
+    if not account_id:
+        return "n/a"
+    text = str(account_id)
+    if len(text) <= 4:
+        return "*" * len(text)
+    return f"{text[:2]}***{text[-2:]}"
+
+
 def _post_webhook(url: str, payload: dict[str, Any]) -> None:
     post_json_webhook(
         url,
@@ -512,12 +752,29 @@ def _post_webhook(url: str, payload: dict[str, Any]) -> None:
 
 def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
     status = str(payload.get("status", "unknown")).upper()
+    summary = payload.get("summary", {})
+    if not isinstance(summary, dict):
+        summary = {}
     checks = payload.get("checks", [])
     if not isinstance(checks, list):
         checks = []
 
-    failed = [check for check in checks if check.get("status") == "fail"]
+    max_age_hours = _float(payload.get("max_age_hours") or 36.0)
+    unified_current = _summary_is_current(summary, max_age_hours=max_age_hours)
+    failed = [
+        check
+        for check in checks
+        if check.get("status") == "fail"
+        and not (unified_current and check.get("name") in LEGACY_LIVE_CHECK_NAMES)
+    ]
     warnings = [check for check in checks if check.get("status") == "warn"]
+    suppressed_legacy = [
+        check
+        for check in checks
+        if check.get("status") == "fail"
+        and unified_current
+        and check.get("name") in LEGACY_LIVE_CHECK_NAMES
+    ]
     latest_nav = _find_check(checks, "latest NAV")
     freshness = _find_check(checks, "NAV freshness")
     latest_positions = _find_check(checks, "latest positions")
@@ -525,24 +782,97 @@ def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
     account_freshness = _find_check(checks, "unified NAV freshness")
     account_positions = _find_check(checks, "unified live positions")
 
+    currency = str(summary.get("currency") or "USD").upper()
     fields: list[dict[str, Any]] = []
-    if account_nav:
-        fields.append(_discord_field("Unified Live NAV", account_nav.get("detail", "")))
-    if account_freshness:
-        fields.append(_discord_field("Unified Freshness", account_freshness.get("detail", "")))
-    if account_positions:
-        fields.append(_discord_field("Unified Positions", account_positions.get("detail", "")))
+    if summary:
+        fields.extend(
+            [
+                _discord_field(
+                    "Live Account",
+                    (
+                        f"{summary.get('account_id', 'n/a')} | {summary.get('profile', 'live')}\n"
+                        f"as_of={_human_datetime(summary.get('as_of'))}"
+                    ),
+                ),
+                _discord_field(
+                    "NAV / Cash",
+                    (
+                        f"NAV {_money(summary.get('net_liquidation'), currency)}\n"
+                        f"Cash {_money(summary.get('cash'), currency)}"
+                    ),
+                ),
+                _discord_field(
+                    "P&L",
+                    (
+                        f"Daily {_money(summary.get('daily_pnl'), currency)}\n"
+                        f"Unrealized {_money(summary.get('unrealized_pnl'), currency)}"
+                    ),
+                ),
+                _discord_field(
+                    "Returns",
+                    (
+                        f"Daily {_pct(summary.get('daily_return'))}\n"
+                        f"Cumulative {_pct(summary.get('cumulative_return'))}"
+                    ),
+                ),
+                _discord_field(
+                    "Exposure / Holdings",
+                    (
+                        f"Gross {_money(summary.get('gross_exposure'), currency)}\n"
+                        f"Positions {summary.get('latest_position_rows', summary.get('position_count', 'n/a'))}"
+                    ),
+                ),
+            ]
+        )
+        top_positions = summary.get("top_positions")
+        if isinstance(top_positions, list) and top_positions:
+            fields.append(
+                _discord_field(
+                    "Top Holdings",
+                    "\n".join(
+                        f"{item.get('symbol', 'n/a')}: {_money(item.get('market_value'), item.get('currency', currency))}"
+                        for item in top_positions[:5]
+                        if isinstance(item, dict)
+                    ),
+                )
+            )
+        asset_mix = summary.get("asset_mix")
+        if isinstance(asset_mix, dict) and asset_mix:
+            fields.append(
+                _discord_field(
+                    "Asset Mix",
+                    "\n".join(
+                        f"{asset}: {_money(value, currency)}"
+                        for asset, value in list(asset_mix.items())[:5]
+                    ),
+                )
+            )
+    else:
+        if account_nav:
+            fields.append(_discord_field("Unified Live NAV", account_nav.get("detail", "")))
+        if account_freshness:
+            fields.append(_discord_field("Unified Freshness", account_freshness.get("detail", "")))
+        if account_positions:
+            fields.append(_discord_field("Unified Positions", account_positions.get("detail", "")))
+
     if latest_nav:
         fields.append(_discord_field("Legacy NAV", latest_nav.get("detail", "")))
     if freshness:
-        fields.append(_discord_field("Freshness", freshness.get("detail", "")))
+        fields.append(_discord_field("Legacy Freshness", freshness.get("detail", "")))
     if latest_positions:
-        fields.append(_discord_field("Positions", latest_positions.get("detail", "")))
+        fields.append(_discord_field("Legacy Positions", latest_positions.get("detail", "")))
 
     for check in failed[:5]:
         fields.append(
             _discord_field(
                 f"FAIL: {check.get('name', 'check')}",
+                str(check.get("detail", "")),
+            )
+        )
+    for check in suppressed_legacy[:2]:
+        fields.append(
+            _discord_field(
+                f"LEGACY: {check.get('name', 'check')}",
                 str(check.get("detail", "")),
             )
         )
@@ -556,12 +886,12 @@ def _discord_payload(payload: dict[str, Any]) -> dict[str, Any]:
             )
 
     return {
-        "username": "OQP Portfolio Health",
-        "content": f"OQP portfolio snapshot health: {status}",
+        "username": "OQP Live Portfolio",
+        "content": f"OQP live portfolio report: {status}",
         "allowed_mentions": {"parse": []},
         "embeds": [
             {
-                "title": "Portfolio Snapshot Health",
+                "title": "Live Portfolio Daily Report",
                 "description": f"Status: {status}",
                 "color": 0x2ECC71 if status == "PASS" else 0xE74C3C,
                 "timestamp": payload.get("checked_at"),

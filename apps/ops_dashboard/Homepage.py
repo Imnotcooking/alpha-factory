@@ -58,9 +58,15 @@ from oqp.ui import (  # noqa: E402
     nav_tiles,
     ops_text,
     page_header,
+    qmt_account_rows,
+    qmt_overall_status,
+    qmt_safety_gate_frame,
+    qmt_status_frame,
+    qmt_submit_state,
     render_dark_bar_chart,
     render_dark_line_chart,
     render_dark_table,
+    render_market_lane_overview,
     section_header,
     tr,
 )
@@ -818,6 +824,7 @@ def pipeline_rows(
     safety = check_subset(items, categories=("Safety",))
     ops = check_subset(items, categories=("Schedulers", "Host", "Notifications", "Jobs"))
     gateway = check_subset(items, categories=("Gateway", "Broker Heartbeat"))
+    qmt = check_subset(items, contains=("QMT",))
 
     return [
         {
@@ -846,6 +853,12 @@ def pipeline_rows(
                 "paper review open; paper submit "
                 + ("armed" if paper_submit_ready else "locked")
             ),
+        },
+        {
+            "Layer": "QMT Connector",
+            "Mode": "Read-only / guarded submit",
+            "Status": status_label(worst_status(qmt)),
+            "Signal": status_detail(qmt, "QMT bridge is installed; connector state follows runtime flags."),
         },
         {
             "Layer": "IBKR And Server",
@@ -1206,6 +1219,7 @@ page_header(
     subtitle_zh="统一监控实盘、模拟交易、执行安全与服务器健康状态。",
     language=OPS_LANG,
 )
+render_market_lane_overview(language=OPS_LANG, expanded=True)
 st.caption(T("checked_at", time=human_timestamp(snapshot.checked_at)))
 if server_sync:
     st.caption(
@@ -1226,7 +1240,7 @@ with st.container(border=True):
         ),
         accent="teal",
     )
-    top_cols = st.columns(8)
+    top_cols = st.columns(10)
     top_cols[0].metric(T("overall"), status_label(snapshot.overall_status))
     top_cols[1].metric(T("failures"), str(overall_counts.get("fail", 0)))
     top_cols[2].metric(T("warnings"), str(overall_counts.get("warn", 0)))
@@ -1235,6 +1249,8 @@ with st.container(border=True):
     top_cols[5].metric(T("dry_run_tickets"), str(dry_run_count))
     top_cols[6].metric(T("paper_submit"), T("armed") if paper_submit_ready else T("locked"))
     top_cols[7].metric(T("action_items"), str(actionable_count))
+    top_cols[8].metric("QMT Heartbeat", qmt_overall_status(snapshot))
+    top_cols[9].metric("QMT Submit", qmt_submit_state(settings))
 
     if paper_submit_ready:
         st.warning(T("paper_submission_armed"))
@@ -1360,6 +1376,8 @@ with st.container(border=True):
         ),
         empty_message=T("no_policy_rows"),
     )
+    st.subheader("QMT Bridge Gates")
+    render_dark_table(qmt_safety_gate_frame(settings), max_height_px=280)
 
 account_left, account_right = st.columns([1.2, 1])
 with account_left:
@@ -1382,6 +1400,12 @@ with account_left:
             ),
             empty_message=T("no_account_summary_rows"),
         )
+        st.subheader("QMT Account Rows")
+        render_dark_table(
+            qmt_account_rows(snapshot),
+            empty_message="No QMT account rows are available yet.",
+            max_height_px=240,
+        )
 with account_right:
     with st.container(border=True):
         section_header(
@@ -1394,6 +1418,12 @@ with account_right:
             accent="teal",
         )
         render_dark_table(system_summary, empty_message=T("no_system_summary_rows"))
+        st.subheader("QMT System Rows")
+        render_dark_table(
+            qmt_status_frame(snapshot),
+            empty_message="No QMT status rows are available yet.",
+            max_height_px=240,
+        )
 
 with st.container(border=True):
     section_header(

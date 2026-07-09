@@ -12,10 +12,14 @@ from oqp.contracts import (
     normalize_market_vertical,
 )
 from oqp.data import (
+    CORE_DASHBOARD_ASSET_CLASSES,
+    LANE_METADATA,
     InstrumentMaster,
     asset_class_label,
     attach_asset_class,
+    core_dashboard_asset_classes,
     load_asset_taxonomy,
+    taxonomy_frame,
     taxonomy_options,
     taxonomy_row,
 )
@@ -27,6 +31,8 @@ class InstrumentTaxonomyTests(unittest.TestCase):
         self.assertEqual(normalize_market_vertical("china futures"), "FUTURES_CN")
         self.assertEqual(normalize_market_vertical("US equities"), "EQUITY_US")
         self.assertEqual(normalize_market_vertical(MarketVertical.OPTIONS_US), "OPTIONS_US")
+        self.assertEqual(normalize_market_vertical("Chinese options"), "OPTIONS_CN")
+        self.assertEqual(normalize_market_vertical("A shares"), "EQUITY_CN")
         self.assertEqual(normalize_market_vertical(math.nan), "UNKNOWN")
 
         futures = market_vertical_spec("CN_FUTURES")
@@ -37,6 +43,8 @@ class InstrumentTaxonomyTests(unittest.TestCase):
         self.assertTrue(futures.price_limit)
         self.assertTrue(ASSET_TAXONOMY["FUTURES_CN"]["vectorizable"])
         self.assertFalse(ASSET_TAXONOMY["OPTIONS_US"]["vectorizable"])
+        self.assertFalse(ASSET_TAXONOMY["OPTIONS_CN"]["vectorizable"])
+        self.assertEqual(ASSET_TAXONOMY["OPTIONS_CN"]["backtest_route"], "event_driven_options")
 
     def test_instrument_master_handles_cn_futures_and_us_equity_without_symbol_damage(self) -> None:
         futures_master = InstrumentMaster("FUTURES_CN")
@@ -55,6 +63,18 @@ class InstrumentTaxonomyTests(unittest.TestCase):
         self.assertEqual(equity.ticker, "3M")
         self.assertEqual(equity.exchange, "US")
         self.assertEqual(equity.tick_size, 0.01)
+
+        cn_equity = InstrumentMaster("EQUITY_CN").get_profile("600519")
+        us_option = InstrumentMaster("OPTIONS_US").get_profile("AAPL_20270115_C200")
+        cn_option = InstrumentMaster("OPTIONS_CN").get_profile("510050C2609M03000")
+
+        self.assertEqual(cn_equity.ticker, "600519")
+        self.assertEqual(cn_equity.exchange, "CN")
+        self.assertEqual(cn_equity.multiplier, 1)
+        self.assertEqual(us_option.exchange, "US")
+        self.assertEqual(us_option.multiplier, 100)
+        self.assertEqual(cn_option.exchange, "CN")
+        self.assertEqual(cn_option.multiplier, 10_000)
 
     def test_asset_taxonomy_helpers_attach_and_describe_market_verticals(self) -> None:
         taxonomy = load_asset_taxonomy()
@@ -100,7 +120,31 @@ class InstrumentTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(ASSET_TAXONOMY["FUTURES_CN"]["region"], "CN")
         self.assertEqual(taxonomy["OPTIONS_US"]["vectorizable"], False)
+        self.assertEqual(taxonomy["OPTIONS_CN"]["instrument_family"], "option")
         self.assertEqual(InstrumentMaster("FUTURES_CN").get_profile("au2608").exchange, "SHFE")
+
+    def test_dashboard_taxonomy_core_lanes_include_qmt_china_routes(self) -> None:
+        lanes = core_dashboard_asset_classes()
+
+        self.assertEqual(
+            lanes,
+            ["EQUITY_US", "OPTIONS_US", "EQUITY_CN", "OPTIONS_CN", "FUTURES_CN"],
+        )
+        self.assertEqual(tuple(lanes), CORE_DASHBOARD_ASSET_CLASSES)
+        for asset_class in lanes:
+            self.assertIn(asset_class, ASSET_TAXONOMY)
+
+        frame = taxonomy_frame(asset_classes=lanes)
+        self.assertEqual(frame["asset_class"].tolist(), lanes)
+        self.assertIn("Massive", frame.loc[frame["asset_class"].eq("OPTIONS_US"), "provider"].iat[0])
+        for asset_class in ["EQUITY_CN", "OPTIONS_CN", "FUTURES_CN"]:
+            row = frame.loc[frame["asset_class"].eq(asset_class)].iloc[0]
+            self.assertIn("华源证券", row["broker"])
+            self.assertIn("QMT", row["execution"])
+            self.assertEqual(row["region"], "CN")
+
+        self.assertEqual(LANE_METADATA["EQUITY_CN"]["status"], "planned_qmt")
+        self.assertEqual(LANE_METADATA["OPTIONS_CN"]["status"], "planned_qmt")
 
 
 if __name__ == "__main__":

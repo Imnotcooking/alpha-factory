@@ -28,28 +28,28 @@ These can be moved by hand with little architectural risk.
 
 | Alpha path | Move to | Notes |
 | --- | --- | --- |
-| `alpha_research_lab/data_cache/*raw*tick*.parquet` | `runtime/data/alpha_lab/market_data/tick/` | Raw vendor/local tick files. Keep private and ignored. |
-| `alpha_research_lab/data_cache/*_1m_*.parquet` | `runtime/data/alpha_lab/market_data/intraday/` | Intraday market data cache. |
-| `alpha_research_lab/data_cache/*_1d_*.parquet`, `*.csv` | `runtime/data/alpha_lab/market_data/daily/` | Daily/index market data cache. |
-| `alpha_research_lab/data_cache/*universe.parquet` | `runtime/data/alpha_lab/universes/` | Local research universes. Promote only schema/code, not files. |
-| `alpha_research_lab/ML_Feature_Matrix.parquet` | `runtime/data/alpha_lab/feature_store/ML_Feature_Matrix.parquet` | Generated feature-store output. |
-| `alpha_research_lab/ML_Stacked_Matrix.parquet` | `runtime/data/alpha_lab/feature_store/ML_Stacked_Matrix.parquet` | Generated ML matrix. |
-| `alpha_research_lab/GMM_Rolling_Probabilities.parquet` | `runtime/data/alpha_lab/regime/GMM_Rolling_Probabilities.parquet` | Generated regime probability output. |
-| `alpha_research_lab/Macro_Index_V2.parquet` | `runtime/data/alpha_lab/regime/Macro_Index_V2.parquet` | Generated macro regime input/output. |
-| `alpha_research_lab/Macro_Regimes.parquet` | `runtime/data/alpha_lab/regime/Macro_Regimes.parquet` | Generated macro regime output. |
-| `alpha_research_lab/research_memory.db` | `runtime/db/research/alpha_lab/research_memory.db` | Local research trial database. |
-| `alpha_research_lab/optimization_memory.db` | `runtime/db/research/alpha_lab/optimization_memory.db` | Local optimization database. |
-| `alpha_research_lab/execution_logs/returns/` | `runtime/artifacts/research/alpha_lab/returns/` | Backtest output. |
-| `alpha_research_lab/execution_logs/trades/` | `runtime/artifacts/research/alpha_lab/trades/` | Backtest output. |
-| `alpha_research_lab/execution_logs/tca/` | `runtime/artifacts/research/alpha_lab/tca/` | Execution-cost output. |
-| `alpha_research_lab/execution_logs/tick_pulse_cache/` | `runtime/artifacts/research/alpha_lab/tick_pulse_cache/` | Dashboard/research cache. |
-| `alpha_research_lab/execution_logs/feature_importance/` | `runtime/artifacts/research/alpha_lab/feature_importance/` | Model diagnostics output. |
-| `alpha_research_lab/execution_logs/shap_regime_dna.csv` | `runtime/artifacts/research/alpha_lab/diagnostics/shap_regime_dna.csv` | Generated diagnostic. |
-| `alpha_research_lab/ml_engine/*.pkl` | `runtime/artifacts/research/alpha_lab/models/` | Trained model artifacts. |
-| `alpha_research_lab/ml_engine/*model*.json` | `runtime/artifacts/research/alpha_lab/models/` | Trained model artifacts. |
-| `alpha_research_lab/regime_engine/*.pkl` | `runtime/artifacts/research/alpha_lab/regime_models/` | Trained regime artifacts. |
-| `alpha_research_lab/metadata/*.csv` | `runtime/data/alpha_lab/metadata/` | Private metadata unless sanitized. |
-| `alpha_research_lab/data_engine/metadata/*.csv` | `runtime/data/alpha_lab/metadata/` | Private metadata unless sanitized. |
+| `alpha_research_lab/data_cache/*raw*tick*.parquet` | `runtime/data/futures_cn/tick/` | Raw vendor/local CN futures tick files. Keep private and ignored. |
+| `alpha_research_lab/data_cache/*_1m_*.parquet` | `runtime/data/futures_cn/intraday/` | CN futures intraday market data cache. |
+| `alpha_research_lab/data_cache/*_1d_*.parquet`, `*.csv` | `runtime/data/futures_cn/daily/` | Daily CN futures market data. |
+| `alpha_research_lab/data_cache/*universe.parquet` | `runtime/data/universes/` | Local research universes. Promote only schema/code, not files. |
+| `alpha_research_lab/ML_Feature_Matrix.parquet` | `runtime/data/feature_store/ML_Feature_Matrix.parquet` | Generated feature-store output. |
+| `alpha_research_lab/ML_Stacked_Matrix.parquet` | `runtime/data/feature_store/ML_Stacked_Matrix.parquet` | Generated ML matrix. |
+| `alpha_research_lab/GMM_Rolling_Probabilities.parquet` | `runtime/data/regime/GMM_Rolling_Probabilities.parquet` | Generated regime probability output. |
+| `alpha_research_lab/Macro_Index_V2.parquet` | `runtime/data/regime/Macro_Index_V2.parquet` | Generated macro regime input/output. |
+| `alpha_research_lab/Macro_Regimes.parquet` | `runtime/data/regime/Macro_Regimes.parquet` | Generated macro regime output. |
+| `alpha_research_lab/research_memory.db` | `runtime/db/research/research_memory.db` | Local research trial database. |
+| `alpha_research_lab/optimization_memory.db` | `runtime/db/research/optimization_memory.db` | Local optimization database. |
+| `alpha_research_lab/execution_logs/returns/` | `runtime/artifacts/research/returns/` | Backtest output. |
+| `alpha_research_lab/execution_logs/trades/` | `runtime/artifacts/research/trades/` | Backtest output. |
+| `alpha_research_lab/execution_logs/tca/` | `runtime/artifacts/research/tca/` | Execution-cost output. |
+| `alpha_research_lab/execution_logs/tick_pulse_cache/` | `runtime/artifacts/research/tick_pulse_cache/` | Dashboard/research cache. |
+| `alpha_research_lab/execution_logs/feature_importance/` | `runtime/artifacts/research/feature_importance/` | Model diagnostics output. |
+| `alpha_research_lab/execution_logs/shap_regime_dna.csv` | `runtime/artifacts/research/diagnostics/shap_regime_dna.csv` | Generated diagnostic. |
+| `alpha_research_lab/ml_engine/*.pkl` | `runtime/artifacts/research/models/` | Trained model artifacts. |
+| `alpha_research_lab/ml_engine/*model*.json` | `runtime/artifacts/research/models/` | Trained model artifacts. |
+| `alpha_research_lab/regime_engine/*.pkl` | `runtime/artifacts/research/regime_models/` | Trained regime artifacts. |
+| `alpha_research_lab/metadata/*.csv` | `runtime/data/metadata/` | Private metadata unless sanitized. |
+| `alpha_research_lab/data_engine/metadata/*.csv` | `runtime/data/metadata/` | Private metadata unless sanitized. |
 
 ## Factor Recipe Moves
 
@@ -93,17 +93,17 @@ source logic, local paths, runtime outputs, or legacy imports.
 
 | Alpha path | Likely target | What to do first |
 | --- | --- | --- |
-| `alpha_research_lab/feature_engineering.py` | `src/oqp/research/features/feature_matrix.py` | Split reusable feature builders from local file IO; route generated matrices to `runtime/data/alpha_lab/feature_store/`. |
+| `alpha_research_lab/feature_engineering.py` | `src/oqp/research/features/feature_matrix.py` | Split reusable feature builders from local file IO; route generated matrices to `runtime/data/feature_store/`. |
 | `alpha_research_lab/train_rolling_gmm.py` | `src/oqp/intelligence/regime_engine/asset_training.py` | Replace alpha imports with `oqp.intelligence.regime_engine`; add config object and output path argument. |
 | `alpha_research_lab/evaluator.py` | `src/oqp/research/backtesting/` | Keep only reusable evaluation/backtesting classes; move CLI/runtime assumptions to scripts. |
-| `alpha_research_lab/run_backtest.py` | `scripts/research/run_alpha_backtest.py` | Convert paths to `DATA_ROOT`/`ARTIFACT_ROOT`; import from `oqp.research`. |
-| `alpha_research_lab/run_ml_backtest.py` | `scripts/research/run_alpha_ml_backtest.py` | Same as above, plus model artifact paths under `runtime/artifacts`. |
+| `alpha_research_lab/run_backtest.py` | `scripts/research/run_backtest.py` | Convert paths to `DATA_ROOT`/`ARTIFACT_ROOT`; import from `oqp.research`. |
+| `alpha_research_lab/run_ml_backtest.py` | `scripts/research/run_ml_backtest.py` | Same as above, plus model artifact paths under `runtime/artifacts`. |
 | `alpha_research_lab/oracle_evaluator.py` | `src/oqp/research/evaluation/` or `departments/research/` docs | Review for private assumptions before promotion. |
 | `alpha_research_lab/data_engine/data_feed.py` | `src/oqp/data/vendors/` or `src/oqp/data/adapters/` | Strip local file paths/vendor assumptions; keep secrets out. |
 | `alpha_research_lab/data_engine/tick_data_adapter.py` | `src/oqp/data/adapters/` | Promote schema normalization only; data files stay in `runtime/data`. |
 | `alpha_research_lab/data_engine/builders/build_datasets.py` | `scripts/data_platform/build_alpha_datasets.py` | Treat as a local build script, not package code. |
-| `alpha_research_lab/experiments/` | `runtime/artifacts/research/alpha_lab/experiment_logs/` for outputs, `departments/research/` docs for narrative notes | Separate notes/config from generated files. |
-| `alpha_research_lab/archive/` | `departments/archive/legacy_alpha_lab/` | Move only if you still need the reference. |
+| `alpha_research_lab/experiments/` | `runtime/artifacts/research/experiment_logs/` for outputs, `departments/research/` docs for narrative notes | Separate notes/config from generated files. |
+| `alpha_research_lab/archive/` | none by default | Keep ignored or delete locally; promote only specific reusable ideas into active departments. |
 
 ## UI Moves
 

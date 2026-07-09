@@ -51,7 +51,7 @@ reproducible, and clear about what remains private.
 | `factors/fac_*.py` | none by default | keep private | Publish only sanitized retired examples through allowlist. |
 | `data_cache/`, `execution_logs/`, `metadata/` | none | keep private | Runtime or research artifacts, not source integration targets. |
 | `ui_v2/` | `apps/research_dashboard/` | promoted | Research dashboard source now lives under the app surface directly. |
-| `archive/`, `backtest_1-main/`, `manager_research_demo/` | `departments/archive/` if needed | archive/reference | Do not mix into active OQP core. |
+| `archive/`, `backtest_1-main/`, `manager_research_demo/` | none by default | archive/reference | Keep ignored or delete locally; promote only specific reusable ideas into active OQP core. |
 
 ## Immediate Sequence
 

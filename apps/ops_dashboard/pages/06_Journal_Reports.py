@@ -22,6 +22,7 @@ from oqp.accounts import (  # noqa: E402
     load_account_nav_history,
     load_account_trade_events,
 )
+from oqp.config import load_settings  # noqa: E402
 from oqp.journal import (  # noqa: E402
     default_journal_ledger_path,
     ensure_journal_schema,
@@ -33,7 +34,21 @@ from oqp.paper_trading import (  # noqa: E402
     load_latest_paper_execution_reviews,
     load_latest_paper_orders,
 )
-from oqp.ui import apply_ops_theme, language_selector, ops_tabs, ops_text, page_header, render_dark_table  # noqa: E402
+from oqp.ops import collect_ops_status  # noqa: E402
+from oqp.ui import (  # noqa: E402
+    apply_ops_theme,
+    language_selector,
+    ops_tabs,
+    ops_text,
+    page_header,
+    qmt_audit_count,
+    qmt_audit_events_frame,
+    qmt_audit_path_frame,
+    qmt_overall_status,
+    qmt_status_frame,
+    render_dark_table,
+    render_market_lane_chips,
+)
 
 
 st.set_page_config(
@@ -343,6 +358,8 @@ def save_entry(
 journal_db = ensure_journal_schema(default_journal_ledger_path())
 account_ledger = default_account_ledger_path()
 paper_ledger = default_paper_trading_ledger_path()
+settings = load_settings()
+ops_snapshot = collect_ops_status(settings=settings)
 
 today = datetime.now(timezone.utc).date()
 selected_date = st.sidebar.date_input("Journal date", value=today)
@@ -381,14 +398,21 @@ page_header(
     subtitle_zh="记录每日笔记、交易假设、错误复盘、P&L 摘要、报告引用与后续 Discord 汇总归档。",
     language=OPS_LANG,
 )
+render_market_lane_chips(
+    language=OPS_LANG,
+    lanes=("EQUITY_US", "OPTIONS_US", "EQUITY_CN", "OPTIONS_CN", "FUTURES_CN"),
+    caption="Journal entries should tag the market lane, so US discretionary trades, QMT CN trades, and CN futures research stay separable.",
+)
 
-top = st.columns(6)
+top = st.columns(8)
 top[0].metric(T("entries_today"), str(len(selected_entries)))
 top[1].metric(T("all_entries"), str(len(entries)))
 top[2].metric(T("live_pnl", "Live P&L"), signed_money(nav_rows.loc[nav_rows["Account"].eq("Live"), "Daily P&L"].iloc[0] if not nav_rows.empty else None))
 top[3].metric(T("paper_pnl", "Paper P&L"), signed_money(nav_rows.loc[nav_rows["Account"].eq("Paper"), "Daily P&L"].iloc[0] if not nav_rows.empty else None))
 top[4].metric(T("paper_tickets"), str(len(paper_orders)))
 top[5].metric(T("reviews"), str(len(paper_reviews)))
+top[6].metric("QMT Heartbeat", qmt_overall_status(ops_snapshot))
+top[7].metric("QMT Audit Rows", str(qmt_audit_count(settings)))
 
 st.caption(T("journal_ledger", path=display_path(journal_db)))
 
@@ -401,7 +425,7 @@ with daily_tab:
     with st.form("daily_note_form"):
         cols = st.columns([1, 1, 1, 1])
         note_date = cols[0].date_input(T("date"), value=selected_date, key="daily_note_date")
-        environment = cols[1].selectbox(T("environment"), ["all", "live", "paper", "discretionary", "research"], key="daily_env")
+        environment = cols[1].selectbox(T("environment"), ["all", "live", "paper", "qmt_paper", "qmt_live_monitor", "discretionary", "research"], key="daily_env")
         symbols = cols[2].text_input(T("symbols"), placeholder="AAPL, SPY", key="daily_symbols")
         tags = cols[3].text_input(T("tags"), placeholder="discipline, macro", key="daily_tags")
         title = st.text_input(T("title"), value=T("daily_note_default"))
@@ -428,13 +452,20 @@ with daily_tab:
     else:
         render_dark_table(display, max_height_px=460)
 
+    st.subheader("QMT Daily Status")
+    render_dark_table(
+        qmt_status_frame(ops_snapshot),
+        empty_message="No QMT status rows are available yet.",
+        max_height_px=260,
+    )
+
 with thesis_tab:
     st.subheader(T("trade_thesis_log"))
     with st.form("trade_thesis_form"):
         cols = st.columns([1, 1, 1, 1])
         thesis_date = cols[0].date_input(T("date"), value=selected_date, key="thesis_date")
         symbol = cols[1].text_input(T("symbol"), placeholder="AAPL", key="thesis_symbol").upper().strip()
-        environment = cols[2].selectbox(T("environment"), ["discretionary", "paper", "live"], key="thesis_env")
+        environment = cols[2].selectbox(T("environment"), ["discretionary", "paper", "qmt_paper", "qmt_live_monitor", "live"], key="thesis_env")
         strategy = cols[3].text_input(T("strategy_setup_id"), placeholder="manual_options_watch")
         cols2 = st.columns([1, 1, 1, 1])
         direction = cols2[0].selectbox(T("direction"), ["long", "short", "income", "hedge", "spread", "watch", "avoid"])
@@ -498,11 +529,18 @@ with digest_tab:
                     {"Area": "Paper events", "Rows": len(paper_events)},
                     {"Area": "Paper tickets", "Rows": len(paper_orders)},
                     {"Area": "Paper reviews", "Rows": len(paper_reviews)},
+                    {"Area": "QMT audit events", "Rows": qmt_audit_count(settings)},
                     {"Area": "Journal entries", "Rows": len(selected_entries)},
                 ]
             ),
             max_height_px=360,
         )
+    st.subheader("QMT Audit Digest")
+    render_dark_table(
+        qmt_audit_events_frame(settings, limit=10),
+        empty_message="No QMT audit events are available yet.",
+        max_height_px=320,
+    )
     with st.form("eod_summary_form"):
         title = st.text_input(T("summary_title"), value=f"EOD summary {selected_date.isoformat()}")
         reflection = st.text_area(T("human_reflection"), height=140)
@@ -532,7 +570,7 @@ with mistakes_tab:
         cols = st.columns([1, 1, 1, 1])
         mistake_date = cols[0].date_input(T("date"), value=selected_date, key="mistake_date")
         severity = cols[1].selectbox(T("severity"), ["low", "medium", "high", "process break"])
-        environment = cols[2].selectbox(T("environment"), ["discretionary", "paper", "live", "research", "ops"], key="mistake_env")
+        environment = cols[2].selectbox(T("environment"), ["discretionary", "paper", "qmt_paper", "qmt_live_monitor", "live", "research", "ops", "ops/qmt"], key="mistake_env")
         symbols = cols[3].text_input(T("symbols"), placeholder="optional", key="mistake_symbols")
         title = st.text_input(T("mistake_title"))
         mistake = st.text_area(T("what_went_wrong"), height=120)
@@ -598,3 +636,11 @@ with reports_tab:
         st.info(T("no_report_references"))
     else:
         render_dark_table(display, max_height_px=460)
+
+    st.subheader("QMT Audit References")
+    render_dark_table(qmt_audit_path_frame(settings), max_height_px=180)
+    render_dark_table(
+        qmt_audit_events_frame(settings, limit=10),
+        empty_message="No QMT audit events are available yet.",
+        max_height_px=320,
+    )

@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from oqp.contracts.market_vertical import ASSET_TAXONOMY, normalize_market_vertical
+
 
 @dataclass(frozen=True, slots=True)
 class BacktestBackendMetadata:
@@ -37,12 +39,18 @@ class ExecutionBacktestRequest:
     fee_close_history: Sequence[float] | None = None
     fee_close_today: Sequence[float] | None = None
     tick_sizes: Sequence[float] | None = None
+    asset_class: str = "FUTURES_CN"
     initial_capital: float = 1_000_000.0
     deadband: float = 0.015
     integer_lots: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        normalized_asset_class = normalize_market_vertical(self.asset_class)
+        if normalized_asset_class not in ASSET_TAXONOMY:
+            normalized_asset_class = "FUTURES_CN"
+        object.__setattr__(self, "asset_class", normalized_asset_class)
+
         n_rows = len(self.asset_ids)
         if n_rows == 0:
             raise ValueError("ExecutionBacktestRequest requires at least one row")
@@ -71,6 +79,22 @@ class ExecutionBacktestRequest:
                 self.fee_close_today,
             )
         )
+
+    @property
+    def taxonomy(self) -> Mapping[str, Any]:
+        return ASSET_TAXONOMY.get(self.asset_class, {})
+
+    @property
+    def is_options(self) -> bool:
+        return self.taxonomy.get("instrument_family") == "option"
+
+    @property
+    def backtest_route(self) -> str:
+        return str(self.taxonomy.get("backtest_route") or "vectorized")
+
+    @property
+    def native_compatible(self) -> bool:
+        return bool(self.taxonomy.get("vectorizable", True)) and self.backtest_route != "event_driven_options"
 
     def _all_series(self) -> Mapping[str, Sequence[Any] | None]:
         return {

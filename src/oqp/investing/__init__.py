@@ -70,7 +70,6 @@ from oqp.investing.opportunity_history import (
 from oqp.investing.watchlist import (
     DEFAULT_INVESTING_STATE_DIR,
     DEFAULT_STOCK_WATCHLIST_PATH,
-    LEGACY_STOCK_WATCHLIST_PATH,
     add_stock_watchlist_symbol,
     load_stock_watchlist,
     normalize_symbol,
@@ -87,7 +86,6 @@ __all__ = [
     "DEFAULT_LLM_EVIDENCE_DB_PATH",
     "DEFAULT_STOCK_WATCHLIST_PATH",
     "DEFAULT_OPPORTUNITY_HISTORY_DB_PATH",
-    "LEGACY_STOCK_WATCHLIST_PATH",
     "NewsNLPResult",
     "PeerComparison",
     "RATIO_CATEGORIES",

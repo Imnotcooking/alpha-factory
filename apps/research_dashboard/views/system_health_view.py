@@ -37,15 +37,25 @@ ALPHA_RUNTIME_ARTIFACT_ROOT = _UI_CONFIG.ALPHA_RUNTIME_ARTIFACT_ROOT
 get_plotly_template = _UI_CONFIG.get_plotly_template
 
 try:
-    from oqp.data.asset_taxonomy import load_asset_taxonomy
+    from oqp.data.runtime_paths import discover_futures_cn_tick_files, futures_cn_tick_roots
+    from oqp.data.asset_taxonomy import LANE_METADATA, load_asset_taxonomy
 
     ASSET_TAXONOMY = load_asset_taxonomy(BASE_DIR)
 except Exception:
     ASSET_TAXONOMY = {}
+    LANE_METADATA = {}
+
+    def discover_futures_cn_tick_files() -> list[Path]:
+        root = Path(BASE_DIR) / "runtime" / "data" / "futures_cn" / "tick"
+        return sorted(root.glob("*tick*.parquet")) if root.exists() else []
+
+    def futures_cn_tick_roots() -> tuple[Path, ...]:
+        return (Path(BASE_DIR) / "runtime" / "data" / "futures_cn" / "tick",)
 
 
 STATUS_RANK = {"OK": 2, "WARN": 1, "FAIL": 0}
 STATUS_COLORS = {"OK": "#16a34a", "WARN": "#f59e0b", "FAIL": "#dc2626"}
+SNAPSHOT_SCHEMA_VERSION = "research_health_canonical_paths_v3"
 
 
 COPY = {
@@ -97,7 +107,15 @@ This tab answers: *will the page run correctly and fast enough?*
         "fail": "Failures",
         "latest_run": "Latest Run",
         "api_readiness": "API Readiness",
-        "api_readiness_note": "US equities and US options are API-backed lanes. They are shown here because missing credentials can block the next research phase without affecting the current bundled Chinese futures dataset.",
+        "api_readiness_note": "Provider-level readiness for market data endpoints and local data sources. This checks credentials and adapter wiring without making live network calls.",
+        "provider_api": "Provider / API",
+        "data_folder_overview": "Runtime Data Folder Coverage",
+        "folder": "Folder",
+        "timeframe": "Timeframe",
+        "file_count": "Files",
+        "latest_file": "Latest File",
+        "latest_update": "Latest Update",
+        "system_checks": "System Checks",
         "checks": "Checks",
         "path": "Path",
         "status": "Status",
@@ -113,6 +131,10 @@ This tab answers: *will the page run correctly and fast enough?*
         "role": "Role",
         "description": "Description",
         "region": "Region",
+        "family": "Family",
+        "currency": "Currency",
+        "broker": "Broker / Route",
+        "execution": "Execution",
         "settlement": "Settlement",
         "price_limit": "Price Limit",
         "vectorizable": "Vectorizable",
@@ -166,7 +188,7 @@ This table is the bridge between model files and reproducible research.
         "model_health_warn": "Model research is partly reproducible: versioned artifacts exist, but at least one legacy path or compatibility link needs attention.",
         "model_health_fail": "Model evidence is not fully reproducible yet: at least one registered model artifact points to a missing file.",
         "infra_title": "Runtime Infrastructure",
-        "no_tick": "No tick parquet files found in runtime/data/alpha_lab/market_data/tick.",
+        "no_tick": "No tick parquet files found in runtime/data/futures_cn/tick.",
     },
     "ZH": {
         "title": "数据健康检查",
@@ -216,7 +238,15 @@ This table is the bridge between model files and reproducible research.
         "fail": "失败",
         "latest_run": "最近运行",
         "api_readiness": "API 就绪度",
-        "api_readiness_note": "美股与美股期权属于 API 数据线。这里单独展示，是因为缺少密钥会影响下一阶段研究，但不代表当前本地中国期货样本不可用。",
+        "api_readiness_note": "按供应商/API 汇总市场数据端点与本地数据源就绪度。这里检查密钥和适配器接入，不发起实时网络请求。",
+        "provider_api": "供应商 / API",
+        "data_folder_overview": "运行数据文件夹覆盖",
+        "folder": "文件夹",
+        "timeframe": "周期",
+        "file_count": "文件数",
+        "latest_file": "最新文件",
+        "latest_update": "最近更新",
+        "system_checks": "系统检查",
         "checks": "检查项",
         "path": "路径",
         "status": "状态",
@@ -232,6 +262,10 @@ This table is the bridge between model files and reproducible research.
         "role": "定位",
         "description": "说明",
         "region": "地区",
+        "family": "资产族",
+        "currency": "默认币种",
+        "broker": "券商 / 通道",
+        "execution": "执行通道",
         "settlement": "交割/结算",
         "price_limit": "涨跌停",
         "vectorizable": "可向量化",
@@ -285,7 +319,7 @@ This table is the bridge between model files and reproducible research.
         "model_health_warn": "模型研究部分可复现：版本化产物存在，但至少一个旧路径或兼容链接需要关注。",
         "model_health_fail": "模型证据尚未完全可复现：至少一个已注册模型产物指向缺失文件。",
         "infra_title": "运行基础设施",
-        "no_tick": "runtime/data/alpha_lab/market_data/tick 中未找到 tick parquet 文件。",
+        "no_tick": "runtime/data/futures_cn/tick 中未找到 tick parquet 文件。",
     },
 }
 
@@ -367,7 +401,7 @@ class SystemHealthView:
         self.logs_dir = Path(LOGS_DIR)
         self.runtime_data_root = Path(ALPHA_RUNTIME_DATA_ROOT)
         self.runtime_artifact_root = Path(ALPHA_RUNTIME_ARTIFACT_ROOT)
-        self.data_cache = self.runtime_data_root / "market_data" / "tick"
+        self.data_cache = futures_cn_tick_roots()[0]
         legacy_native_dir = os.environ.get("OQP_LEGACY_QUANT_CORE_DIR", "").strip()
         self.legacy_cpp_dir = Path(legacy_native_dir) if legacy_native_dir else None
 
@@ -380,45 +414,54 @@ class SystemHealthView:
             st.cache_data.clear()
             st.rerun()
 
-        snapshot = self._load_snapshot(str(self.base_dir), str(self.db_path))
+        snapshot = self._load_snapshot(
+            str(self.base_dir),
+            str(self.db_path),
+            str(self.runtime_data_root),
+            str(self.runtime_artifact_root),
+            SNAPSHOT_SCHEMA_VERSION,
+        )
         checks = snapshot["checks"]
         market_df = snapshot["markets"]
         parquet_df = snapshot["parquets"]
         tick_df = snapshot["ticks"]
+        data_folder_df = snapshot["data_folders"]
         db_df = snapshot["db"]
         returns_df = snapshot["returns"]
         return_issues_df = snapshot["return_issues"]
         latent_df = snapshot["latent"]
         model_df = snapshot["models"]
-        infra_df = snapshot["infra"]
 
         tabs = st.tabs(
             [
                 copy["overview"],
                 copy["data_sources"],
                 copy["research_artifacts"],
-                copy["runtime"],
             ]
         )
         with tabs[0]:
-            self._render_overview(checks, snapshot, tpl, copy)
+            self._render_overview(checks, snapshot, data_folder_df, tpl, copy)
         with tabs[1]:
             self._render_help_toggle(copy["data_sources_help_title"], copy["data_sources_help"])
             self._render_market_coverage(market_df, copy)
             st.divider()
-            self._render_parquet_table(parquet_df, copy["data_matrix"], copy)
+            raw_folders = (
+                data_folder_df[data_folder_df["asset_class"] != "CORE"].copy()
+                if "asset_class" in data_folder_df.columns
+                else pd.DataFrame()
+            )
+            self._render_data_folder_overview(raw_folders, copy)
             st.divider()
             self._render_tick_table(tick_df, copy)
         with tabs[2]:
             self._render_help_toggle(copy["artifacts_help_title"], copy["artifacts_help"])
+            self._render_parquet_table(parquet_df, copy["data_matrix"], copy)
+            st.divider()
             self._render_database(db_df, returns_df, return_issues_df, copy)
             st.divider()
             self._render_latent(latent_df, copy)
             st.divider()
             self._render_models(model_df, copy)
-        with tabs[3]:
-            self._render_help_toggle(copy["runtime_help_title"], copy["runtime_help"])
-            self._render_infra(infra_df, copy)
 
     @staticmethod
     def _render_page_header(copy: dict) -> None:
@@ -445,7 +488,14 @@ class SystemHealthView:
         else:
             st.success(copy["status_ok"])
 
-    def _render_overview(self, checks: pd.DataFrame, snapshot: dict, tpl: str, copy: dict) -> None:
+    def _render_overview(
+        self,
+        checks: pd.DataFrame,
+        snapshot: dict,
+        data_folder_df: pd.DataFrame,
+        tpl: str,
+        copy: dict,
+    ) -> None:
         score = self._readiness_score(checks)
         ok_count = int((checks["status"] == "OK").sum())
         warn_count = int((checks["status"] == "WARN").sum())
@@ -459,31 +509,32 @@ class SystemHealthView:
         self._render_latest_run(cols[4], snapshot.get("latest_run", "N/A"), copy)
 
         self._render_health_callout(score, warn_count, fail_count, copy)
-        self._render_api_readiness(snapshot.get("markets", pd.DataFrame()), copy)
+        self._render_api_readiness(snapshot.get("api_readiness", pd.DataFrame()), copy)
+        self._render_data_folder_overview(data_folder_df, copy)
 
         area_counts = (
             checks.groupby(["area", "status"], as_index=False)
             .agg(count=("check", "count"))
             .sort_values(["area", "status"])
         )
-        fig = px.bar(
-            area_counts,
-            x="area",
-            y="count",
-            color="status",
-            color_discrete_map=STATUS_COLORS,
-            template=tpl,
-            title=copy["checks"],
-        )
-        fig.update_layout(height=340, margin=dict(l=10, r=10, t=50, b=20), xaxis_title="", yaxis_title="")
-        st.plotly_chart(fig, width="stretch")
-
-        st.dataframe(
-            self._style_status(checks[["area", "check", "status", "detail", "path", "modified"]]),
-            width="stretch",
-            hide_index=True,
-            height=520,
-        )
+        with st.expander(copy["system_checks"], expanded=False):
+            fig = px.bar(
+                area_counts,
+                x="area",
+                y="count",
+                color="status",
+                color_discrete_map=STATUS_COLORS,
+                template=tpl,
+                title=copy["checks"],
+            )
+            fig.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=20), xaxis_title="", yaxis_title="")
+            st.plotly_chart(fig, width="stretch")
+            st.dataframe(
+                self._style_status(checks[["area", "check", "status", "detail", "path", "modified"]]),
+                width="stretch",
+                hide_index=True,
+                height=360,
+            )
 
     @staticmethod
     def _render_latest_run(container, latest_run: Any, copy: dict) -> None:
@@ -532,19 +583,25 @@ class SystemHealthView:
             return parsed.strftime("%Y-%m-%d %H:%M")
         return text
 
-    def _render_api_readiness(self, market_df: pd.DataFrame, copy: dict) -> None:
-        if market_df.empty or "asset_class" not in market_df.columns:
-            return
-        api_df = market_df[market_df["asset_class"].isin(["EQUITY_US", "OPTIONS_US"])].copy()
+    @staticmethod
+    def _whole_number_label(value: Any) -> str:
+        if value is None or pd.isna(value):
+            return ""
+        try:
+            return f"{int(float(value)):,}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    def _render_api_readiness(self, api_df: pd.DataFrame, copy: dict) -> None:
         if api_df.empty:
             return
 
         st.markdown(f"### {copy['api_readiness']}")
         st.caption(copy["api_readiness_note"])
         display_cols = [
-            "status",
-            "asset_class",
             "provider",
+            "asset_class",
+            "status",
             "data_mode",
             "env_status",
             "env_source",
@@ -552,16 +609,75 @@ class SystemHealthView:
         ]
         display = api_df[[col for col in display_cols if col in api_df.columns]].rename(
             columns={
-                "status": copy["status"],
+                "provider": copy["provider_api"],
                 "asset_class": copy["asset_class"],
-                "provider": copy["provider"],
+                "status": copy["status"],
                 "data_mode": copy["data_mode"],
                 "env_status": copy["env_status"],
                 "env_source": copy["env_source"],
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=150)
+        st.dataframe(
+            self._style_status(display),
+            width="stretch",
+            hide_index=True,
+            height=220,
+            column_config={
+                copy["provider_api"]: st.column_config.TextColumn(width="medium"),
+                copy["asset_class"]: st.column_config.TextColumn(width="medium"),
+                copy["detail"]: st.column_config.TextColumn(width="large"),
+            },
+        )
+
+    def _render_data_folder_overview(self, data_folder_df: pd.DataFrame, copy: dict) -> None:
+        st.markdown(f"### {copy['data_folder_overview']}")
+        if data_folder_df.empty:
+            st.info("No runtime data folders found.")
+            return
+        display_cols = [
+            "status",
+            "asset_class",
+            "timeframe",
+            "path",
+            "file_count",
+            "latest_update",
+            "date_range",
+            "asset_count",
+            "rows",
+            "latest_file",
+            "detail",
+        ]
+        display = data_folder_df[[col for col in display_cols if col in data_folder_df.columns]].rename(
+            columns={
+                "status": copy["status"],
+                "asset_class": copy["asset_class"],
+                "timeframe": copy["timeframe"],
+                "path": copy["path"],
+                "file_count": copy["file_count"],
+                "latest_update": copy["latest_update"],
+                "date_range": copy["date_range"],
+                "asset_count": copy["assets"],
+                "rows": copy["rows"],
+                "latest_file": copy["latest_file"],
+                "detail": copy["detail"],
+            }
+        )
+        for col in [copy["file_count"], copy["assets"], copy["rows"]]:
+            if col in display.columns:
+                display[col] = display[col].map(self._whole_number_label)
+        st.dataframe(
+            self._style_status(display),
+            width="stretch",
+            hide_index=True,
+            height=360,
+            column_config={
+                copy["latest_update"]: st.column_config.TextColumn(width="medium"),
+                copy["date_range"]: st.column_config.TextColumn(width="large"),
+                copy["latest_file"]: st.column_config.TextColumn(width="large"),
+                copy["detail"]: st.column_config.TextColumn(width="large"),
+            },
+        )
 
     def _render_parquet_table(self, df: pd.DataFrame, title: str, copy: dict) -> None:
         st.markdown(f"### {title}")
@@ -610,6 +726,10 @@ class SystemHealthView:
                 "role": copy["role"],
                 "description": copy["description"],
                 "region": copy["region"],
+                "instrument_family": copy["family"],
+                "default_currency": copy["currency"],
+                "broker": copy["broker"],
+                "execution": copy["execution"],
                 "t_settlement": copy["settlement"],
                 "price_limit": copy["price_limit"],
                 "vectorizable": copy["vectorizable"],
@@ -729,7 +849,14 @@ class SystemHealthView:
 
     @staticmethod
     @st.cache_data(show_spinner=False)
-    def _load_snapshot(base_dir: str, db_path: str) -> dict[str, Any]:
+    def _load_snapshot(
+        base_dir: str,
+        db_path: str,
+        data_root: str = "",
+        artifact_root: str = "",
+        schema_version: str = SNAPSHOT_SCHEMA_VERSION,
+    ) -> dict[str, Any]:
+        _ = (data_root, artifact_root, schema_version)
         view = SystemHealthView(base_dir=base_dir, db_path=db_path)
         checks: list[HealthCheck] = []
 
@@ -739,7 +866,10 @@ class SystemHealthView:
         tick_df, tick_checks = view._tick_snapshot()
         checks.extend(tick_checks)
 
+        data_folder_df = view._runtime_data_folder_snapshot()
+
         market_df = view._market_coverage_snapshot(parquet_df, tick_df)
+        api_readiness_df = view._api_provider_snapshot(market_df)
 
         db_df, db_checks, latest_run = view._database_schema_snapshot()
         checks.extend(db_checks)
@@ -762,8 +892,10 @@ class SystemHealthView:
         return {
             "checks": checks_df,
             "markets": market_df,
+            "api_readiness": api_readiness_df,
             "parquets": parquet_df,
             "ticks": tick_df,
+            "data_folders": data_folder_df,
             "db": db_df,
             "returns": returns_df,
             "return_issues": return_issues_df,
@@ -807,7 +939,7 @@ class SystemHealthView:
         return pd.DataFrame(rows), checks
 
     def _tick_snapshot(self) -> tuple[pd.DataFrame, list[HealthCheck]]:
-        files = sorted(self.data_cache.glob("*tick*.parquet"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+        files = discover_futures_cn_tick_files()
         rows = []
         checks = []
         for idx, path in enumerate(files):
@@ -852,6 +984,212 @@ class SystemHealthView:
             checks.append(HealthCheck("Tick Data", "Latest tick cache", "WARN", "No tick parquet files found.", self._rel(self.data_cache)))
         return pd.DataFrame(rows), checks
 
+    def _api_provider_snapshot(self, market_df: pd.DataFrame) -> pd.DataFrame:
+        market_by_asset = (
+            market_df.set_index("asset_class").to_dict("index")
+            if not market_df.empty and "asset_class" in market_df.columns
+            else {}
+        )
+
+        fmp_present, fmp_source = self._env_key_presence("FMP_API_KEY")
+        massive_present, massive_source = self._env_key_presence("MASSIVE_API_KEY")
+        options_present, options_source = self._env_key_presence("OPTIONS_API_KEY")
+        flat_access_present, flat_access_source = self._env_key_presence("MASSIVE_FLAT_FILES_ACCESS_KEY_ID")
+        flat_secret_present, flat_secret_source = self._env_key_presence("MASSIVE_FLAT_FILES_SECRET_ACCESS_KEY")
+        qmt_present, qmt_source = self._env_key_presence("QMT_API_TOKEN")
+        wind_present, wind_source = self._env_key_presence("WIND_API_KEY")
+
+        massive_sources = self._merge_sources([massive_source, options_source])
+        massive_ready = massive_present or options_present
+        flat_ready = flat_access_present and flat_secret_present
+        flat_partial = flat_access_present or flat_secret_present
+        cn_vendor_ready = qmt_present or wind_present
+
+        local_status = self._status_for_assets(market_by_asset, ["FUTURES_CN"])
+        local_detail = str(market_by_asset.get("FUTURES_CN", {}).get("detail", "Local runtime files are checked through folder coverage."))
+
+        rows = [
+            {
+                "provider": "Local runtime files",
+                "asset_class": "FUTURES_CN",
+                "status": local_status,
+                "data_mode": "Local parquet matrices + tick cache",
+                "env_status": "No API key required",
+                "env_source": "workspace files",
+                "detail": local_detail,
+            },
+            {
+                "provider": "FMP",
+                "asset_class": "EQUITY_US, EQUITY_HK; fundamentals/news",
+                "status": "OK" if fmp_present else "WARN",
+                "data_mode": "REST API for US/HK equities, fundamentals, ratings, and news",
+                "env_status": "FMP_API_KEY configured" if fmp_present else "Missing FMP_API_KEY",
+                "env_source": fmp_source,
+                "detail": (
+                    "Credentials are present; adapter URL and JSON helpers are wired."
+                    if fmp_present
+                    else "Add FMP_API_KEY before US equity/fundamental research relies on vendor data."
+                ),
+            },
+            {
+                "provider": "Massive",
+                "asset_class": "OPTIONS_US; US market data where available",
+                "status": "OK" if massive_ready else "WARN",
+                "data_mode": "REST option chains plus optional historical flat files",
+                "env_status": self._massive_env_status(massive_ready, flat_ready, flat_partial),
+                "env_source": self._merge_sources([massive_sources, flat_access_source, flat_secret_source]),
+                "detail": (
+                    "REST credentials are present; flat-file credentials are also complete."
+                    if massive_ready and flat_ready
+                    else "REST credentials are present; flat-file credentials can be added for historical chain ingestion."
+                    if massive_ready
+                    else "Add MASSIVE_API_KEY or OPTIONS_API_KEY before US options research relies on vendor chains."
+                ),
+            },
+            {
+                "provider": "Yahoo Finance",
+                "asset_class": "EQUITY_US, EQUITY_HK; OPTIONS_US fallback",
+                "status": "WARN",
+                "data_mode": "Public fallback adapter",
+                "env_status": "No API key required",
+                "env_source": "public endpoint",
+                "detail": "Adapter shell is available, but dashboard-grade history/quote methods are not fully wired in this runtime yet.",
+            },
+            {
+                "provider": "Wind / QMT",
+                "asset_class": "EQUITY_CN, OPTIONS_CN; future CN execution lanes",
+                "status": "OK" if cn_vendor_ready else "WARN",
+                "data_mode": "Planned CN vendor/broker data and execution bridge",
+                "env_status": "QMT/Wind credential configured" if cn_vendor_ready else "Missing QMT_API_TOKEN or WIND_API_KEY",
+                "env_source": self._merge_sources([qmt_source, wind_source]),
+                "detail": (
+                    "At least one CN vendor/broker credential is present; adapters still need lane-specific validation."
+                    if cn_vendor_ready
+                    else "Chinese equity/options taxonomy is active, but live vendor/broker data is not configured yet."
+                ),
+            },
+        ]
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _status_for_assets(market_by_asset: dict[str, dict[str, Any]], asset_classes: list[str]) -> str:
+        statuses = [str(market_by_asset.get(asset, {}).get("status", "WARN")) for asset in asset_classes]
+        if any(status == "FAIL" for status in statuses):
+            return "FAIL"
+        if any(status == "WARN" for status in statuses):
+            return "WARN"
+        return "OK"
+
+    @staticmethod
+    def _massive_env_status(rest_ready: bool, flat_ready: bool, flat_partial: bool) -> str:
+        rest_label = "MASSIVE/OPTIONS API key configured" if rest_ready else "Missing MASSIVE_API_KEY or OPTIONS_API_KEY"
+        if flat_ready:
+            return f"{rest_label}; flat files configured"
+        if flat_partial:
+            return f"{rest_label}; flat files partially configured"
+        return f"{rest_label}; flat files not configured"
+
+    def _runtime_data_folder_snapshot(self) -> pd.DataFrame:
+        rows = []
+        folder_specs = [
+            ("CORE", "feature_store", self.runtime_data_root / "feature_store", True),
+            ("CORE", "regime", self.runtime_data_root / "regime", True),
+            ("CORE", "metadata", self.runtime_data_root / "metadata", False),
+            ("CORE", "universes", self.runtime_data_root / "universes", False),
+        ]
+        for asset_class in ["FUTURES_CN", "EQUITY_CN", "OPTIONS_CN", "EQUITY_US", "OPTIONS_US"]:
+            asset_root = self.runtime_data_root / asset_class.lower()
+            for timeframe in ["daily", "intraday", "tick", "api_cache"]:
+                path = asset_root / timeframe
+                if path.exists() or timeframe in {"daily", "tick", "api_cache"}:
+                    folder_specs.append((asset_class, timeframe, path, asset_class == "FUTURES_CN" and timeframe == "daily"))
+
+        seen: set[Path] = set()
+        for asset_class, timeframe, path, required in folder_specs:
+            if path in seen:
+                continue
+            seen.add(path)
+            rows.append(self._summarize_data_folder(asset_class, timeframe, path, required=required))
+
+        out = pd.DataFrame(rows)
+        if not out.empty:
+            status_rank = {"FAIL": 0, "WARN": 1, "OK": 2}
+            out["status_rank"] = out["status"].map(status_rank).fillna(1)
+            out = out.sort_values(["status_rank", "asset_class", "timeframe"], ascending=[True, True, True])
+            out = out.drop(columns=["status_rank"])
+        return out
+
+    def _summarize_data_folder(self, asset_class: str, timeframe: str, path: Path, *, required: bool) -> dict:
+        if not path.exists():
+            return {
+                "asset_class": asset_class,
+                "timeframe": timeframe,
+                "status": "FAIL" if required else "WARN",
+                "path": self._rel(path),
+                "file_count": 0,
+                "latest_file": "",
+                "latest_update": "",
+                "rows": np.nan,
+                "date_range": "",
+                "asset_count": np.nan,
+                "detail": "Required folder missing." if required else "Folder not populated yet.",
+            }
+
+        files = [
+            file
+            for file in path.rglob("*")
+            if file.is_file() and file.name != ".DS_Store"
+        ]
+        data_files = [
+            file
+            for file in files
+            if file.suffix.lower() in {".parquet", ".csv", ".json", ".db", ".sqlite", ".joblib", ".pkl"}
+        ]
+        if not data_files:
+            return {
+                "asset_class": asset_class,
+                "timeframe": timeframe,
+                "status": "WARN" if not required else "FAIL",
+                "path": self._rel(path),
+                "file_count": 0,
+                "latest_file": "",
+                "latest_update": "",
+                "rows": np.nan,
+                "date_range": "",
+                "asset_count": np.nan,
+                "detail": "Folder exists but has no recognized data files.",
+            }
+
+        latest = max(data_files, key=lambda file: file.stat().st_mtime)
+        parquet_files = [file for file in data_files if file.suffix.lower() == ".parquet"]
+        summary = self._parquet_summary(latest) if latest.suffix.lower() == ".parquet" else {}
+        if not summary and parquet_files:
+            latest_parquet = max(parquet_files, key=lambda file: file.stat().st_mtime)
+            summary = self._parquet_summary(latest_parquet)
+
+        stale_days = 14 if timeframe == "tick" else 30
+        stale = self._is_data_stale(summary.get("date_max"), max_days=stale_days)
+        status = "WARN" if stale else "OK"
+        detail = (
+            f"Latest data max date is older than {stale_days} days."
+            if stale
+            else f"{len(data_files):,} data files found."
+        )
+
+        return {
+            "asset_class": asset_class,
+            "timeframe": timeframe,
+            "status": status,
+            "path": self._rel(path),
+            "file_count": len(data_files),
+            "latest_file": latest.name,
+            "latest_update": self._mtime_label(latest),
+            "rows": summary.get("rows", np.nan),
+            "date_range": summary.get("date_range", ""),
+            "asset_count": summary.get("asset_count", np.nan),
+            "detail": detail,
+        }
+
     def _market_coverage_snapshot(self, parquet_df: pd.DataFrame, tick_df: pd.DataFrame) -> pd.DataFrame:
         rows = []
 
@@ -872,9 +1210,9 @@ class SystemHealthView:
             self._market_row(
                 asset_class="FUTURES_CN",
                 status=futures_status,
-                role="Current local/static research dataset",
-                data_mode="Local parquet matrices + tick cache",
-                provider="Bundled/static files",
+                role=LANE_METADATA.get("FUTURES_CN", {}).get("role", "Current local/static research dataset"),
+                data_mode=LANE_METADATA.get("FUTURES_CN", {}).get("data_mode", "Local parquet matrices + tick cache"),
+                provider=LANE_METADATA.get("FUTURES_CN", {}).get("provider", "Bundled/static files"),
                 env_status="No API key required",
                 env_source="workspace files",
                 detail=futures_detail,
@@ -886,9 +1224,9 @@ class SystemHealthView:
             self._market_row(
                 asset_class="EQUITY_US",
                 status="OK" if fmp_present else "WARN",
-                role="Next-phase US equities lane",
-                data_mode="API-backed; no public data bundled",
-                provider="FMP",
+                role=LANE_METADATA.get("EQUITY_US", {}).get("role", "US equities lane"),
+                data_mode=LANE_METADATA.get("EQUITY_US", {}).get("data_mode", "API-backed equity data"),
+                provider=LANE_METADATA.get("EQUITY_US", {}).get("provider", "FMP"),
                 env_status="FMP_API_KEY configured" if fmp_present else "Missing FMP_API_KEY",
                 env_source=fmp_source,
                 detail=(
@@ -896,6 +1234,19 @@ class SystemHealthView:
                     if fmp_present
                     else "Add FMP_API_KEY to the parent .env or runtime environment before US equity pages rely on live/vendor data."
                 ),
+            )
+        )
+
+        rows.append(
+            self._market_row(
+                asset_class="EQUITY_CN",
+                status="WARN",
+                role=LANE_METADATA.get("EQUITY_CN", {}).get("role", "Next-phase China A-share lane"),
+                data_mode=LANE_METADATA.get("EQUITY_CN", {}).get("data_mode", "Vendor/API-backed A-share bars"),
+                provider=LANE_METADATA.get("EQUITY_CN", {}).get("provider", "TBD"),
+                env_status="Vendor/API adapter not configured",
+                env_source="not found",
+                detail="China A-share taxonomy is active, but no dedicated data vendor or local A-share matrix is wired into the research runtime yet.",
             )
         )
 
@@ -914,9 +1265,9 @@ class SystemHealthView:
             self._market_row(
                 asset_class="OPTIONS_US",
                 status="OK" if massive_present else "WARN",
-                role="Next-phase US options lane",
-                data_mode="API-backed option chains; event-driven/non-vectorized",
-                provider="Massive",
+                role=LANE_METADATA.get("OPTIONS_US", {}).get("role", "US options lane"),
+                data_mode=LANE_METADATA.get("OPTIONS_US", {}).get("data_mode", "API-backed option chains"),
+                provider=LANE_METADATA.get("OPTIONS_US", {}).get("provider", "Massive"),
                 env_status=("MASSIVE_API_KEY configured; " if massive_present else "Missing MASSIVE_API_KEY; ") + flat_status,
                 env_source=self._merge_sources([massive_source, flat_sources]),
                 detail=(
@@ -924,6 +1275,19 @@ class SystemHealthView:
                     if massive_present
                     else "Add MASSIVE_API_KEY before options pages rely on vendor data. Flat-file keys can later support historical chain ingestion."
                 ),
+            )
+        )
+
+        rows.append(
+            self._market_row(
+                asset_class="OPTIONS_CN",
+                status="WARN",
+                role=LANE_METADATA.get("OPTIONS_CN", {}).get("role", "Next-phase Chinese options lane"),
+                data_mode=LANE_METADATA.get("OPTIONS_CN", {}).get("data_mode", "Vendor/API-backed option chains; event-driven/non-vectorized"),
+                provider=LANE_METADATA.get("OPTIONS_CN", {}).get("provider", "TBD"),
+                env_status="Vendor/API adapter not configured",
+                env_source="not found",
+                detail="Chinese options taxonomy is active and marked event-driven/non-vectorized; add a vendor adapter and contract-specific multiplier/fee inputs before relying on options backtests.",
             )
         )
 
@@ -941,12 +1305,17 @@ class SystemHealthView:
         detail: str,
     ) -> dict[str, Any]:
         taxonomy = ASSET_TAXONOMY.get(asset_class, {})
+        lane = LANE_METADATA.get(asset_class, {})
         return {
             "status": status,
             "asset_class": asset_class,
             "role": role,
             "description": taxonomy.get("description", ""),
             "region": taxonomy.get("region", ""),
+            "instrument_family": taxonomy.get("instrument_family", ""),
+            "default_currency": taxonomy.get("default_currency", ""),
+            "broker": lane.get("broker", "TBD"),
+            "execution": lane.get("execution", "TBD"),
             "t_settlement": taxonomy.get("t_settlement", ""),
             "price_limit": self._yes_no(taxonomy.get("price_limit")),
             "vectorizable": self._yes_no(taxonomy.get("vectorizable")),
@@ -1203,7 +1572,7 @@ class SystemHealthView:
                     "path": self._rel(path),
                     "modified": self._mtime_label(path),
                     "size_mb": self._size_mb(path),
-                    "detail": "Found under ui_v2; Regime Analysis expects runtime/artifacts/research/alpha_lab/latent_factors.",
+                    "detail": "Found under ui_v2; Regime Analysis expects runtime/artifacts/research/latent_factors.",
                 }
             )
 
@@ -1381,7 +1750,7 @@ class SystemHealthView:
         )
         checks.append(HealthCheck("Infra", "quant_core import", import_status, import_detail, "oqp.native"))
 
-        optuna_db = self.repo_root / "runtime" / "db" / "research" / "alpha_lab" / "optimization_memory.db"
+        optuna_db = self.repo_root / "runtime" / "db" / "research" / "optimization_memory.db"
         rows.append(
             {
                 "check": "optimization_memory.db",
@@ -1477,6 +1846,7 @@ class SystemHealthView:
         if value is None or pd.isna(value) or not str(value).strip():
             return None
         path = Path(str(value))
+        path = self._rewrite_legacy_workspace_path(path)
         if path.is_absolute():
             return path
         if path.parts and path.parts[0] == "execution_logs":
@@ -1487,6 +1857,7 @@ class SystemHealthView:
     def _resolve_returns_path(self, run_id: str, returns_file_path: str | None) -> Path:
         if returns_file_path is not None and not pd.isna(returns_file_path) and str(returns_file_path).strip():
             path = Path(str(returns_file_path))
+            path = self._rewrite_legacy_artifact_path(path)
             if path.is_absolute():
                 return path
             if path.parts and path.parts[0] == "execution_logs":
@@ -1494,6 +1865,52 @@ class SystemHealthView:
             repo_path = self.repo_root / path
             return repo_path if repo_path.exists() else self.base_dir / path
         return self.logs_dir / "returns" / f"returns_{run_id}.csv"
+
+    def _rewrite_legacy_artifact_path(self, path: Path) -> Path:
+        return self._rewrite_legacy_workspace_path(path)
+
+    def _rewrite_legacy_workspace_path(self, path: Path) -> Path:
+        parts = path.parts
+        for idx in range(len(parts) - 3):
+            if parts[idx : idx + 4] == (
+                "runtime",
+                "artifacts",
+                "research",
+                "alpha_lab",
+            ):
+                return Path(*parts[: idx + 3], *parts[idx + 4 :])
+            if parts[idx : idx + 4] == (
+                "runtime",
+                "data",
+                "alpha_lab",
+                "feature_store",
+            ):
+                return Path(*parts[: idx + 2], *parts[idx + 3 :])
+            if parts[idx : idx + 4] == (
+                "runtime",
+                "data",
+                "alpha_lab",
+                "regime",
+            ):
+                return Path(*parts[: idx + 2], *parts[idx + 3 :])
+            if parts[idx : idx + 4] == (
+                "runtime",
+                "data",
+                "alpha_lab",
+                "market_data",
+            ):
+                market_tail = parts[idx + 4 :]
+                if market_tail and market_tail[0] == "tick":
+                    return Path(*parts[: idx + 2], "futures_cn", "tick", *market_tail[1:])
+                return Path(*parts[: idx + 2], *market_tail)
+            if parts[idx : idx + 4] == (
+                "runtime",
+                "db",
+                "research",
+                "alpha_lab",
+            ):
+                return Path(*parts[: idx + 3], *parts[idx + 4 :])
+        return path
 
     def _is_data_stale(self, date_value: Any, max_days: int = 30) -> bool:
         if date_value is None or pd.isna(date_value):

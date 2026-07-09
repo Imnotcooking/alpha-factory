@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 
 import numpy as np
@@ -39,8 +40,72 @@ def _cached_feature_columns(matrix_path: str, matrix_mtime: float):
 
 
 class MLView:
+    MODEL_MARKERS = (
+        "run_ml_backtest",
+        "ml_backtest",
+        "machine learning",
+        "机器学习",
+        "xgboost",
+        "lightgbm",
+        "lgbm",
+        "catboost",
+        "random forest",
+        "random_forest",
+        "supervised",
+        "model driven",
+        "model_driven",
+        "feature importance",
+        "feature_importance",
+        "shap",
+        "ml router",
+        "ml_router",
+        "ensemble",
+    )
+    MULTI_FACTOR_MODEL_MARKERS = (
+        "multi factor",
+        "multi_factor",
+        "multifactor",
+        "multi-factor",
+        "factor blend",
+        "factor_blend",
+        "stacked",
+        "stacking",
+        "meta model",
+        "meta_model",
+        "allocator model",
+        "allocator_model",
+        "allocation model",
+        "allocation_model",
+    )
+    MODEL_METADATA_FIELDS = (
+        "backtest_engine",
+        "runner",
+        "runner_name",
+        "engine_type",
+        "model_type",
+        "model_family",
+        "strategy_type",
+        "research_family",
+        "stat_research_family",
+        "execution_mode",
+        "evaluation_geometry",
+    )
+
     def __init__(self, data_manager):
         self.dm = data_manager
+
+    def should_render_tab(self, run_id: str, run_metadata: pd.Series) -> bool:
+        """Return whether the selected run has model explainability to inspect.
+
+        Current ML runs are discovered by their feature-importance artifact.
+        Future multi-factor/model allocator engines can opt in through explicit
+        metadata such as ``backtest_engine=multi_factor_ml`` or ``model_type``.
+        """
+        factor_id = self._metadata_value(run_metadata, "factor_id")
+        has_importance = self._has_feature_importance(run_id, factor_id, include_factor_level=True)
+        if has_importance:
+            return True
+        return self._metadata_declares_model_explainability(run_metadata)
 
     def render(
         self,
@@ -51,11 +116,71 @@ class MLView:
     ):
         t = TEXT[lang] if lang in TEXT else TEXT["EN"]
 
-        self._render_feature_importance(run_id, run_metadata, theme_mode, t)
+        if not self.should_render_tab(run_id, run_metadata):
+            st.info(t.get("ml_missing", "No Feature Importance data found."))
+            return
+
+        has_feature_importance = self._render_feature_importance(run_id, run_metadata, theme_mode, t)
+        if not has_feature_importance:
+            return
         st.markdown("---")
         self._render_ic_decay_panel(run_id, run_metadata, theme_mode, t)
         st.markdown("---")
         self._render_shap_dna(theme_mode)
+
+    def _metadata_value(self, run_metadata: pd.Series | dict, field: str):
+        if run_metadata is None:
+            return None
+        if hasattr(run_metadata, "get"):
+            value = run_metadata.get(field, None)
+        else:
+            value = None
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return value
+
+    def _has_feature_importance(
+        self,
+        run_id: str,
+        factor_id: str | None,
+        *,
+        include_factor_level: bool,
+    ) -> bool:
+        checker = getattr(self.dm, "has_feature_importance", None)
+        if callable(checker):
+            return bool(
+                checker(
+                    run_id,
+                    factor_id=factor_id,
+                    include_factor_level=include_factor_level,
+                )
+            )
+        importance_df = self.dm.get_feature_importance(run_id, factor_id=factor_id)
+        return not importance_df.empty
+
+    def _metadata_declares_model_explainability(self, run_metadata: pd.Series | dict) -> bool:
+        fields = [
+            self._metadata_value(run_metadata, field)
+            for field in self.MODEL_METADATA_FIELDS
+        ]
+        return any(self._contains_model_marker(value) for value in fields)
+
+    def _contains_model_marker(self, value) -> bool:
+        if value is None:
+            return False
+        text = str(value).strip().lower()
+        if not text:
+            return False
+        normalized = re.sub(r"[\s_\-/]+", " ", text)
+        markers = self.MODEL_MARKERS + self.MULTI_FACTOR_MODEL_MARKERS
+        if any(marker.replace("_", " ") in normalized for marker in markers):
+            return True
+        return bool(re.search(r"(^|[^a-z])ml([^a-z]|$)", normalized))
 
     def _render_feature_importance(
         self,
@@ -63,7 +188,7 @@ class MLView:
         run_metadata: pd.Series,
         theme_mode: str,
         t: dict,
-    ):
+    ) -> bool:
         st.markdown(f"### {t.get('tab_ml', 'ML Feature Importance')}")
         st.caption(t.get("ml_caption", "Visualizing the internal decision-making weights of the Machine Learning model."))
 
@@ -71,14 +196,14 @@ class MLView:
         importance_df = self.dm.get_feature_importance(run_id, factor_id=factor_id)
         if importance_df.empty or not {"feature", "importance"}.issubset(importance_df.columns):
             st.info(t.get("ml_missing", "No Feature Importance data found."))
-            return
+            return False
 
         plot_df = importance_df.copy()
         plot_df["importance"] = pd.to_numeric(plot_df["importance"], errors="coerce")
         plot_df = plot_df.dropna(subset=["feature", "importance"]).sort_values("importance", ascending=True)
         if plot_df.empty:
             st.info(t.get("ml_missing", "No Feature Importance data found."))
-            return
+            return False
 
         fig = px.bar(
             plot_df.tail(20),
@@ -98,6 +223,7 @@ class MLView:
             coloraxis_showscale=False,
         )
         st.plotly_chart(fig, width="stretch")
+        return True
 
     def _render_ic_decay_panel(
         self,

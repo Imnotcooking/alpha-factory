@@ -18,8 +18,8 @@ from oqp.brokers import (  # noqa: E402
     BrokerHealth,
     IBKRBrokerAdapter,
     fetch_ibkr_readonly_portfolio_snapshot,
-    ibkr_account_summary_to_middle_office_metrics,
-    ibkr_position_to_middle_office_row,
+    ibkr_account_summary_to_live_metrics,
+    ibkr_position_to_live_position_row,
 )
 from oqp.domain import AssetClass, Instrument, Position  # noqa: E402
 
@@ -118,7 +118,7 @@ class FakeConnectedIB:
 
 
 class IBKRReadOnlyPortfolioTests(unittest.TestCase):
-    def test_converts_position_to_middle_office_row(self) -> None:
+    def test_converts_position_to_live_position_row(self) -> None:
         position = Position(
             instrument=Instrument(
                 symbol="MSFT",
@@ -132,7 +132,7 @@ class IBKRReadOnlyPortfolioTests(unittest.TestCase):
             metadata={"unrealized_pnl": None},
         )
 
-        row = ibkr_position_to_middle_office_row(position)
+        row = ibkr_position_to_live_position_row(position)
 
         self.assertEqual(row["Ticker"], "MSFT")
         self.assertEqual(row["Shares"], 3.0)
@@ -142,8 +142,8 @@ class IBKRReadOnlyPortfolioTests(unittest.TestCase):
         self.assertEqual(row["AssetType"], "Equity")
         self.assertEqual(row["Broker"], "IBKR Live")
 
-    def test_converts_account_summary_to_middle_office_metrics(self) -> None:
-        metrics = ibkr_account_summary_to_middle_office_metrics(
+    def test_converts_account_summary_to_live_metrics(self) -> None:
+        metrics = ibkr_account_summary_to_live_metrics(
             AccountSummary(
                 broker="ibkr",
                 account_id="DU123",

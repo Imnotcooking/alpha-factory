@@ -12,6 +12,20 @@ from oqp.market.cache import (
     refresh_yahoo_market_cache,
     write_market_history,
 )
+from oqp.market.events import (
+    DEFAULT_MARKET_EVENTS_PATH,
+    MARKET_EVENT_COLUMNS,
+    event_provider_plan,
+    load_market_events,
+    seed_market_events_template,
+)
+from oqp.market.monitor import (
+    DEFAULT_MARKET_MONITOR_UNIVERSE,
+    MarketMonitorInstrument,
+    market_monitor_refresh_symbols,
+    market_monitor_snapshot,
+    market_monitor_universe,
+)
 from oqp.market.vol_forecast import (
     DEFAULT_VOL_FORECAST_DB_PATH,
     DEFAULT_VOL_FORECAST_HORIZONS,
@@ -24,6 +38,8 @@ from oqp.market.vol_forecast import (
 )
 from oqp.market.volatility import (
     DEFAULT_PRICE_HISTORY_PATHS,
+    bollinger_squeeze_metrics,
+    commodity_channel_index,
     enrich_with_historical_volatility,
     historical_volatility,
     historical_volatility_frame,
@@ -34,14 +50,21 @@ from oqp.market.volatility import (
 __all__ = [
     "DEFAULT_MARKET_CACHE_MAX_AGE_HOURS",
     "DEFAULT_MARKET_CACHE_PATH",
+    "DEFAULT_MARKET_EVENTS_PATH",
+    "DEFAULT_MARKET_MONITOR_UNIVERSE",
     "DEFAULT_PRICE_HISTORY_PATHS",
     "DEFAULT_VOL_FORECAST_DB_PATH",
     "DEFAULT_VOL_FORECAST_HORIZONS",
+    "MARKET_EVENT_COLUMNS",
     "VolatilityForecast",
+    "MarketMonitorInstrument",
+    "bollinger_squeeze_metrics",
     "cache_age_hours",
+    "commodity_channel_index",
     "enrich_with_historical_volatility",
     "ensure_market_cache_schema",
     "ensure_vol_forecast_schema",
+    "event_provider_plan",
     "fetch_yahoo_history",
     "forecast_volatility_models",
     "historical_volatility",
@@ -49,11 +72,16 @@ __all__ = [
     "load_cached_market_history",
     "load_cached_price_history",
     "load_latest_volatility_forecasts",
+    "load_market_events",
     "load_price_history",
+    "market_monitor_refresh_symbols",
+    "market_monitor_snapshot",
+    "market_monitor_universe",
     "market_cache_status",
     "normalize_price_history",
     "refresh_yahoo_market_cache",
     "select_forecast_vol",
+    "seed_market_events_template",
     "write_market_history",
     "write_volatility_forecasts",
 ]

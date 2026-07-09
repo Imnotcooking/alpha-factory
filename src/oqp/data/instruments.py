@@ -269,16 +269,43 @@ class ChineseFuturesRegistry(BaseRegistry):
         return {k: v['fee_close_today'] for k, v in self.FEE_DICT.items()}
 
 # ---------------------------------------------------------
-# 4. US Equities Registry (Safe Placeholder)
+# 4. Equity / Options Registries (Safe Placeholders)
 # ---------------------------------------------------------
-class USEquitiesRegistry(BaseRegistry):
+class GenericEquitiesRegistry(BaseRegistry):
+    def __init__(
+        self,
+        *,
+        exchange: str,
+        sector: str = "Equity",
+        margin_rate: float = 0.25,
+        fee_open: float = 0.00005,
+        fee_close_history: float | None = None,
+        fee_close_today: float | None = None,
+        tick_size: float = 0.01,
+    ) -> None:
+        self.exchange = exchange
+        self.sector = sector
+        self.margin_rate = margin_rate
+        self.fee_open = fee_open
+        self.fee_close_history = fee_open if fee_close_history is None else fee_close_history
+        self.fee_close_today = self.fee_close_history if fee_close_today is None else fee_close_today
+        self.tick_size = tick_size
+
     def get_profile(self, ticker: str) -> InstrumentProfile:
-        # Notice we do NOT strip numbers here! '3M' stays '3M'.
+        # Do not strip numbers here: symbols such as ``3M`` must remain intact.
         return InstrumentProfile(
-            ticker=ticker, exchange="US", sector="Equity", multiplier=1, tick_size=0.01,
-            margin_rate=0.25, fee_type="ratio", fee_open=0.00005, fee_close_history=0.00005, fee_close_today=0.00005
+            ticker=str(ticker),
+            exchange=self.exchange,
+            sector=self.sector,
+            multiplier=1,
+            tick_size=self.tick_size,
+            margin_rate=self.margin_rate,
+            fee_type="ratio",
+            fee_open=self.fee_open,
+            fee_close_history=self.fee_close_history,
+            fee_close_today=self.fee_close_today,
         )
-        
+
     def get_sector_map(self) -> Dict[str, str]: return {}
     def get_margin_map(self) -> Dict[str, float]: return {}
     def get_multiplier_map(self) -> Dict[str, int]: return {}
@@ -287,6 +314,78 @@ class USEquitiesRegistry(BaseRegistry):
     def get_fee_open_map(self) -> Dict[str, float]: return {}
     def get_fee_close_history_map(self) -> Dict[str, float]: return {}
     def get_fee_close_today_map(self) -> Dict[str, float]: return {}
+
+
+class USEquitiesRegistry(GenericEquitiesRegistry):
+    def __init__(self) -> None:
+        super().__init__(exchange="US", margin_rate=0.25, fee_open=0.00005)
+
+
+class CNEquitiesRegistry(GenericEquitiesRegistry):
+    def __init__(self) -> None:
+        super().__init__(
+            exchange="CN",
+            margin_rate=1.0,
+            fee_open=0.0003,
+            fee_close_history=0.0008,
+            fee_close_today=0.0008,
+        )
+
+
+class HKEquitiesRegistry(GenericEquitiesRegistry):
+    def __init__(self) -> None:
+        super().__init__(exchange="HK", margin_rate=0.25, fee_open=0.0001)
+
+
+class GenericOptionsRegistry(BaseRegistry):
+    def __init__(
+        self,
+        *,
+        exchange: str,
+        multiplier: int,
+        margin_rate: float,
+        tick_size: float,
+        fee_open: float,
+    ) -> None:
+        self.exchange = exchange
+        self.multiplier = multiplier
+        self.margin_rate = margin_rate
+        self.tick_size = tick_size
+        self.fee_open = fee_open
+
+    def get_profile(self, ticker: str) -> InstrumentProfile:
+        return InstrumentProfile(
+            ticker=str(ticker),
+            exchange=self.exchange,
+            sector="Option",
+            multiplier=self.multiplier,
+            tick_size=self.tick_size,
+            margin_rate=self.margin_rate,
+            fee_type="fixed",
+            fee_open=self.fee_open,
+            fee_close_history=self.fee_open,
+            fee_close_today=self.fee_open,
+        )
+
+    def get_sector_map(self) -> Dict[str, str]: return {}
+    def get_margin_map(self) -> Dict[str, float]: return {}
+    def get_multiplier_map(self) -> Dict[str, int]: return {}
+    def get_fee_profile_map(self) -> Dict[str, Dict[str, Any]]: return {}
+    def get_fee_type_map(self) -> Dict[str, str]: return {}
+    def get_fee_open_map(self) -> Dict[str, float]: return {}
+    def get_fee_close_history_map(self) -> Dict[str, float]: return {}
+    def get_fee_close_today_map(self) -> Dict[str, float]: return {}
+
+
+class USOptionsRegistry(GenericOptionsRegistry):
+    def __init__(self) -> None:
+        super().__init__(exchange="US", multiplier=100, margin_rate=1.0, tick_size=0.01, fee_open=0.65)
+
+
+class CNOptionsRegistry(GenericOptionsRegistry):
+    def __init__(self) -> None:
+        super().__init__(exchange="CN", multiplier=10_000, margin_rate=1.0, tick_size=0.0001, fee_open=5.0)
+
 
 # ---------------------------------------------------------
 # 5. The Master Factory Router
@@ -302,6 +401,7 @@ class InstrumentMaster:
             print(f"⚠️ WARNING: '{asset_class}' not in ASSET_TAXONOMY. Defaulting to FUTURES_CN.")
             asset_class = "FUTURES_CN"
             
+        self.asset_class = asset_class
         self.taxonomy = ASSET_TAXONOMY[asset_class]
         
         # Route to the correct physics engine
@@ -309,6 +409,14 @@ class InstrumentMaster:
             self.registry = ChineseFuturesRegistry()
         elif "EQUITY_US" in asset_class:
             self.registry = USEquitiesRegistry()
+        elif "EQUITY_CN" in asset_class:
+            self.registry = CNEquitiesRegistry()
+        elif "EQUITY_HK" in asset_class:
+            self.registry = HKEquitiesRegistry()
+        elif "OPTIONS_US" in asset_class:
+            self.registry = USOptionsRegistry()
+        elif "OPTIONS_CN" in asset_class:
+            self.registry = CNOptionsRegistry()
         else:
             # Fallback
             self.registry = ChineseFuturesRegistry()

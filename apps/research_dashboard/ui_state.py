@@ -1,4 +1,12 @@
+import sys
+from pathlib import Path
+
 import streamlit as st
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SRC_ROOT = _REPO_ROOT / "src"
+if str(_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRC_ROOT))
 
 try:
     from config import get_theme_css
@@ -35,6 +43,6 @@ def render_global_controls_in_sidebar():
     st.sidebar.button(
         lang_label,
         on_click=toggle_lang,
-        width="stretch",
         key="global_sidebar_lang_toggle",
+        width="stretch",
     )

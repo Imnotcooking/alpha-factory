@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from oqp.data.futures_cn import normalize_futures_cn_daily_frame
 from oqp.data.instruments import InstrumentMaster
 
 
@@ -65,19 +66,8 @@ def load_futures_daily_data(path: str | Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Risk breadth data source not found: {path}")
 
-    df = pd.read_parquet(path)
-    required = {"date", "ticker", "close"}
-    missing = sorted(required - set(df.columns))
-    if missing:
-        raise ValueError(f"Risk breadth input is missing columns: {missing}")
-
-    out = df[["date", "ticker", "close"]].copy()
-    out["date"] = pd.to_datetime(out["date"], errors="coerce")
-    out["ticker"] = out["ticker"].astype(str)
-    out["close"] = pd.to_numeric(out["close"], errors="coerce")
-    out = out.dropna(subset=["date", "ticker", "close"])
-    out = out[out["close"] > 0]
-    return out.sort_values(["ticker", "date"]).reset_index(drop=True)
+    df = normalize_futures_cn_daily_frame(pd.read_parquet(path))
+    return df[["date", "ticker", "close"]].copy()
 
 
 def compute_log_return_matrix(df: pd.DataFrame) -> pd.DataFrame:

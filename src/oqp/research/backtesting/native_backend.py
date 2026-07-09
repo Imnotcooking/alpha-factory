@@ -7,6 +7,7 @@ from types import ModuleType
 
 import numpy as np
 
+from oqp.contracts.market_vertical import ASSET_TAXONOMY
 from oqp.native import load_quant_core
 from oqp.research.backtesting.models import (
     BacktestBackendMetadata,
@@ -18,7 +19,14 @@ from oqp.research.backtesting.models import (
 class NativeBacktestBackend:
     backend_id = "native"
     backend_name = "OQP Native C++ Backtest Backend"
-    required_features = ("ExecutionEngine", "FuturesMargin", "StochasticTCAWrapper")
+    required_features = (
+        "CryptoOrderBookTCA",
+        "EquitiesMargin",
+        "ExecutionEngine",
+        "FuturesMargin",
+        "SquareRootTCA",
+        "StochasticTCAWrapper",
+    )
 
     def __init__(
         self,
@@ -39,6 +47,11 @@ class NativeBacktestBackend:
         return self._quant_core
 
     def run(self, request: ExecutionBacktestRequest) -> ExecutionBacktestResult:
+        if not request.native_compatible:
+            raise ValueError(
+                f"{request.asset_class} is routed as {request.backtest_route}; "
+                "native vectorized backtesting is not enabled for this market vertical."
+            )
         qc = self.quant_core
         engine = self._build_default_engine(qc, request)
 
@@ -90,26 +103,44 @@ class NativeBacktestBackend:
                 arrays.date_ids,
             )
 
-        return self._coerce_result(native_result, qc)
+        return self._coerce_result(native_result, qc, request)
 
     def _build_default_engine(self, qc: ModuleType, request: ExecutionBacktestRequest):
-        tca = qc.StochasticTCAWrapper(1e-4, 0.1, 2.0, 60)
-        margin = qc.FuturesMargin(maintenance_req=0.05)
+        taxonomy = ASSET_TAXONOMY.get(request.asset_class, {})
+        if taxonomy.get("instrument_family") == "crypto":
+            tca = qc.CryptoOrderBookTCA(bps=0.0005, penalty=2.0)
+            margin = qc.FuturesMargin(maintenance_req=0.10)
+        elif taxonomy.get("instrument_family") == "equity":
+            tca = qc.SquareRootTCA(bps=0.0001, gamma=0.05)
+            req = 0.0 if taxonomy.get("region") == "CN" else 0.25
+            margin = qc.EquitiesMargin(maintenance_req=req)
+        else:
+            tca = qc.StochasticTCAWrapper(1e-4, 0.1, 2.0, 60)
+            margin = qc.FuturesMargin(maintenance_req=0.05)
         return qc.ExecutionEngine(
             tca_model=tca,
             margin_model=margin,
             initial_capital=float(request.initial_capital),
             deadband=float(request.deadband),
-            enforce_price_limits=False,
-            enforce_t1=False,
+            enforce_price_limits=bool(taxonomy.get("price_limit", False)),
+            enforce_t1=bool(taxonomy.get("t_settlement", 0) == 1),
         )
 
-    def _coerce_result(self, native_result, qc: ModuleType) -> ExecutionBacktestResult:
+    def _coerce_result(
+        self,
+        native_result,
+        qc: ModuleType,
+        request: ExecutionBacktestRequest,
+    ) -> ExecutionBacktestResult:
         backend = BacktestBackendMetadata(
             backend_id=self.backend_id,
             backend_name=self.backend_name,
             native_module=qc.__name__,
             native_source_path=str(getattr(qc, "__file__", "")) or None,
+            metadata={
+                "asset_class": request.asset_class,
+                "backtest_route": request.backtest_route,
+            },
         )
 
         if not isinstance(native_result, dict):

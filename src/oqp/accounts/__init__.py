@@ -1,6 +1,7 @@
 """Unified account snapshot contracts and storage helpers."""
 
 from oqp.accounts.converters import (
+    account_snapshot_from_broker_snapshot,
     account_snapshot_from_ibkr_readonly,
     account_trade_events_from_proposal_review,
     account_snapshot_from_live_positions_frame,
@@ -99,6 +100,7 @@ __all__ = [
     "account_position_totals",
     "account_position_history_by_asset",
     "account_position_history_by_symbol",
+    "account_snapshot_from_broker_snapshot",
     "account_snapshot_from_ibkr_readonly",
     "account_profit_breakdown",
     "account_symbol_exposure_pivot",

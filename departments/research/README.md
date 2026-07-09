@@ -21,9 +21,13 @@ The old `alpha_research_lab/` folder was deliberately split by responsibility:
 | Backtest runner scripts | `scripts/research/` | Commit lightweight runners; keep outputs in runtime. |
 | Private live factor recipes | `departments/research/factors/` | Private by default; do not publish live edge. |
 | Public sanitized examples | `departments/research/retired_factors/` | Commit only reviewed examples. |
-| Market data, feature matrices, regime outputs | `runtime/data/alpha_lab/` | Local/private runtime state. |
-| Research databases | `runtime/db/research/alpha_lab/` | Local/private runtime state. |
-| Backtest returns, trades, TCA, models, diagnostics | `runtime/artifacts/research/alpha_lab/` | Local/private runtime artifacts. |
+| CN futures market data | `runtime/data/futures_cn/{daily,intraday,tick}/` | Local/private vendor/static market data. |
+| CN equity market data | `runtime/data/equity_cn/{daily,intraday,tick}/` | Planned local QMT/static market data. |
+| CN option market data | `runtime/data/options_cn/{daily,tick}/` | Planned local commodity option chain data. |
+| US API caches | `runtime/data/{equity_us,options_us}/api_cache/` | Optional local cache only; vendors remain API-owned. |
+| Feature matrices, regime outputs, research metadata | `runtime/data/` | Local/private generated research state. |
+| Research databases | `runtime/db/research/` | Local/private runtime state. |
+| Backtest returns, trades, TCA, models, diagnostics | `runtime/artifacts/research/` | Local/private runtime artifacts. |
 | Dashboard/job logs | `runtime/logs/` | Local/private operational logs. |
 
 ## Active Subfolders
@@ -58,7 +62,9 @@ Policy docs now live directly under this folder:
 2. Put private factor recipes in
    `departments/research/factors/`.
 3. Put generated data, databases, models, and backtest outputs under
-   `runtime/`.
+   `runtime/`. Market data is market-first: for example CN futures files
+   belong under `runtime/data/futures_cn/{daily,intraday,tick}/`; generated
+   feature/regime research state stays under `runtime/data/`.
 4. Put Streamlit page code under `apps/research_dashboard/`.
 5. Put shared dashboard text/config under `src/oqp/ui/`.
 6. Do not recreate root `data/`, root `logs/`, or the deleted

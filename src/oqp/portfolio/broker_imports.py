@@ -1,4 +1,4 @@
-"""Broker export parsers for middle-office portfolio ingestion."""
+"""Broker export parsers for portfolio ingestion."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pandas as pd
 from oqp.portfolio.symbols import to_yahoo_ticker
 from oqp.portfolio.snapshots import (
     PortfolioPositionSnapshot,
-    position_snapshots_to_legacy_frame,
+    position_snapshots_to_broker_position_frame,
 )
 
 
@@ -60,7 +60,7 @@ def parse_futubull_csv(
     *,
     greeks_provider: GreeksProvider | None = None,
 ) -> pd.DataFrame:
-    """Parse a Futubull holdings CSV into the legacy middle-office shape."""
+    """Parse a Futubull holdings CSV into the broker-position import shape."""
 
     raw = _read_csv(file_path)
     _require_columns(raw, FUTUBULL_REQUIRED_COLUMNS, source="Futubull")
@@ -104,7 +104,7 @@ def parse_futubull_csv(
             )
         )
 
-    return position_snapshots_to_legacy_frame(positions)
+    return position_snapshots_to_broker_position_frame(positions)
 
 
 def parse_trading212_csv(
@@ -179,7 +179,7 @@ def parse_trading212_csv(
         )
 
     return Trading212ImportResult(
-        positions=position_snapshots_to_legacy_frame(positions),
+        positions=position_snapshots_to_broker_position_frame(positions),
         banked_profit=_trading212_banked_profit(df),
     )
 

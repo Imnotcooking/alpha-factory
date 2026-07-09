@@ -1,8 +1,7 @@
-"""Credential lookup helpers for phased migration.
+"""Credential lookup helpers for centralized runtime settings.
 
-Environment variables and ``.env`` values always win. Legacy JSON files are
-read as a transition path only so existing local dashboards keep working while
-the repo moves toward centralized runtime config.
+Environment variables and ``.env`` values always win. Optional JSON sources are
+supported only when a caller explicitly supplies canonical runtime config files.
 """
 
 from __future__ import annotations

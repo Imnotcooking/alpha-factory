@@ -14,7 +14,7 @@ from oqp.research.artifacts import FileFingerprint, fingerprint_file, normalize_
 
 MODEL_REGISTRY_TABLE = "model_artifacts"
 DEFAULT_RESEARCH_DB_PATH = Path(
-    os.environ.get("ALPHA_RESEARCH_DB_PATH", "runtime/db/research/alpha_lab/research_memory.db")
+    os.environ.get("ALPHA_RESEARCH_DB_PATH", "runtime/db/research/research_memory.db")
 )
 
 

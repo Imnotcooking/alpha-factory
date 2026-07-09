@@ -6,6 +6,8 @@ from oqp.research.contracts import (
     FactorContract,
     attach_factor_contract_attrs,
     resolve_factor_contract,
+    resolve_factor_supported_markets,
+    validate_factor_market_compatibility,
 )
 from oqp.research.backtesting import (
     AbsoluteReturnBenchmark,
@@ -20,6 +22,10 @@ from oqp.research.backtesting import (
     ExecutionModeFactory,
     ExecutionModeResult,
     ExecutionTradePolicy,
+    DXYBenchmark,
+    HSIBenchmark,
+    NanhuaBenchmark,
+    QQQBenchmark,
     RiskFreeRateBenchmark,
     RiskDeskExecutionMode,
     SPYBenchmark,
@@ -29,6 +35,7 @@ from oqp.research.backtesting import (
     attach_capital_attrs,
     attach_trade_policy_attrs,
     dynamic_equal_weight_benchmark,
+    resolve_default_benchmark_policy,
     resolve_execution_capital,
     resolve_execution_trade_policy,
 )
@@ -257,6 +264,10 @@ __all__ = [
     "ResearchTrialRecord",
     "RiskDeskExecutionMode",
     "RiskFreeRateBenchmark",
+    "DXYBenchmark",
+    "HSIBenchmark",
+    "NanhuaBenchmark",
+    "QQQBenchmark",
     "SPREAD_CONTRACT_VALUE",
     "SPREAD_LINEAR_PRICE",
     "SPREAD_PRICE_RATIO",
@@ -363,6 +374,8 @@ __all__ = [
     "refresh_multiple_testing_adjustments",
     "register_model_artifact",
     "resolve_factor_contract",
+    "resolve_factor_supported_markets",
+    "resolve_default_benchmark_policy",
     "resolve_execution_capital",
     "resolve_execution_trade_policy",
     "run_relationship_dkf",
@@ -381,4 +394,5 @@ __all__ = [
     "tag_feature_family",
     "train_temporal_vqvae_latents",
     "update_evidence_ticket_status",
+    "validate_factor_market_compatibility",
 ]
