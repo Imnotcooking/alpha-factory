@@ -58,11 +58,11 @@ mixing UI workflow state into the statistical trial ledger.
 | Page | Role | Primary Dependencies | Smoke Coverage |
 |---|---|---|---|
 | `01_Data_Health` | Check data/artifact readiness before research | runtime data, artifact roots, DB schema, native extension status | system health snapshot smoke |
-| `02_Pulse_Scan` | Discover directionless tick pulses before forming hypotheses | `runtime/data/futures_cn/tick/`, `src/oqp/research/tick_pulse/` | preflight wrapper/import tests |
-| `03_Tick_Event_Study` | Test tick-pulse directional hypotheses and saved seeds | tick data, research cache, `src/oqp/research/tick_pulse/` | preflight wrapper/import tests |
+| `02_Pattern_Lab` | Discover daily, intraday, and tick-level patterns before forming hypotheses | `runtime/data/futures_cn/daily/`, `runtime/data/futures_cn/intraday/`, `runtime/data/futures_cn/tick/`, `src/oqp/research/tick_pulse/` | preflight wrapper/import tests |
+| `03_Intraday_Event_Study` | Test intraday/tick-pulse directional hypotheses and saved seeds | tick data, research cache, `src/oqp/research/tick_pulse/` | preflight wrapper/import tests |
 | `04_Arbitrage_Lab` | Scan pair/spread dislocations and relationship stability | `runtime/data/futures_cn/daily/`, `src/oqp/research/state_space/` | real-data relationship scan |
 | `05_Regime_Analysis` | Interpret GMM regimes and latent/VQ cross-checks | feature matrix, GMM probabilities, latent artifacts | real-data regime/latent smoke |
-| `06_Risk_Breadth` | Estimate independent risk-factor breadth | `runtime/data/futures_cn/daily/`, `src/oqp/risk/factor_breadth.py` | real-data breadth smoke |
+| `06_Market_Breadth_Lab` | Estimate market covariance breadth across vectorizable asset classes | `runtime/data/*/daily/`, `src/oqp/risk/factor_breadth.py` | real-data breadth smoke |
 | `07_Feature_Review` | Rank feature quality, redundancy, MDA, latent diagnostics | feature matrices, `src/oqp/research/ml/` | real-data governance smoke |
 | `08_Factor_Review` | Review factor evidence and candidate status | `research_memory.db`, factor files, diagnostics artifacts | `test_research_dashboard_real_data_smoke.py` board load |
 | `09_Strategy_Comparison` | Compare completed backtest runs | research DB, returns/trades artifacts | real-data run ledger load |

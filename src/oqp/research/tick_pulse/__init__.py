@@ -3,6 +3,7 @@
 from oqp.research.tick_pulse.asset_ranker import (
     REQUIRED_DAILY_COLUMNS,
     discover_daily_universe_files,
+    discover_intraday_universe_files,
     filter_ranked_assets,
     load_daily_universe,
     rank_daily_asset_volatility,
@@ -182,6 +183,7 @@ __all__ = [
     "contract_summary",
     "detect_directionless_pulse_events",
     "discover_daily_universe_files",
+    "discover_intraday_universe_files",
     "ensure_hypothesis_seed_table",
     "filter_ranked_assets",
     "filter_scope",

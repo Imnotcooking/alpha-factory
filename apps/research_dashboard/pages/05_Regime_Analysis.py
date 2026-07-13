@@ -525,7 +525,7 @@ def render_timeline(merged_data: pd.DataFrame):
     fig_ts.update_yaxes(
         title_text=t.get("regime_stress_title", "Z-Scores"), row=3, col=1
     )
-    st.plotly_chart(fig_ts, use_container_width=True)
+    st.plotly_chart(fig_ts, width="stretch")
 
     with st.expander(lt["timeline_help_title"]):
         st.markdown(lt["timeline_help"])
@@ -563,7 +563,7 @@ def render_phase_space(merged_data: pd.DataFrame):
         ),
         legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5),
     )
-    st.plotly_chart(fig_phase, use_container_width=True)
+    st.plotly_chart(fig_phase, width="stretch")
     with st.expander(lt["phase_help_title"]):
         st.markdown(lt["phase_help"])
 
@@ -611,7 +611,7 @@ def render_radar(merged_data: pd.DataFrame):
             title="", orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
         ),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_vq_cross_check(
@@ -646,7 +646,7 @@ def render_vq_cross_check(
             fig_usage.update_layout(
                 height=330, yaxis_tickformat=".0%", margin=dict(l=10, r=10, t=20, b=10)
             )
-            st.plotly_chart(fig_usage, use_container_width=True)
+            st.plotly_chart(fig_usage, width="stretch")
 
     with right:
         st.markdown(f"#### {lt['vq_gmm']}")
@@ -674,7 +674,7 @@ def render_vq_cross_check(
                 fig_gmm.update_layout(
                     template=tpl, height=330, margin=dict(l=10, r=10, t=20, b=10)
                 )
-                st.plotly_chart(fig_gmm, use_container_width=True)
+                st.plotly_chart(fig_gmm, width="stretch")
 
     st.markdown(f"#### {lt['vq_timeline']}")
     if vq_asset.empty or "vq_code" not in vq_asset.columns:
@@ -709,7 +709,7 @@ def render_vq_cross_check(
     fig_vq.update_layout(template=tpl, height=430, margin=dict(l=10, r=10, t=20, b=10))
     fig_vq.update_yaxes(title_text="Price", row=1, col=1)
     fig_vq.update_yaxes(title_text="VQ Code", row=2, col=1)
-    st.plotly_chart(fig_vq, use_container_width=True)
+    st.plotly_chart(fig_vq, width="stretch")
 
 
 def render_meta_diagnostics(merged_data: pd.DataFrame):
@@ -753,7 +753,7 @@ def render_meta_diagnostics(merged_data: pd.DataFrame):
             margin=dict(l=10, r=10, t=20, b=10),
             yaxis_title="Future Return (bps)",
         )
-        st.plotly_chart(fig_box, use_container_width=True)
+        st.plotly_chart(fig_box, width="stretch")
 
     with right:
         st.markdown(f"#### {lt['meta_rates']}")
@@ -775,7 +775,7 @@ def render_meta_diagnostics(merged_data: pd.DataFrame):
                 yaxis_title="Stress Rate",
                 showlegend=False,
             )
-            st.plotly_chart(fig_rates, use_container_width=True)
+            st.plotly_chart(fig_rates, width="stretch")
     st.dataframe(
         by_state.style.format(
             {
@@ -785,7 +785,7 @@ def render_meta_diagnostics(merged_data: pd.DataFrame):
                 "avg_future_abs_move": "{:.2%}",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -817,7 +817,7 @@ The regime input pipeline uses winsorized and smoothed microstructure features, 
             margin=dict(t=30, l=10, r=10, b=10),
             showlegend=False,
         )
-        col.plotly_chart(fig, use_container_width=True)
+        col.plotly_chart(fig, width="stretch")
 
 
 def render_gmm_density(merged_data: pd.DataFrame):
@@ -875,7 +875,7 @@ def render_gmm_density(merged_data: pd.DataFrame):
             camera=dict(eye=dict(x=1.5, y=-1.5, z=0.6)),
         ),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     with st.expander(lt["density_help_title"]):
         st.markdown(lt["density_help"])
 
@@ -921,7 +921,7 @@ def render_state_profiler(merged_data: pd.DataFrame):
                     "Trend_Efficiency": "{:.3f}",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     with right:
@@ -945,7 +945,7 @@ def render_state_profiler(merged_data: pd.DataFrame):
             },
         )
         fig.update_layout(height=310, margin=dict(t=10, l=10, r=10, b=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 matrix_path = os.path.join(

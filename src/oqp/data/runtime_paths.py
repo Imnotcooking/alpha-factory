@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from oqp.config import REPO_ROOT
+from oqp.contracts.market_vertical import normalize_market_vertical
 
 
 DEFAULT_FUTURES_CN_DAILY_FILENAME = "全市场_1d_index_20180101_20260602.parquet"
@@ -25,6 +26,16 @@ FUTURES_CN_INTRADAY_DATA_ROOT = _path_from_env(
 FUTURES_CN_TICK_DATA_ROOT = _path_from_env(
     os.environ.get("FUTURES_CN_TICK_DATA_ROOT", "runtime/data/futures_cn/tick")
 )
+
+
+def asset_class_runtime_data_root(asset_class: str, timeframe: str = "daily") -> Path:
+    """Return the canonical runtime data folder for an asset class/timeframe."""
+
+    normalized = normalize_market_vertical(asset_class).lower()
+    timeframe = str(timeframe).strip().lower()
+    if not timeframe:
+        timeframe = "daily"
+    return REPO_ROOT / "runtime" / "data" / normalized / timeframe
 
 
 def futures_cn_daily_roots() -> tuple[Path, ...]:
@@ -75,6 +86,28 @@ def discover_futures_cn_daily_files(
         )
     )
     return files
+
+
+def discover_asset_class_files(
+    asset_class: str,
+    *,
+    timeframe: str = "daily",
+    patterns: tuple[str, ...] | None = None,
+    include_csv: bool = False,
+) -> list[Path]:
+    """Find local market data files for a taxonomy asset class."""
+
+    normalized = normalize_market_vertical(asset_class)
+    if normalized == "FUTURES_CN" and timeframe == "daily":
+        return discover_futures_cn_daily_files(patterns=patterns, include_csv=include_csv)
+
+    search_patterns = patterns or ("*.parquet",)
+    if include_csv:
+        search_patterns = (*search_patterns, "*.csv")
+    return _discover_files_from_roots(
+        (asset_class_runtime_data_root(normalized, timeframe),),
+        search_patterns,
+    )
 
 
 def _discover_files_from_roots(

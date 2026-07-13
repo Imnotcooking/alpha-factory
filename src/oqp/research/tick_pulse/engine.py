@@ -338,7 +338,7 @@ def evaluate_seed_hypothesis(
     seed: dict,
     min_success_ticks: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Evaluate a Pulse Discovery seed as a simple deterministic hypothesis."""
+    """Evaluate a saved discovery seed as a simple deterministic hypothesis."""
     rule = seed.get("rule", {}) if isinstance(seed, dict) else {}
     behavior = str(rule.get("behavior") or seed.get("behavior") or "continuation")
     direction_filter = str(rule.get("direction_filter") or seed.get("pulse_direction") or "Any")

@@ -14,12 +14,17 @@ UI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if UI_DIR not in sys.path:
     sys.path.insert(0, UI_DIR)
 
-from config import BASE_DIR, LOGS_DIR, TEXT  # noqa: E402
+from config import BASE_DIR, DB_PATH, LOGS_DIR, TEXT  # noqa: E402
 
 try:
     from oqp.contracts.market_vertical import ASSET_TAXONOMY
 except Exception:  # pragma: no cover - keeps standalone dashboard launches alive.
     ASSET_TAXONOMY = {}
+
+try:
+    from views.system_health_view import SystemHealthView
+except Exception:  # pragma: no cover - assumptions view can run without health module.
+    SystemHealthView = None
 
 
 class AssumptionsView:
@@ -70,7 +75,7 @@ class AssumptionsView:
                     st.markdown(f"#### {copy.get('assumptions_available', 'Available manifests')}")
                     st.dataframe(
                         index.loc[:, ["run_id", "factor_id", "asset_class", "execution_mode", "modified_at"]],
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         height=260,
                     )
@@ -93,6 +98,7 @@ class AssumptionsView:
                 copy,
             )
         self._render_section(copy.get("assumptions_data", "Data"), manifest.get("data", {}), copy)
+        self._render_data_health_assumptions(manifest, copy)
         self._render_section(copy.get("assumptions_signal", "Signal & execution"), manifest.get("signal_and_execution_mode", {}), copy)
         self._render_section(copy.get("assumptions_engine", "Execution engine"), manifest.get("execution_engine", {}), copy)
         if manifest.get("costs_and_slippage"):
@@ -373,7 +379,7 @@ class AssumptionsView:
         if frame.empty:
             st.info(copy.get("assumptions_no_values", "No recorded values."))
         else:
-            st.dataframe(frame, use_container_width=True, hide_index=True)
+            st.dataframe(frame, width="stretch", hide_index=True)
 
     def _render_costs_and_slippage(self, title: str, payload: Any, copy: dict[str, Any]) -> None:
         st.markdown(f"#### {title}")
@@ -388,7 +394,86 @@ class AssumptionsView:
         if frame.empty:
             st.info(copy.get("assumptions_no_values", "No recorded values."))
         else:
-            st.dataframe(frame, use_container_width=True, hide_index=True)
+            st.dataframe(frame, width="stretch", hide_index=True)
+
+    def _render_data_health_assumptions(self, manifest: dict[str, Any], copy: dict[str, Any]) -> None:
+        st.markdown(f"#### {copy.get('assumptions_data_health', 'Data Health')}")
+        st.caption(
+            copy.get(
+                "assumptions_data_health_note",
+                "Accounting views may forward-fill stale marks, while alpha views must block synthetic inputs.",
+            )
+        )
+        if SystemHealthView is None:
+            st.info(copy.get("assumptions_data_health_missing", "Data health snapshot is unavailable."))
+            return
+
+        try:
+            snapshot = SystemHealthView._load_snapshot(str(BASE_DIR), str(DB_PATH))
+        except Exception as exc:
+            st.info(f"{copy.get('assumptions_data_health_missing', 'Data health snapshot is unavailable.')}: {exc}")
+            return
+
+        folders = snapshot.get("data_folders", pd.DataFrame())
+        if folders.empty or "fresh_pct" not in folders.columns:
+            st.info(copy.get("assumptions_data_health_missing", "Data health snapshot is unavailable."))
+            return
+
+        data_section = manifest.get("data") or {}
+        source_path = str(data_section.get("source_path") or "")
+        asset_class = str(manifest.get("asset_class") or data_section.get("asset_class") or "")
+        scoped = folders.dropna(subset=["fresh_pct"]).copy()
+        if "asset_class" in scoped.columns:
+            scoped = scoped[scoped["asset_class"].astype(str).ne("CORE")]
+        if asset_class and "asset_class" in scoped.columns:
+            matched = scoped[scoped["asset_class"].astype(str).eq(asset_class)]
+            if not matched.empty:
+                scoped = matched
+        if source_path and "sample_file" in scoped.columns:
+            file_matched = scoped[scoped["sample_file"].astype(str).map(lambda value: bool(value and value in source_path))]
+            if not file_matched.empty:
+                scoped = file_matched
+
+        if scoped.empty:
+            st.info(copy.get("assumptions_data_health_missing", "Data health snapshot is unavailable."))
+            return
+
+        display_cols = [
+            "freshness_status",
+            "asset_class",
+            "timeframe",
+            "sample_file",
+            "fresh_pct",
+            "synthetic_pct",
+            "expired_rows",
+            "fill_policy",
+        ]
+        display = scoped[[col for col in display_cols if col in scoped.columns]].rename(
+            columns={
+                "freshness_status": copy.get("assumptions_health_status", "Status"),
+                "asset_class": copy.get("assumptions_health_asset", "Asset"),
+                "timeframe": copy.get("assumptions_health_timeframe", "Timeframe"),
+                "sample_file": copy.get("assumptions_health_file", "Sample file"),
+                "fresh_pct": copy.get("assumptions_health_fresh", "Fresh %"),
+                "synthetic_pct": copy.get("assumptions_health_synthetic", "Synthetic %"),
+                "expired_rows": copy.get("assumptions_health_expired", "Expired rows"),
+                "fill_policy": copy.get("assumptions_health_policy", "Fill policy"),
+            }
+        )
+        for col in [
+            copy.get("assumptions_health_fresh", "Fresh %"),
+            copy.get("assumptions_health_synthetic", "Synthetic %"),
+        ]:
+            if col in display.columns:
+                display[col] = pd.to_numeric(display[col], errors="coerce").map(
+                    lambda value: "" if pd.isna(value) else f"{value:.1%}"
+                )
+        expired_col = copy.get("assumptions_health_expired", "Expired rows")
+        if expired_col in display.columns:
+            display[expired_col] = pd.to_numeric(display[expired_col], errors="coerce").map(
+                lambda value: "" if pd.isna(value) else f"{int(value):,}"
+            )
+        st.dataframe(display, width="stretch", hide_index=True, height=180)
 
     def _key_value_frame(self, payload: Any) -> pd.DataFrame:
         if not isinstance(payload, dict) or not payload:

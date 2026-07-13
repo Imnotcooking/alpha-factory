@@ -69,11 +69,45 @@ class OptionBacktestResult:
     def to_returns_frame(self) -> pd.DataFrame:
         if self.equity_curve.empty:
             return pd.DataFrame(
-                columns=["date", "gross_return", "net_return", "portfolio_leverage", "daily_turnover"]
+                columns=[
+                    "date",
+                    "gross_return",
+                    "net_return",
+                    "portfolio_leverage",
+                    "daily_turnover",
+                    "long_weight",
+                    "short_weight",
+                    "long_notional",
+                    "short_notional",
+                    "gross_notional",
+                    "net_notional",
+                ]
             )
         out = self.equity_curve.loc[:, ["date", "equity", "gross_equity", "turnover", "gross_exposure"]].copy()
         out["gross_return"] = out["gross_equity"].pct_change().fillna(0.0)
         out["net_return"] = out["equity"].pct_change().fillna(0.0)
         out["portfolio_leverage"] = out["gross_exposure"] / out["equity"].replace(0, pd.NA)
         out["daily_turnover"] = out["turnover"] / out["equity"].replace(0, pd.NA)
-        return out.loc[:, ["date", "gross_return", "net_return", "portfolio_leverage", "daily_turnover"]]
+        out["long_notional"] = pd.to_numeric(out["gross_exposure"], errors="coerce").fillna(0.0)
+        out["short_notional"] = 0.0
+        out["gross_notional"] = out["long_notional"].abs() + out["short_notional"].abs()
+        out["net_notional"] = out["long_notional"] + out["short_notional"]
+        equity = pd.to_numeric(out["equity"], errors="coerce").replace(0.0, pd.NA)
+        out["long_weight"] = out["long_notional"] / equity
+        out["short_weight"] = out["short_notional"] / equity
+        return out.loc[
+            :,
+            [
+                "date",
+                "gross_return",
+                "net_return",
+                "portfolio_leverage",
+                "daily_turnover",
+                "long_weight",
+                "short_weight",
+                "long_notional",
+                "short_notional",
+                "gross_notional",
+                "net_notional",
+            ],
+        ]

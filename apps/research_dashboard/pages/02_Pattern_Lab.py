@@ -22,7 +22,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 if os.environ.get("OQP_EMBEDDED_STREAMLIT_PAGE") != "1":
-    st.set_page_config(page_title="Pulse Scan", layout="wide")
+    st.set_page_config(page_title="Pattern Lab", layout="wide")
 
 _CONFIG_PATH = Path(UI_DIR) / "config.py"
 _CONFIG_SPEC = importlib.util.spec_from_file_location("_ui_v2_config", _CONFIG_PATH)
@@ -121,6 +121,7 @@ def _render_section_context(section: str, t: dict) -> None:
     context_key = {
         "ranker": "ranker_context",
         "universe": "universe_context",
+        "clock": "clock_context",
         "single": "workspace_context",
         "cross": "cross_context",
     }.get(section)
@@ -167,6 +168,232 @@ def _render_pulse_validity_callout(
         st.success(t["validity_promising"])
     else:
         st.info(t["validity_ok"])
+
+
+def _clock_session_key(timestamp: pd.Timestamp) -> str:
+    hour = timestamp.hour + timestamp.minute / 60.0 + timestamp.second / 3600.0
+    if 9.0 <= hour < 11.5:
+        return "morning"
+    if 13.0 <= hour < 15.25:
+        return "afternoon"
+    if hour >= 21.0 or hour < 2.75:
+        return "night"
+    return "other"
+
+
+def _clock_session_label(session_key: str, t: dict) -> str:
+    return t.get(f"clock_session_{session_key}", session_key.title())
+
+
+def _infer_clock_tick_size(frame: pd.DataFrame) -> float:
+    if "tick_size_est" in frame.columns:
+        ticks = pd.to_numeric(frame["tick_size_est"], errors="coerce")
+        ticks = ticks.replace([np.inf, -np.inf], np.nan).dropna()
+        ticks = ticks[ticks > 0]
+        if not ticks.empty:
+            return float(ticks.median())
+
+    prices = pd.to_numeric(frame.get("last_price"), errors="coerce")
+    diffs = prices.diff().abs().replace([np.inf, -np.inf], np.nan).dropna()
+    diffs = diffs[diffs > 0]
+    if not diffs.empty:
+        return float(diffs.quantile(0.25))
+    return 1.0
+
+
+def _clock_edge_summary(scope: pd.DataFrame, min_bars: int) -> pd.DataFrame:
+    if scope.empty or not {"datetime", "last_price"}.issubset(scope.columns):
+        return pd.DataFrame()
+
+    work = scope.copy()
+    work["datetime"] = pd.to_datetime(work["datetime"], errors="coerce")
+    work["last_price"] = pd.to_numeric(work["last_price"], errors="coerce")
+    if "symbol" not in work.columns:
+        work["symbol"] = "selected"
+    work = work.dropna(subset=["datetime", "last_price"]).sort_values(
+        ["symbol", "datetime"]
+    )
+    if work.empty:
+        return pd.DataFrame()
+
+    pieces = []
+    for symbol, group in work.groupby("symbol", sort=False):
+        tick_size = _infer_clock_tick_size(group)
+        if not np.isfinite(tick_size) or tick_size <= 0:
+            tick_size = 1.0
+
+        bars = (
+            group.drop_duplicates("datetime")
+            .set_index("datetime")["last_price"]
+            .sort_index()
+            .resample("1min")
+            .last()
+            .dropna()
+        )
+        if len(bars) < max(3, min_bars):
+            continue
+
+        sample = pd.DataFrame(
+            {
+                "datetime": bars.index,
+                "move_ticks": bars.diff().to_numpy(dtype=float) / tick_size,
+            }
+        ).dropna()
+        if sample.empty:
+            continue
+
+        sample["hour"] = sample["datetime"].dt.hour.astype(int)
+        sample["hour_label"] = sample["hour"].map(lambda value: f"{value:02d}:00")
+        sample["session_key"] = sample["datetime"].map(_clock_session_key)
+        sample["abs_move_ticks"] = sample["move_ticks"].abs()
+
+        summary = (
+            sample.groupby(["session_key", "hour", "hour_label"], sort=True)
+            .agg(
+                bars=("move_ticks", "size"),
+                avg_move_ticks=("move_ticks", "mean"),
+                median_move_ticks=("move_ticks", "median"),
+                positive_share=("move_ticks", lambda s: float((s > 0).mean())),
+                avg_abs_move_ticks=("abs_move_ticks", "mean"),
+                p95_abs_move_ticks=("abs_move_ticks", lambda s: float(s.quantile(0.95))),
+                net_move_ticks=("move_ticks", "sum"),
+            )
+            .reset_index()
+        )
+        summary = summary[summary["bars"] >= int(min_bars)]
+        if summary.empty:
+            continue
+        summary["symbol"] = str(symbol)
+        pieces.append(summary)
+
+    if not pieces:
+        return pd.DataFrame()
+    result = pd.concat(pieces, ignore_index=True)
+    session_order = {"morning": 0, "afternoon": 1, "night": 2, "other": 3}
+    result["_session_order"] = result["session_key"].map(session_order).fillna(99)
+    return result.sort_values(["_session_order", "hour"]).drop(columns="_session_order")
+
+
+def _render_clock_edge(
+    *,
+    scope: pd.DataFrame,
+    selected_symbol: str,
+    min_bars: int,
+    tpl: str,
+    t: dict,
+) -> None:
+    st.markdown(f"### {t['clock_title']}")
+    st.caption(t["clock_caption"].format(symbol=selected_symbol))
+
+    summary = _clock_edge_summary(scope, min_bars=min_bars)
+    if summary.empty:
+        st.info(t["clock_empty"])
+        return
+
+    best = summary.loc[summary["avg_move_ticks"].idxmax()]
+    weakest = summary.loc[summary["avg_move_ticks"].idxmin()]
+    active = summary.loc[summary["p95_abs_move_ticks"].idxmax()]
+
+    metrics = st.columns(4)
+    metrics[0].metric(
+        t["clock_best_hour"],
+        f"{_clock_session_label(str(best.session_key), t)} {best.hour_label}",
+        f"{float(best.avg_move_ticks):+.2f} ticks",
+    )
+    metrics[1].metric(
+        t["clock_weak_hour"],
+        f"{_clock_session_label(str(weakest.session_key), t)} {weakest.hour_label}",
+        f"{float(weakest.avg_move_ticks):+.2f} ticks",
+    )
+    metrics[2].metric(
+        t["clock_active_hour"],
+        f"{_clock_session_label(str(active.session_key), t)} {active.hour_label}",
+        f"{float(active.p95_abs_move_ticks):.2f} ticks p95",
+    )
+    metrics[3].metric(t["clock_bars"], f"{int(summary['bars'].sum()):,}")
+
+    display_sessions = ["morning", "afternoon", "night", "other"]
+    heatmap = summary.copy()
+    heatmap["session"] = heatmap["session_key"].map(
+        lambda value: _clock_session_label(str(value), t)
+    )
+    session_labels = [_clock_session_label(value, t) for value in display_sessions]
+    pivot = heatmap.pivot_table(
+        index="session", columns="hour_label", values="avg_move_ticks", aggfunc="mean"
+    ).reindex(session_labels).dropna(how="all")
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Heatmap(
+            z=pivot.to_numpy(dtype=float),
+            x=list(pivot.columns),
+            y=list(pivot.index),
+            colorscale="RdBu",
+            reversescale=True,
+            zmid=0,
+            colorbar=dict(title=t["clock_avg_move_short"]),
+            hovertemplate=(
+                f"{t['clock_session']}=%{{y}}<br>"
+                f"{t['clock_hour']}=%{{x}}<br>"
+                f"{t['clock_avg_move']}=%{{z:.2f}} ticks<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(
+        template=tpl,
+        height=360,
+        margin=dict(l=10, r=10, t=35, b=10),
+        title=t["clock_heatmap"],
+        xaxis_title=t["clock_hour"],
+        yaxis_title=t["clock_session"],
+    )
+    st.plotly_chart(fig, width="stretch")
+
+    table = summary.copy()
+    table["session"] = table["session_key"].map(
+        lambda value: _clock_session_label(str(value), t)
+    )
+    table = table[
+        [
+            "session",
+            "hour_label",
+            "bars",
+            "avg_move_ticks",
+            "median_move_ticks",
+            "positive_share",
+            "avg_abs_move_ticks",
+            "p95_abs_move_ticks",
+            "net_move_ticks",
+        ]
+    ].rename(
+        columns={
+            "session": t["clock_session"],
+            "hour_label": t["clock_hour"],
+            "bars": t["clock_rows"],
+            "avg_move_ticks": t["clock_avg_move"],
+            "median_move_ticks": t["clock_median_move"],
+            "positive_share": t["clock_positive_share"],
+            "avg_abs_move_ticks": t["clock_avg_abs_move"],
+            "p95_abs_move_ticks": t["clock_abs_p95"],
+            "net_move_ticks": t["clock_net_move"],
+        }
+    )
+    st.markdown(f"#### {t['clock_table']}")
+    st.dataframe(
+        table.style.format(
+            {
+                t["clock_rows"]: "{:,.0f}",
+                t["clock_avg_move"]: "{:+.3f}",
+                t["clock_median_move"]: "{:+.3f}",
+                t["clock_positive_share"]: "{:.1%}",
+                t["clock_avg_abs_move"]: "{:.3f}",
+                t["clock_abs_p95"]: "{:.3f}",
+                t["clock_net_move"]: "{:+.2f}",
+            }
+        ),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def _product_hint(path: str) -> str:
@@ -1158,7 +1385,7 @@ def _render_behavior_preview(
                         t["behavior_directional_move"]: "{:+.2f}",
                     }
                 ),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -1209,7 +1436,7 @@ def _render_behavior_preview(
                 t["behavior_directional_move"]: "{:+.2f}",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     return (
@@ -1572,7 +1799,7 @@ def _render_cross_asset(
     else:
         result = None
 
-    if st.button(t["cross_asset_run"], use_container_width=True):
+    if st.button(t["cross_asset_run"], width="stretch"):
         progress = st.progress(0, text=f"0% - {t['cross_asset_loading']}")
 
         def compute() -> pd.DataFrame:
@@ -1690,7 +1917,7 @@ def _render_cross_asset(
             xaxis_title=t["axis_pulses_per_hour"],
             yaxis_title="",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     display_result = _format_cross_asset_summary(result, t)
     st.dataframe(
         display_result.style.format(
@@ -1705,7 +1932,7 @@ def _render_cross_asset(
                 t["rows"]: "{:.0f}",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     with st.expander(t["cross_asset_columns_help_title"], expanded=False):
@@ -1742,7 +1969,7 @@ def _render_cross_asset_zone_summary(files: list[dict], window_seconds: float, t
         )
 
     if st.button(
-        t["cross_zone_run"], use_container_width=True, key="pulse_cross_zone_run"
+        t["cross_zone_run"], width="stretch", key="pulse_cross_zone_run"
     ):
         progress = st.progress(0, text=f"0% - {t['cross_zone_loading']}")
 
@@ -1801,7 +2028,7 @@ def _render_cross_asset_zone_summary(files: list[dict], window_seconds: float, t
     display = _format_cross_zone_summary(result, t)
     st.dataframe(
         _style_cross_zone_summary(display, t),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.caption(t["zone_note"])
@@ -1827,6 +2054,7 @@ def main():
     section_labels = {
         "ranker": t["section_asset_ranker"],
         "universe": t["section_contract_universe"],
+        "clock": t["section_clock_edge"],
         "single": t["section_pulse_discovery"],
         "cross": t["section_cross_summary"],
     }
@@ -1872,9 +2100,10 @@ def main():
         .iloc[0]
     )
 
-    scope_cols = st.columns(
-        [1.2, 0.8] if selected_section == "universe" else [1.2, 0.7, 0.7, 0.7]
-    )
+    if selected_section in {"universe", "clock"}:
+        scope_cols = st.columns([1.2, 0.8])
+    else:
+        scope_cols = st.columns([1.2, 0.7, 0.7, 0.7])
     with scope_cols[0]:
         selected_symbol = st.selectbox(
             t["symbol"],
@@ -1890,6 +2119,28 @@ def main():
         else _product_hint(selected_file)
     )
 
+    if selected_section == "clock":
+        with scope_cols[1]:
+            min_bars = st.slider(
+                t["clock_min_bars"],
+                5,
+                250,
+                30,
+                5,
+                key="clock_min_bars",
+            )
+        progress.progress(65, text=f"65% - {t['clock_loading']}")
+        raw_scope = _tick_scope(path, mtime, selected_product, selected_symbol)
+        progress.progress(100, text=f"100% - {t['loading_done']}")
+        _render_clock_edge(
+            scope=raw_scope,
+            selected_symbol=selected_symbol,
+            min_bars=int(min_bars),
+            tpl=tpl,
+            t=t,
+        )
+        return
+
     if selected_section == "universe":
         raw_scope = _tick_scope(path, mtime, selected_product, selected_symbol)
         progress.progress(100, text=f"100% - {t['loading_done']}")
@@ -1902,10 +2153,10 @@ def main():
             }
         )
         st.markdown(f"#### {lab_t['schema']}")
-        st.dataframe(schema_df, use_container_width=True, hide_index=True)
+        st.dataframe(schema_df, width="stretch", hide_index=True)
         _render_raw_row_viewer(raw_scope, selected_symbol, lab_t)
         _render_contract_health(summary, tpl, lab_t)
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+        st.dataframe(summary, width="stretch", hide_index=True)
         return
 
     with scope_cols[1]:
@@ -2015,7 +2266,7 @@ def main():
     st.caption(t["distribution_help"])
     st.plotly_chart(
         _severity_ladder_figure(frame, selected_source_index, tpl, t),
-        use_container_width=True,
+        width="stretch",
     )
     zone_summary = _zone_summary(frame, t)
     if not zone_summary.empty:
@@ -2027,7 +2278,7 @@ def main():
                     t["zone_max"]: "{:.2f}",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         st.caption(t["zone_note"])
@@ -2051,7 +2302,7 @@ def main():
                     t["range"]: "{:.2f}",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
         with st.expander(t["event_columns_help_title"], expanded=False):
@@ -2077,7 +2328,7 @@ def main():
             st.markdown(t["inspector_help"])
         st.plotly_chart(
             _event_inspector(frame, event, float(window_seconds), tpl, t),
-            use_container_width=True,
+            width="stretch",
         )
         behavior_recommendation = _render_behavior_preview(frame, events, event, t)
         _render_seed_promotion(

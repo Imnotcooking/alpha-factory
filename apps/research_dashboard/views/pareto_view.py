@@ -74,7 +74,7 @@ class ParetoView:
                     )
                 )
 
-                st.plotly_chart(fig_pareto, use_container_width=True)
+                st.plotly_chart(fig_pareto, width="stretch")
 
                 # Educational Expander
                 st.info(t["pareto_help"])

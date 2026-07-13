@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import importlib
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -149,7 +150,7 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
 
         self.assertEqual(first["ticket_id"], second["ticket_id"])
         self.assertTrue(str(first["ticket_id"]).startswith("ticket_"))
-        self.assertEqual(first["source_page"], "03_Tick_Event_Study")
+        self.assertEqual(first["source_page"], "03_Intraday_Event_Study")
         self.assertEqual(first["research_family"], "tick_pulse_lab")
         self.assertEqual(first["factor_id"], "tick_pulse_relative_velocity")
         self.assertEqual(first["decision"], "promote_to_validation")
@@ -238,13 +239,56 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         self.assertNotIn("", by_factor.index)
 
     def test_streamlit_nav_widgets_do_not_mix_default_with_seeded_state(self) -> None:
-        pulse_page = (RESEARCH_APP / "pages" / "02_Pulse_Scan.py").read_text()
+        pulse_page = (RESEARCH_APP / "pages" / "02_Pattern_Lab.py").read_text()
         tick_page = (RESEARCH_APP / "tick_pulse_lab" / "dashboard.py").read_text()
 
         self.assertNotIn('default=st.session_state["pulse_discovery_nav"]', pulse_page)
         self.assertNotIn('default=st.session_state["tick_pulse_nav"]', tick_page)
         self.assertNotIn('default=st.session_state["tick_scope_hypothesis_source"]', tick_page)
         self.assertNotIn("default=threshold_mode", tick_page)
+
+    def test_intraday_pattern_lab_clock_edge_summary_buckets_sessions(self) -> None:
+        original_flag = os.environ.get("OQP_EMBEDDED_STREAMLIT_PAGE")
+        os.environ["OQP_EMBEDDED_STREAMLIT_PAGE"] = "1"
+        try:
+            page = _load_module(
+                RESEARCH_APP / "pages" / "02_Pattern_Lab.py",
+                "_intraday_pattern_lab_preflight",
+            )
+        finally:
+            if original_flag is None:
+                os.environ.pop("OQP_EMBEDDED_STREAMLIT_PAGE", None)
+            else:
+                os.environ["OQP_EMBEDDED_STREAMLIT_PAGE"] = original_flag
+
+        times = (
+            list(pd.date_range("2026-01-05 09:00", periods=70, freq="min"))
+            + list(pd.date_range("2026-01-05 14:00", periods=70, freq="min"))
+            + list(pd.date_range("2026-01-05 22:00", periods=70, freq="min"))
+        )
+        moves = [0.1] * 70 + [0.4] * 70 + [-0.2] * 70
+        prices = []
+        price = 100.0
+        for move in moves:
+            price += move
+            prices.append(price)
+        scope = pd.DataFrame(
+            {
+                "datetime": times,
+                "symbol": "au2608",
+                "last_price": prices,
+                "tick_size_est": 1.0,
+            }
+        )
+
+        summary = page._clock_edge_summary(scope, min_bars=20)
+        by_session = summary.groupby("session_key")["avg_move_ticks"].mean()
+
+        self.assertIn("morning", by_session)
+        self.assertIn("afternoon", by_session)
+        self.assertIn("night", by_session)
+        self.assertGreater(by_session["afternoon"], by_session["morning"])
+        self.assertLess(by_session["night"], 0)
 
     def test_homepage_ml_tab_is_artifact_gated(self) -> None:
         homepage = (RESEARCH_APP / "Homepage.py").read_text()
@@ -313,9 +357,14 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         self.assertNotIn("taxonomy_help_title", regime_page)
 
     def test_risk_breadth_top_section_stays_compact(self) -> None:
-        risk_page = (RESEARCH_APP / "pages" / "06_Risk_Breadth.py").read_text()
+        risk_page = (RESEARCH_APP / "pages" / "06_Market_Breadth_Lab.py").read_text()
 
         self.assertIn("label = path.name", risk_page)
+        self.assertIn("load_asset_taxonomy", risk_page)
+        self.assertIn("is_vectorizable_asset_class", risk_page)
+        self.assertIn("discover_asset_class_files", risk_page)
+        self.assertIn('asset_class=asset_class', risk_page)
+        self.assertIn('max_assets=max_assets', risk_page)
         self.assertIn("pc1_top_sectors", risk_page)
         self.assertIn('st.markdown(f"### {t[\'cards\']}")', risk_page)
         self.assertNotIn('st.info(t["feature_link"])', risk_page)
@@ -359,9 +408,16 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         self.assertIn("def _render_api_readiness", health_view)
         self.assertIn("def _api_provider_snapshot", health_view)
         self.assertIn("def _render_data_folder_overview", health_view)
+        self.assertIn("def _render_freshness_overview", health_view)
+        self.assertIn("def _folder_freshness_summary", health_view)
+        self.assertIn("def _folder_risk_imputation_summary", health_view)
+        self.assertIn("def _cap_risk_lens_frame", health_view)
+        self.assertIn("def _read_quality_parquet_sample", health_view)
         self.assertIn("def _runtime_data_folder_snapshot", health_view)
         self.assertIn('"api_readiness": api_readiness_df', health_view)
         self.assertIn('"api_readiness": "API Readiness"', health_view)
+        self.assertIn('"freshness_overview": "Market Data Freshness"', health_view)
+        self.assertIn('"risk_lens_title": "Risk Imputation Lens"', health_view)
         self.assertIn('"provider_api": "Provider / API"', health_view)
         self.assertIn('"data_folder_overview": "Runtime Data Folder Coverage"', health_view)
         self.assertIn('"provider": "FMP"', health_view)
@@ -371,9 +427,20 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         self.assertIn('copy["latest_update"]: st.column_config.TextColumn(width="medium")', health_view)
         self.assertIn('copy["date_range"]: st.column_config.TextColumn(width="large")', health_view)
         self.assertIn("def _whole_number_label", health_view)
+        self.assertIn("compare_risk_imputation_views", health_view)
+        self.assertIn('"bridge_rv_median"', health_view)
+        self.assertIn('"ffill_zero_return_pct"', health_view)
         self.assertNotIn('copy["runtime"],', health_view)
         self.assertIn('asset_class="EQUITY_CN"', health_view)
         self.assertIn('asset_class="OPTIONS_CN"', health_view)
+
+    def test_assumptions_view_surfaces_data_health_contract(self) -> None:
+        assumptions_view = (RESEARCH_APP / "views" / "assumptions_view.py").read_text()
+
+        self.assertIn("def _render_data_health_assumptions", assumptions_view)
+        self.assertIn("SystemHealthView._load_snapshot", assumptions_view)
+        self.assertIn("assumptions_data_health", assumptions_view)
+        self.assertIn('"fill_policy"', assumptions_view)
 
     def test_research_dashboard_uses_current_streamlit_width_api(self) -> None:
         for path in RESEARCH_APP.rglob("*.py"):

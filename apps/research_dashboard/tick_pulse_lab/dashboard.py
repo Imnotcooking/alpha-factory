@@ -752,7 +752,7 @@ def _render_event_example_card(
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     summary = pd.DataFrame(
         [
@@ -774,7 +774,7 @@ def _render_event_example_card(
             {t["concept_col"]: t["outcome_label"], t["example_col"]: outcome_label},
         ]
     )
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.dataframe(summary, width="stretch", hide_index=True)
 
     st.markdown(f"**{t['base_checks_title']}**")
     for idx, (label, passed) in enumerate(
@@ -962,7 +962,7 @@ def _render_nav(options: dict[str, str]) -> str:
     option_keys = list(options.keys())
     _ensure_option_state("tick_pulse_nav", option_keys, option_keys[0])
     selected = st.pills(
-        "Tick Event Study navigation",
+        "Intraday Event Study navigation",
         option_keys,
         selection_mode="single",
         format_func=lambda key: options[key],
@@ -1068,7 +1068,7 @@ def _build_tick_pulse_evidence_ticket_payload(
     hypothesis_key = seed_id if seed_id else selected_hypothesis
     factor_id = f"tick_pulse_{_ticket_slug(hypothesis_key)}"
     signature_payload = {
-        "source_page": "03_Tick_Event_Study",
+        "source_page": "03_Intraday_Event_Study",
         "source_file": selected_file,
         "symbol": selected_symbol,
         "hypothesis": selected_hypothesis,
@@ -1086,7 +1086,7 @@ def _build_tick_pulse_evidence_ticket_payload(
     return {
         "ticket_id": ticket_id,
         "title": f"{selected_symbol} {hypothesis_label} @ {int(horizon_ticks)} ticks",
-        "source_page": "03_Tick_Event_Study",
+        "source_page": "03_Intraday_Event_Study",
         "evidence_type": "microstructure_hypothesis",
         "stage": "hypothesis_tested",
         "status": "ready_for_review" if events else "open",
@@ -1144,7 +1144,7 @@ class TickPulseLabPage:
         button_disabled = events <= 0
         if st.button(
             t["evidence_ticket_button"],
-            use_container_width=True,
+            width="stretch",
             key=f"tick_evidence_ticket_{payload['ticket_id']}",
             disabled=button_disabled,
         ):
@@ -1356,7 +1356,7 @@ class TickPulseLabPage:
                 f"backend={metadata.get('backend', 'sqlite_cache')}"
             )
 
-        if st.button(t["cross_asset_run"], use_container_width=True, key="tick_cross_asset_run"):
+        if st.button(t["cross_asset_run"], width="stretch", key="tick_cross_asset_run"):
             progress = st.progress(0, text=f"0% - {t['cross_asset_loading']}")
 
             def compute_cross_asset() -> pd.DataFrame:
@@ -1471,7 +1471,7 @@ class TickPulseLabPage:
         )
         st.dataframe(
             styled_display,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -1773,7 +1773,7 @@ class TickPulseLabPage:
                 )
             st.dataframe(
                 format_research_sweep_display(sweep_raw, t),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
             st.divider()

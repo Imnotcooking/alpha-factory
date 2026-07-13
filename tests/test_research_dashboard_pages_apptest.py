@@ -12,11 +12,11 @@ FUTURES_CN_TICK_DATA = REPO_ROOT / "runtime" / "data" / "futures_cn" / "tick"
 RUNTIME_DB = REPO_ROOT / "runtime" / "db" / "research" / "research_memory.db"
 EXPECTED_PAGE_ORDER = [
     "01_Data_Health.py",
-    "02_Pulse_Scan.py",
-    "03_Tick_Event_Study.py",
+    "02_Pattern_Lab.py",
+    "03_Intraday_Event_Study.py",
     "04_Arbitrage_Lab.py",
     "05_Regime_Analysis.py",
-    "06_Risk_Breadth.py",
+    "06_Market_Breadth_Lab.py",
     "07_Feature_Review.py",
     "08_Factor_Review.py",
     "09_Strategy_Comparison.py",

@@ -102,7 +102,7 @@ class ResearchReproducibilityTests(unittest.TestCase):
             ticket = record_evidence_ticket(
                 str(db_path),
                 title="Relative velocity pulse has follow-through",
-                source_page="03_Tick_Event_Study",
+                source_page="03_Intraday_Event_Study",
                 evidence_type="microstructure_hypothesis",
                 stage="hypothesis_tested",
                 status="open",

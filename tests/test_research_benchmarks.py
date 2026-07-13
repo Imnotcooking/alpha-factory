@@ -261,6 +261,22 @@ class ResearchBenchmarkTests(unittest.TestCase):
         self.assertEqual(policy["same_horizon_controls"][0]["benchmark_column"], BENCHMARK_SAME_HORIZON_COL)
         self.assertEqual(policy["same_horizon_controls"][0]["return_mode"], "same_horizon")
 
+    def test_futures_intraday_factor_can_prefer_same_horizon_active_universe(self) -> None:
+        policy = resolve_default_benchmark_policy(
+            "FUTURES_CN",
+            factor_metadata={"benchmark_preference": "SAME_HORIZON_ACTIVE_UNIVERSE"},
+        )
+
+        self.assertEqual(policy["benchmark_type"], "BUY_AND_HOLD")
+        self.assertEqual(policy["benchmark_column"], "benchmark_return")
+        self.assertEqual(policy["benchmark_role"], "same_horizon_universe_control")
+        self.assertEqual(policy["return_mode"], "same_horizon")
+        self.assertEqual(
+            policy["secondary_benchmarks"][0]["benchmark_column"],
+            "benchmark_return_passive_active_universe",
+        )
+        self.assertEqual(policy["secondary_benchmarks"][1]["benchmark_type"], "NANHUA")
+
     def test_benchmark_frame_keeps_passive_and_same_horizon_returns_separate(self) -> None:
         raw = pd.DataFrame(
             {
@@ -357,6 +373,8 @@ class ResearchBenchmarkTests(unittest.TestCase):
         self.assertEqual(hk_policy["benchmark_type"], "HSI")
         self.assertEqual(futures_policy["benchmark_type"], "BUY_AND_HOLD")
         self.assertEqual(futures_policy["secondary_benchmarks"][0]["benchmark_type"], "NANHUA")
+        self.assertEqual(futures_policy["same_horizon_controls"][0]["benchmark_column"], BENCHMARK_SAME_HORIZON_COL)
+        self.assertEqual(futures_policy["same_horizon_controls"][0]["return_mode"], "same_horizon")
         self.assertEqual(crypto_policy["benchmark_role"], "active_crypto_universe")
         self.assertEqual(fx_policy["benchmark_type"], "ABSOLUTE")
         self.assertEqual(fx_policy["ann_rate"], 0.0)

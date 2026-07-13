@@ -446,6 +446,18 @@ def main():
     )
     
     parser.add_argument("--data_file", type=str, default=str(DEFAULT_DATA_FILE), help="Path to the internal parquet file")
+    parser.add_argument(
+        "--start_date",
+        type=str,
+        default=None,
+        help="Inclusive backtest start timestamp/date applied after factor data preparation.",
+    )
+    parser.add_argument(
+        "--end_date",
+        type=str,
+        default=None,
+        help="Inclusive backtest end timestamp/date applied after factor data preparation.",
+    )
     parser.add_argument("--split_mode", choices=["auto", "date", "ratio"], default="auto", help="Evaluation split policy.")
     parser.add_argument("--split_date", type=str, default="2023-01-01", help="Calendar split date for date/auto mode.")
     parser.add_argument("--validation_fraction", type=float, default=0.60, help="Chronological validation fraction for ratio fallback.")
@@ -592,6 +604,38 @@ def main():
         args.return_horizon = normalize_return_horizon(args.return_horizon)
     except Exception as e:
         parser.error(str(e))
+
+    def frame_date_window(frame: pd.DataFrame) -> tuple[str | None, str | None]:
+        date_col = "date" if "date" in frame.columns else "datetime" if "datetime" in frame.columns else None
+        if date_col is None:
+            return None, None
+        dates = pd.to_datetime(frame[date_col], errors="coerce").dropna()
+        if dates.empty:
+            return None, None
+        return dates.min().isoformat(), dates.max().isoformat()
+
+    def inclusive_end_boundary(value: str | None):
+        if value is None or not str(value).strip():
+            return None
+        parsed = pd.to_datetime(value, errors="raise")
+        raw = str(value).strip()
+        if " " not in raw and "T" not in raw and len(raw) <= 10:
+            return parsed + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+        return parsed
+
+    def apply_backtest_date_filter(frame: pd.DataFrame) -> pd.DataFrame:
+        if not args.start_date and not args.end_date:
+            return frame
+        if "date" not in frame.columns:
+            raise ValueError("--start_date/--end_date require a date column after factor preparation.")
+        dates = pd.to_datetime(frame["date"], errors="coerce")
+        mask = dates.notna()
+        if args.start_date:
+            mask &= dates.ge(pd.to_datetime(args.start_date, errors="raise"))
+        end_boundary = inclusive_end_boundary(args.end_date)
+        if end_boundary is not None:
+            mask &= dates.le(end_boundary)
+        return frame.loc[mask].copy()
 
     factor_module_name = args.factor
     # Strip .py if the user accidentally typed it in the terminal
@@ -843,6 +887,30 @@ def main():
         print("❌ ERROR: Data must have 'ticker' and 'date' columns (Long Format).")
         return
 
+    prepared_start, prepared_end = frame_date_window(df)
+    prepared_rows = int(len(df))
+    if args.start_date or args.end_date:
+        try:
+            df = apply_backtest_date_filter(df)
+        except Exception as e:
+            print(f"❌ [DATE FILTER ERROR] {e}")
+            return
+        if df.empty:
+            print(
+                "❌ [DATE FILTER ERROR] No rows remain after "
+                f"start_date={args.start_date!r}, end_date={args.end_date!r}."
+            )
+            return
+        df = df.sort_values(by=['ticker', 'date']).reset_index(drop=True)
+        filtered_start, filtered_end = frame_date_window(df)
+        print(
+            "   -> 🗓️ Backtest Window Filter: "
+            f"{filtered_start} to {filtered_end} "
+            f"({len(df):,}/{prepared_rows:,} prepared rows kept)"
+        )
+    else:
+        filtered_start, filtered_end = prepared_start, prepared_end
+
     data_frequency = infer_data_frequency(df)
     try:
         df = attach_return_horizon(
@@ -871,6 +939,14 @@ def main():
         "dataset_id": os.path.splitext(os.path.basename(args.data_file))[0],
         "data_vendor": "local_parquet",
         "data_frequency": data_frequency,
+        "prepared_data_start": prepared_start,
+        "prepared_data_end": prepared_end,
+        "prepared_data_rows": prepared_rows,
+        "backtest_start": filtered_start,
+        "backtest_end": filtered_end,
+        "backtest_rows": int(len(df)),
+        "requested_start_date": args.start_date,
+        "requested_end_date": args.end_date,
         "dataset_role": data_profile.dataset_role,
         "data_tradability": data_profile.tradability,
         "data_price_source": data_profile.price_source,

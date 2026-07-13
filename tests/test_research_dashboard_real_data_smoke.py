@@ -146,6 +146,13 @@ class ResearchDashboardRealDataSmokeTests(unittest.TestCase):
         self.assertIn("asset_class", folders.columns)
         self.assertIn("timeframe", folders.columns)
         self.assertIn("latest_update", folders.columns)
+        self.assertIn("freshness_status", folders.columns)
+        self.assertIn("fresh_pct", folders.columns)
+        self.assertIn("synthetic_pct", folders.columns)
+        self.assertIn("raw_rv_median", folders.columns)
+        self.assertIn("ffill_rv_median", folders.columns)
+        self.assertIn("bridge_rv_median", folders.columns)
+        self.assertIn("ffill_zero_return_pct", folders.columns)
         self.assertTrue(
             ((folders["asset_class"] == "FUTURES_CN") & (folders["timeframe"] == "daily")).any()
         )

@@ -37,8 +37,10 @@ ALPHA_RUNTIME_ARTIFACT_ROOT = _UI_CONFIG.ALPHA_RUNTIME_ARTIFACT_ROOT
 get_plotly_template = _UI_CONFIG.get_plotly_template
 
 try:
+    from oqp.data.views import build_market_data_views
     from oqp.data.runtime_paths import discover_futures_cn_tick_files, futures_cn_tick_roots
     from oqp.data.asset_taxonomy import LANE_METADATA, load_asset_taxonomy
+    from oqp.risk.realized_volatility import compare_risk_imputation_views
 
     ASSET_TAXONOMY = load_asset_taxonomy(BASE_DIR)
 except Exception:
@@ -52,10 +54,15 @@ except Exception:
     def futures_cn_tick_roots() -> tuple[Path, ...]:
         return (Path(BASE_DIR) / "runtime" / "data" / "futures_cn" / "tick",)
 
+    def build_market_data_views(*args, **kwargs):
+        raise RuntimeError("oqp.data.views is unavailable in this runtime")
+
+    def compare_risk_imputation_views(*args, **kwargs):
+        raise RuntimeError("oqp.risk.realized_volatility is unavailable in this runtime")
 
 STATUS_RANK = {"OK": 2, "WARN": 1, "FAIL": 0}
 STATUS_COLORS = {"OK": "#16a34a", "WARN": "#f59e0b", "FAIL": "#dc2626"}
-SNAPSHOT_SCHEMA_VERSION = "research_health_canonical_paths_v3"
+SNAPSHOT_SCHEMA_VERSION = "research_health_canonical_paths_v5"
 
 
 COPY = {
@@ -110,11 +117,31 @@ This tab answers: *will the page run correctly and fast enough?*
         "api_readiness_note": "Provider-level readiness for market data endpoints and local data sources. This checks credentials and adapter wiring without making live network calls.",
         "provider_api": "Provider / API",
         "data_folder_overview": "Runtime Data Folder Coverage",
+        "freshness_overview": "Market Data Freshness",
+        "freshness_note": "Forward-fill accounting visibility by runtime folder. Alpha logic must still use fresh-only rows.",
+        "risk_lens_title": "Risk Imputation Lens",
+        "risk_lens_note": "Risk-only comparison of observed prices, accounting forward-fill, and Brownian Bridge reconstruction. This is for covariance, realized-volatility, stress, and Monte Carlo research only.",
         "folder": "Folder",
         "timeframe": "Timeframe",
         "file_count": "Files",
         "latest_file": "Latest File",
         "latest_update": "Latest Update",
+        "sample_file": "Sample File",
+        "fresh_pct": "Fresh %",
+        "synthetic_pct": "Synthetic %",
+        "synthetic_rows": "Synthetic Rows",
+        "expired_rows": "Expired Rows",
+        "max_stale_bars": "Max Stale Bars",
+        "quality_state": "Quality State",
+        "fill_policy": "Fill Policy",
+        "raw_rv_median": "Raw RV",
+        "ffill_rv_median": "FFill RV",
+        "bridge_rv_median": "Bridge RV",
+        "bridge_vs_ffill_pct": "Bridge vs FFill",
+        "ffill_zero_return_pct": "FFill Zero Returns",
+        "bridge_zero_return_pct": "Bridge Zero Returns",
+        "bridge_synthetic_pct": "Bridge Synthetic %",
+        "risk_lens_detail": "Risk Lens Detail",
         "system_checks": "System Checks",
         "checks": "Checks",
         "path": "Path",
@@ -241,11 +268,31 @@ This table is the bridge between model files and reproducible research.
         "api_readiness_note": "按供应商/API 汇总市场数据端点与本地数据源就绪度。这里检查密钥和适配器接入，不发起实时网络请求。",
         "provider_api": "供应商 / API",
         "data_folder_overview": "运行数据文件夹覆盖",
+        "freshness_overview": "市场数据新鲜度",
+        "freshness_note": "按运行数据文件夹展示前向填充会计视图。Alpha 逻辑仍必须只使用新鲜真实数据。",
+        "risk_lens_title": "风险插值视角",
+        "risk_lens_note": "仅用于风险研究，对比原始价格、会计前向填充与 Brownian Bridge 重构。适用于协方差、实际波动、压力测试与 Monte Carlo，不用于 Alpha 执行。",
         "folder": "文件夹",
         "timeframe": "周期",
         "file_count": "文件数",
         "latest_file": "最新文件",
         "latest_update": "最近更新",
+        "sample_file": "样本文件",
+        "fresh_pct": "新鲜占比",
+        "synthetic_pct": "合成占比",
+        "synthetic_rows": "合成行数",
+        "expired_rows": "过期行数",
+        "max_stale_bars": "最大陈旧 Bar",
+        "quality_state": "质量状态",
+        "fill_policy": "填充策略",
+        "raw_rv_median": "原始 RV",
+        "ffill_rv_median": "前填 RV",
+        "bridge_rv_median": "Bridge RV",
+        "bridge_vs_ffill_pct": "Bridge 相对前填",
+        "ffill_zero_return_pct": "前填零收益占比",
+        "bridge_zero_return_pct": "Bridge 零收益占比",
+        "bridge_synthetic_pct": "Bridge 合成占比",
+        "risk_lens_detail": "风险视角说明",
         "system_checks": "系统检查",
         "checks": "检查项",
         "path": "路径",
@@ -436,6 +483,7 @@ class SystemHealthView:
             [
                 copy["overview"],
                 copy["data_sources"],
+                copy["freshness_overview"],
                 copy["research_artifacts"],
             ]
         )
@@ -454,6 +502,8 @@ class SystemHealthView:
             st.divider()
             self._render_tick_table(tick_df, copy)
         with tabs[2]:
+            self._render_freshness_overview(data_folder_df, copy)
+        with tabs[3]:
             self._render_help_toggle(copy["artifacts_help_title"], copy["artifacts_help"])
             self._render_parquet_table(parquet_df, copy["data_matrix"], copy)
             st.divider()
@@ -471,7 +521,7 @@ class SystemHealthView:
             st.caption(copy["subtitle"])
         with action_col:
             st.write("")
-            if st.button(copy["refresh"], use_container_width=True):
+            if st.button(copy["refresh"], width="stretch"):
                 st.session_state["_data_health_refresh_requested"] = True
 
     @staticmethod
@@ -528,10 +578,10 @@ class SystemHealthView:
                 title=copy["checks"],
             )
             fig.update_layout(height=320, margin=dict(l=10, r=10, t=50, b=20), xaxis_title="", yaxis_title="")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             st.dataframe(
                 self._style_status(checks[["area", "check", "status", "detail", "path", "modified"]]),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=360,
             )
@@ -620,7 +670,7 @@ class SystemHealthView:
         )
         st.dataframe(
             self._style_status(display),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=220,
             column_config={
@@ -668,7 +718,7 @@ class SystemHealthView:
                 display[col] = display[col].map(self._whole_number_label)
         st.dataframe(
             self._style_status(display),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=360,
             column_config={
@@ -678,6 +728,131 @@ class SystemHealthView:
                 copy["detail"]: st.column_config.TextColumn(width="large"),
             },
         )
+
+    def _render_freshness_overview(self, data_folder_df: pd.DataFrame, copy: dict) -> None:
+        if data_folder_df.empty or "fresh_pct" not in data_folder_df.columns:
+            return
+
+        freshness = data_folder_df.dropna(subset=["fresh_pct"]).copy()
+        freshness = freshness[freshness["asset_class"].ne("CORE")]
+        if freshness.empty:
+            return
+
+        st.markdown(f"### {copy['freshness_overview']}")
+        st.caption(copy["freshness_note"])
+        display_cols = [
+            "freshness_status",
+            "asset_class",
+            "timeframe",
+            "sample_file",
+            "fresh_pct",
+            "synthetic_pct",
+            "synthetic_rows",
+            "expired_rows",
+            "max_stale_bars",
+            "fill_policy",
+            "freshness_detail",
+        ]
+        display = freshness[[col for col in display_cols if col in freshness.columns]].rename(
+            columns={
+                "freshness_status": copy["status"],
+                "asset_class": copy["asset_class"],
+                "timeframe": copy["timeframe"],
+                "sample_file": copy["sample_file"],
+                "fresh_pct": copy["fresh_pct"],
+                "synthetic_pct": copy["synthetic_pct"],
+                "synthetic_rows": copy["synthetic_rows"],
+                "expired_rows": copy["expired_rows"],
+                "max_stale_bars": copy["max_stale_bars"],
+                "fill_policy": copy["fill_policy"],
+                "freshness_detail": copy["detail"],
+            }
+        )
+        for col in [copy["synthetic_rows"], copy["expired_rows"], copy["max_stale_bars"]]:
+            if col in display.columns:
+                display[col] = display[col].map(self._whole_number_label)
+        for col in [copy["fresh_pct"], copy["synthetic_pct"]]:
+            if col in display.columns:
+                display[col] = pd.to_numeric(display[col], errors="coerce").map(
+                    lambda value: "" if pd.isna(value) else f"{value:.1%}"
+                )
+        st.dataframe(
+            self._style_status(display),
+            width="stretch",
+            hide_index=True,
+            height=280,
+            column_config={
+                copy["sample_file"]: st.column_config.TextColumn(width="large"),
+                copy["detail"]: st.column_config.TextColumn(width="large"),
+            },
+        )
+
+        risk_cols = [
+            "freshness_status",
+            "asset_class",
+            "timeframe",
+            "sample_file",
+            "raw_rv_median",
+            "ffill_rv_median",
+            "bridge_rv_median",
+            "bridge_vs_ffill_pct",
+            "ffill_zero_return_pct",
+            "bridge_zero_return_pct",
+            "bridge_synthetic_pct",
+            "risk_lens_detail",
+        ]
+        available_risk_cols = [col for col in risk_cols if col in freshness.columns]
+        risk_lens = freshness[available_risk_cols].dropna(
+            subset=[
+                col
+                for col in ["raw_rv_median", "ffill_rv_median", "bridge_rv_median"]
+                if col in freshness.columns
+            ],
+            how="all",
+        )
+        if not risk_lens.empty:
+            st.markdown(f"#### {copy['risk_lens_title']}")
+            st.caption(copy["risk_lens_note"])
+            risk_display = risk_lens.rename(
+                columns={
+                    "freshness_status": copy["status"],
+                    "asset_class": copy["asset_class"],
+                    "timeframe": copy["timeframe"],
+                    "sample_file": copy["sample_file"],
+                    "raw_rv_median": copy["raw_rv_median"],
+                    "ffill_rv_median": copy["ffill_rv_median"],
+                    "bridge_rv_median": copy["bridge_rv_median"],
+                    "bridge_vs_ffill_pct": copy["bridge_vs_ffill_pct"],
+                    "ffill_zero_return_pct": copy["ffill_zero_return_pct"],
+                    "bridge_zero_return_pct": copy["bridge_zero_return_pct"],
+                    "bridge_synthetic_pct": copy["bridge_synthetic_pct"],
+                    "risk_lens_detail": copy["risk_lens_detail"],
+                }
+            )
+            percent_cols = [
+                copy["raw_rv_median"],
+                copy["ffill_rv_median"],
+                copy["bridge_rv_median"],
+                copy["bridge_vs_ffill_pct"],
+                copy["ffill_zero_return_pct"],
+                copy["bridge_zero_return_pct"],
+                copy["bridge_synthetic_pct"],
+            ]
+            for col in percent_cols:
+                if col in risk_display.columns:
+                    risk_display[col] = pd.to_numeric(risk_display[col], errors="coerce").map(
+                        lambda value: "" if pd.isna(value) else f"{value:.2%}"
+                    )
+            st.dataframe(
+                self._style_status(risk_display),
+                width="stretch",
+                hide_index=True,
+                height=260,
+                column_config={
+                    copy["sample_file"]: st.column_config.TextColumn(width="large"),
+                    copy["risk_lens_detail"]: st.column_config.TextColumn(width="large"),
+                },
+            )
 
     def _render_parquet_table(self, df: pd.DataFrame, title: str, copy: dict) -> None:
         st.markdown(f"### {title}")
@@ -695,7 +870,7 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True)
+        st.dataframe(self._style_status(display), width="stretch", hide_index=True)
 
     def _render_tick_table(self, df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['tick_files']}")
@@ -715,7 +890,7 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=420)
+        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=420)
 
     def _render_market_coverage(self, market_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['market_coverage']}")
@@ -740,7 +915,7 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=260)
+        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=260)
 
     def _render_database(
         self,
@@ -750,9 +925,9 @@ class SystemHealthView:
         copy: dict,
     ) -> None:
         st.markdown(f"### {copy['db_schema']}")
-        st.dataframe(self._style_status(db_df), use_container_width=True, hide_index=True)
+        st.dataframe(self._style_status(db_df), width="stretch", hide_index=True)
         st.markdown(f"### {copy['returns_linkage']}")
-        st.dataframe(self._style_status(returns_df), use_container_width=True, hide_index=True)
+        st.dataframe(self._style_status(returns_df), width="stretch", hide_index=True)
         st.markdown(f"#### {copy['return_issues_title']}")
         if return_issues_df.empty:
             st.success(copy["return_issues_empty"])
@@ -770,11 +945,11 @@ class SystemHealthView:
                 "detail": copy["detail"],
             }
         )
-        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=220)
+        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=220)
 
     def _render_latent(self, latent_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['latent_title']}")
-        st.dataframe(self._style_status(latent_df), use_container_width=True, hide_index=True)
+        st.dataframe(self._style_status(latent_df), width="stretch", hide_index=True)
 
     def _render_models(self, model_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['model_title']}")
@@ -841,11 +1016,11 @@ class SystemHealthView:
                 "created_at": copy["created_at"],
             }
         )
-        st.dataframe(self._style_status(display), use_container_width=True, hide_index=True, height=460)
+        st.dataframe(self._style_status(display), width="stretch", hide_index=True, height=460)
 
     def _render_infra(self, infra_df: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['infra_title']}")
-        st.dataframe(self._style_status(infra_df), use_container_width=True, hide_index=True)
+        st.dataframe(self._style_status(infra_df), width="stretch", hide_index=True)
 
     @staticmethod
     @st.cache_data(show_spinner=False)
@@ -1133,6 +1308,7 @@ class SystemHealthView:
                 "date_range": "",
                 "asset_count": np.nan,
                 "detail": "Required folder missing." if required else "Folder not populated yet.",
+                **self._empty_freshness_summary(),
             }
 
         files = [
@@ -1158,14 +1334,22 @@ class SystemHealthView:
                 "date_range": "",
                 "asset_count": np.nan,
                 "detail": "Folder exists but has no recognized data files.",
+                **self._empty_freshness_summary(),
             }
 
         latest = max(data_files, key=lambda file: file.stat().st_mtime)
         parquet_files = [file for file in data_files if file.suffix.lower() == ".parquet"]
+        freshness_file = latest if latest.suffix.lower() == ".parquet" else None
         summary = self._parquet_summary(latest) if latest.suffix.lower() == ".parquet" else {}
         if not summary and parquet_files:
             latest_parquet = max(parquet_files, key=lambda file: file.stat().st_mtime)
+            freshness_file = latest_parquet
             summary = self._parquet_summary(latest_parquet)
+        freshness = (
+            self._folder_freshness_summary(freshness_file, asset_class=asset_class, timeframe=timeframe)
+            if freshness_file is not None
+            else self._empty_freshness_summary()
+        )
 
         stale_days = 14 if timeframe == "tick" else 30
         stale = self._is_data_stale(summary.get("date_max"), max_days=stale_days)
@@ -1188,7 +1372,226 @@ class SystemHealthView:
             "date_range": summary.get("date_range", ""),
             "asset_count": summary.get("asset_count", np.nan),
             "detail": detail,
+            **freshness,
         }
+
+    @staticmethod
+    def _empty_freshness_summary() -> dict[str, Any]:
+        return {
+            "freshness_status": "",
+            "sample_file": "",
+            "fresh_pct": np.nan,
+            "synthetic_pct": np.nan,
+            "synthetic_rows": np.nan,
+            "expired_rows": np.nan,
+            "max_stale_bars": np.nan,
+            "fill_policy": "",
+            "freshness_detail": "",
+            "raw_rv_median": np.nan,
+            "ffill_rv_median": np.nan,
+            "bridge_rv_median": np.nan,
+            "bridge_vs_ffill_pct": np.nan,
+            "ffill_zero_return_pct": np.nan,
+            "bridge_zero_return_pct": np.nan,
+            "bridge_synthetic_pct": np.nan,
+            "risk_lens_detail": "",
+        }
+
+    def _folder_freshness_summary(
+        self,
+        path: Path,
+        *,
+        asset_class: str,
+        timeframe: str,
+        max_stale_bars: int = 3,
+        max_rows: int = 1_000_000,
+    ) -> dict[str, Any]:
+        try:
+            frame, sampled, sample_rows = self._read_quality_parquet_sample(path, max_rows=max_rows)
+        except Exception as exc:
+            out = self._empty_freshness_summary()
+            out.update(
+                {
+                    "freshness_status": "WARN",
+                    "sample_file": path.name,
+                    "fill_policy": "ffill_with_freshness_flags",
+                    "freshness_detail": f"Freshness scan unavailable: {exc}",
+                }
+            )
+            return out
+
+        if frame.empty:
+            out = self._empty_freshness_summary()
+            out.update(
+                {
+                    "freshness_status": "WARN",
+                    "sample_file": path.name,
+                    "fill_policy": "ffill_with_freshness_flags",
+                    "freshness_detail": "No date/asset/price columns available for freshness scan.",
+                }
+            )
+            return out
+
+        try:
+            views = build_market_data_views(
+                frame,
+                timestamp_col="date",
+                asset_col="ticker",
+                price_cols=("close",),
+                max_stale_bars=max_stale_bars,
+            )
+            summary = views.quality_summary
+            risk_lens = self._folder_risk_imputation_summary(
+                frame,
+                sample_file=path.name,
+                asset_class=asset_class,
+                timeframe=timeframe,
+                max_stale_bars=max_stale_bars,
+            )
+        except Exception as exc:
+            out = self._empty_freshness_summary()
+            out.update(
+                {
+                    "freshness_status": "WARN",
+                    "sample_file": path.name,
+                    "fill_policy": "ffill_with_freshness_flags",
+                    "freshness_detail": f"Freshness view failed: {exc}",
+                }
+            )
+            return out
+
+        expired_rows = int(summary.get("stale_expired_rows", 0) or 0)
+        synthetic_rows = int(summary.get("synthetic_rows", 0) or 0)
+        freshness_status = "OK"
+        if expired_rows > 0:
+            freshness_status = "FAIL" if asset_class == "FUTURES_CN" and timeframe == "daily" else "WARN"
+        elif synthetic_rows > 0:
+            freshness_status = "WARN"
+        detail = (
+            "Sampled newest parquet row groups; percentages describe the sampled rows."
+            if sampled
+            else "Scanned newest parquet file."
+        )
+        if sample_rows:
+            detail = f"{detail} Sample rows: {sample_rows:,}."
+
+        return {
+            "freshness_status": freshness_status,
+            "sample_file": path.name,
+            "fresh_pct": float(summary.get("fresh_pct", np.nan)),
+            "synthetic_pct": float(summary.get("synthetic_pct", np.nan)),
+            "synthetic_rows": synthetic_rows,
+            "expired_rows": expired_rows,
+            "max_stale_bars": int(summary.get("max_stale_bars", 0) or 0),
+            "fill_policy": "ffill_with_freshness_flags",
+            "freshness_detail": detail,
+            **risk_lens,
+        }
+
+    def _folder_risk_imputation_summary(
+        self,
+        frame: pd.DataFrame,
+        *,
+        sample_file: str,
+        asset_class: str,
+        timeframe: str,
+        max_stale_bars: int,
+        bridge_max_gap_bars: int = 20,
+        max_grid_cells: int = 50_000,
+    ) -> dict[str, Any]:
+        if asset_class == "CORE" or timeframe in {"tick", "api_cache"}:
+            return {
+                "raw_rv_median": np.nan,
+                "ffill_rv_median": np.nan,
+                "bridge_rv_median": np.nan,
+                "bridge_vs_ffill_pct": np.nan,
+                "ffill_zero_return_pct": np.nan,
+                "bridge_zero_return_pct": np.nan,
+                "bridge_synthetic_pct": np.nan,
+                "risk_lens_detail": (
+                    f"Skipped for {asset_class} {timeframe}; bridge RV is reserved for regular daily/intraday panels."
+                ),
+            }
+        try:
+            risk_frame, risk_detail = self._cap_risk_lens_frame(
+                frame,
+                max_grid_cells=max_grid_cells,
+            )
+            if risk_frame.empty:
+                raise ValueError("not enough date/asset rows after risk-lens sampling")
+            result = compare_risk_imputation_views(
+                risk_frame,
+                timestamp_col="date",
+                asset_col="ticker",
+                price_col="close",
+                max_stale_bars=max_stale_bars,
+                bridge_max_gap_bars=bridge_max_gap_bars,
+                annualization=1.0,
+            )
+            summary = result.get("summary", {})
+        except Exception as exc:
+            return {
+                "raw_rv_median": np.nan,
+                "ffill_rv_median": np.nan,
+                "bridge_rv_median": np.nan,
+                "bridge_vs_ffill_pct": np.nan,
+                "ffill_zero_return_pct": np.nan,
+                "bridge_zero_return_pct": np.nan,
+                "bridge_synthetic_pct": np.nan,
+                "risk_lens_detail": f"Risk lens unavailable for {sample_file}: {exc}",
+            }
+
+        return {
+            "raw_rv_median": float(summary.get("raw_median_rv", np.nan)),
+            "ffill_rv_median": float(summary.get("ffill_median_rv", np.nan)),
+            "bridge_rv_median": float(summary.get("bridge_median_rv", np.nan)),
+            "bridge_vs_ffill_pct": float(summary.get("bridge_vs_ffill_pct", np.nan)),
+            "ffill_zero_return_pct": float(summary.get("ffill_zero_return_pct", np.nan)),
+            "bridge_zero_return_pct": float(summary.get("bridge_zero_return_pct", np.nan)),
+            "bridge_synthetic_pct": float(summary.get("bridge_synthetic_pct", np.nan)),
+            "risk_lens_detail": (
+                f"{asset_class} {timeframe}; per-bar median realized-vol comparison. "
+                f"{risk_detail} Brownian Bridge is risk-only and not alpha-safe."
+            ),
+        }
+
+    @staticmethod
+    def _cap_risk_lens_frame(
+        frame: pd.DataFrame,
+        *,
+        max_grid_cells: int,
+    ) -> tuple[pd.DataFrame, str]:
+        if frame.empty or not {"date", "ticker", "close"}.issubset(frame.columns):
+            return pd.DataFrame(columns=["date", "ticker", "close"]), ""
+
+        work = frame[["date", "ticker", "close"]].copy()
+        work["date"] = pd.to_datetime(work["date"], errors="coerce")
+        work["ticker"] = work["ticker"].astype(str).str.strip()
+        work["close"] = pd.to_numeric(work["close"], errors="coerce")
+        work = work.dropna(subset=["date", "ticker"])
+        work = work[work["ticker"] != ""]
+        if work.empty:
+            return work, ""
+
+        date_count = int(work["date"].nunique(dropna=True))
+        asset_count = int(work["ticker"].nunique(dropna=True))
+        estimated_grid = date_count * max(asset_count, 1)
+        if estimated_grid <= max_grid_cells:
+            return work, f"Scanned {date_count:,} timestamps x {asset_count:,} assets."
+
+        max_dates = max(2, int(max_grid_cells // max(asset_count, 1)))
+        keep_dates = (
+            pd.Series(work["date"].dropna().unique())
+            .sort_values()
+            .tail(max_dates)
+            .tolist()
+        )
+        capped = work[work["date"].isin(keep_dates)].copy()
+        capped_dates = int(capped["date"].nunique(dropna=True))
+        return (
+            capped,
+            f"Capped to latest {capped_dates:,}/{date_count:,} timestamps for dashboard speed.",
+        )
 
     def _market_coverage_snapshot(self, parquet_df: pd.DataFrame, tick_df: pd.DataFrame) -> pd.DataFrame:
         rows = []
@@ -1812,6 +2215,48 @@ class SystemHealthView:
         except Exception:
             pass
         return out
+
+    def _read_quality_parquet_sample(self, path: Path, *, max_rows: int) -> tuple[pd.DataFrame, bool, int]:
+        import pyarrow.parquet as pq
+
+        pq_file = pq.ParquetFile(path)
+        schema_names = list(pq_file.schema.names)
+        date_col = self._first_present(schema_names, ["date", "datetime", "timestamp", "trading_day", "datetime_nano"])
+        asset_col = self._first_present(schema_names, ["ticker", "symbol", "instrument_id", "contract", "wind_code", "underlying_symbol"])
+        price_col = self._first_present(
+            schema_names,
+            ["close", "settle", "settlement", "last_price", "last", "price", "mark", "mid", "adjusted_close"],
+        )
+        if not date_col or not asset_col or not price_col:
+            return pd.DataFrame(columns=["date", "ticker", "close"]), False, 0
+
+        columns = list(dict.fromkeys([date_col, asset_col, price_col]))
+        total_rows = int(pq_file.metadata.num_rows)
+        sampled = total_rows > max_rows
+        if not sampled:
+            raw = pd.read_parquet(path, columns=columns)
+        else:
+            row_groups: list[int] = []
+            selected_rows = 0
+            for idx in range(pq_file.metadata.num_row_groups - 1, -1, -1):
+                row_groups.append(idx)
+                selected_rows += int(pq_file.metadata.row_group(idx).num_rows)
+                if selected_rows >= max_rows:
+                    break
+            raw = pq_file.read_row_groups(sorted(row_groups), columns=columns).to_pandas()
+
+        out = pd.DataFrame(
+            {
+                "date": pd.to_datetime(raw[date_col], errors="coerce"),
+                "ticker": raw[asset_col].astype(str).str.strip(),
+                "close": pd.to_numeric(raw[price_col], errors="coerce"),
+            }
+        )
+        out.loc[out["close"].le(0), "close"] = np.nan
+        out = out.dropna(subset=["date", "ticker"])
+        out = out[out["ticker"] != ""]
+        out = out.sort_values(["ticker", "date"]).reset_index(drop=True)
+        return out, sampled, len(out)
 
     def _check_quant_core_import(self) -> tuple[str, str]:
         try:

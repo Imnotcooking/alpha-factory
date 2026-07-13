@@ -9,6 +9,16 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config import BASE_DIR, TEXT, get_plotly_template
+from oqp.contracts.market_vertical import normalize_market_vertical
+from oqp.data.runtime_paths import (
+    default_futures_cn_index_daily_file,
+    discover_asset_class_files,
+)
+from oqp.risk.factor_breadth import (
+    RiskBreadthConfig,
+    classify_breadth_regimes,
+    compute_risk_factor_breadth,
+)
 
 
 DNA_COPY = {
@@ -23,6 +33,28 @@ DNA_COPY = {
         "edge_stability": "Edge Stability Heatmap",
         "edge_caption": "Color shows average trade PnL by entry period and holding bucket. Hover reveals trade count, win rate, and total PnL.",
         "edge_color": "Avg PnL %",
+        "exposure_leverage": "Exposure & Leverage",
+        "exposure_caption": "Long/short notional bars show capital deployed; the line shows gross portfolio leverage.",
+        "exposure_legacy_caption": "This run has leverage data but no saved long/short notional split. Rerun the backtest to populate the bars.",
+        "long_notional": "Long notional",
+        "short_notional": "Short notional",
+        "gross_leverage": "Gross leverage",
+        "exposure_y": "Long / short notional",
+        "leverage_y": "Gross leverage",
+        "breadth_perf": "Performance by Market Breadth Regime",
+        "breadth_perf_caption": "This checks whether the factor survives compressed, normal, and expanded market-breadth periods. Low breadth is a stress/crowding lens; high breadth is a diversified-market lens.",
+        "breadth_unavailable": "Breadth regime diagnostics are unavailable for this run's asset class or date range.",
+        "breadth_regime": "Breadth Regime",
+        "breadth_low": "Low / Compressed",
+        "breadth_normal": "Normal",
+        "breadth_high": "High / Expanded",
+        "breadth_trades": "Trades",
+        "breadth_avg_trade": "Avg Trade PnL",
+        "breadth_sum_trade": "Total Trade PnL",
+        "breadth_win_rate": "Win Rate",
+        "breadth_avg_hold": "Avg Hold",
+        "breadth_sample_share": "Sample Share",
+        "breadth_source": "Breadth source",
         "hover_company": "Company",
         "hover_chinese_name": "Chinese Name",
         "hover_trades": "Trades",
@@ -79,6 +111,28 @@ If no trade ledger exists, the page falls back to portfolio-level returns so the
         "edge_stability": "边际稳定性热力图",
         "edge_caption": "颜色表示不同入场周期与持仓区间下的平均单笔交易 PnL。悬停可查看交易数、胜率和累计 PnL。",
         "edge_color": "平均 PnL %",
+        "exposure_leverage": "持仓敞口与杠杆率",
+        "exposure_caption": "多头/空头名义本金柱状图展示资金占用，折线展示组合总杠杆率。",
+        "exposure_legacy_caption": "该运行有杠杆率数据，但没有保存多空名义本金拆分。重新运行回测后柱状图会自动出现。",
+        "long_notional": "多头名义本金",
+        "short_notional": "空头名义本金",
+        "gross_leverage": "总杠杆率",
+        "exposure_y": "多空名义本金",
+        "leverage_y": "总杠杆率",
+        "breadth_perf": "不同市场广度阶段的表现",
+        "breadth_perf_caption": "这里检查因子在低广度、正常广度和高广度环境中是否都能生存。低广度是压力/拥挤视角，高广度是分散市场视角。",
+        "breadth_unavailable": "该运行的资产类别或日期范围暂时无法计算市场广度阶段诊断。",
+        "breadth_regime": "市场广度阶段",
+        "breadth_low": "低广度 / 压缩",
+        "breadth_normal": "正常",
+        "breadth_high": "高广度 / 扩张",
+        "breadth_trades": "交易数",
+        "breadth_avg_trade": "平均单笔 PnL",
+        "breadth_sum_trade": "累计单笔 PnL",
+        "breadth_win_rate": "胜率",
+        "breadth_avg_hold": "平均持仓",
+        "breadth_sample_share": "样本占比",
+        "breadth_source": "广度数据源",
         "hover_company": "公司",
         "hover_chinese_name": "中文名",
         "hover_trades": "交易数",
@@ -125,6 +179,46 @@ If no trade ledger exists, the page falls back to portfolio-level returns so the
 """,
     },
 }
+
+
+DNA_BREADTH_CACHE_VERSION = "strategy_dna_breadth_v1"
+
+
+def _breadth_source_for_asset_class(asset_class: object) -> Path | None:
+    try:
+        normalized = normalize_market_vertical(str(asset_class or "FUTURES_CN"))
+    except Exception:
+        normalized = "FUTURES_CN"
+    if normalized == "FUTURES_CN":
+        source = default_futures_cn_index_daily_file()
+        return source if source.exists() else None
+
+    files = discover_asset_class_files(normalized, timeframe="daily")
+    files = [path for path in files if path.exists()]
+    if not files:
+        return None
+    return max(files, key=lambda path: path.stat().st_mtime)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_breadth_regimes_for_dna(
+    source_path: str,
+    source_mtime: float,
+    asset_class: str,
+    cache_version: str,
+) -> pd.DataFrame:
+    max_assets = 75 if normalize_market_vertical(asset_class) == "FUTURES_CN" else 300
+    result = compute_risk_factor_breadth(
+        source_path,
+        RiskBreadthConfig(
+            asset_class=asset_class,
+            max_assets=max_assets,
+            rolling_window=504,
+            rolling_step=21,
+            rolling_min_assets=20,
+        ),
+    )
+    return classify_breadth_regimes(result.get("rolling_breadth", pd.DataFrame()))
 
 
 CN_FUTURES_PRODUCT_NAMES_ZH = {
@@ -236,7 +330,9 @@ class DNAView:
             return
 
         self._render_trade_metrics(trades, t)
+        self._render_exposure_leverage(run_id, template, copy)
         self._render_trade_charts(trades, template, copy)
+        self._render_breadth_regime_performance(run_id, trades, template, copy)
 
     def _render_metadata(self, run_id: str, copy: dict):
         runs_df = self.dm.get_all_runs()
@@ -357,6 +453,211 @@ class DNAView:
             ),
         )
 
+    def _render_exposure_leverage(self, run_id: str, template: str, copy: dict) -> None:
+        if self.dm is None:
+            return
+
+        returns = self.dm.get_run_returns(run_id)
+        exposure = self._exposure_leverage_frame(returns)
+        if exposure.empty:
+            return
+
+        has_long_short_split = bool(
+            exposure["long_notional"].abs().fillna(0.0).sum() > 1e-9
+            or exposure["short_notional"].abs().fillna(0.0).sum() > 1e-9
+        )
+
+        st.markdown(f"#### {copy['exposure_leverage']}")
+        st.caption(copy["exposure_caption"])
+        if not has_long_short_split:
+            st.caption(copy["exposure_legacy_caption"])
+
+        fig = go.Figure()
+        if exposure["long_notional"].abs().fillna(0.0).sum() > 1e-9:
+            fig.add_trace(
+                go.Bar(
+                    x=exposure["date"],
+                    y=exposure["long_notional"],
+                    name=copy["long_notional"],
+                    marker_color="#FCA5A5",
+                    opacity=0.86,
+                    hovertemplate=(
+                        "%{x|%Y-%m-%d}<br>"
+                        f"{copy['long_notional']}: %{{y:,.0f}}"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+        if exposure["short_notional"].abs().fillna(0.0).sum() > 1e-9:
+            fig.add_trace(
+                go.Bar(
+                    x=exposure["date"],
+                    y=exposure["short_notional"],
+                    name=copy["short_notional"],
+                    marker_color="#6EE7B7",
+                    opacity=0.86,
+                    hovertemplate=(
+                        "%{x|%Y-%m-%d}<br>"
+                        f"{copy['short_notional']}: %{{y:,.0f}}"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+        if exposure["gross_leverage"].notna().any():
+            fig.add_trace(
+                go.Scatter(
+                    x=exposure["date"],
+                    y=exposure["gross_leverage"],
+                    name=copy["gross_leverage"],
+                    mode="lines",
+                    line=dict(color="#111827", width=2.2),
+                    yaxis="y2",
+                    hovertemplate=(
+                        "%{x|%Y-%m-%d}<br>"
+                        f"{copy['gross_leverage']}: %{{y:.2f}}x"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+
+        fig.add_hline(y=0, line_color="rgba(100, 116, 139, 0.38)", line_width=1)
+        fig.update_layout(
+            template=template,
+            height=390,
+            barmode="relative",
+            margin=dict(l=10, r=10, t=18, b=10),
+            xaxis_title="",
+            yaxis=dict(title=copy["exposure_y"], tickformat="~s", zeroline=False),
+            yaxis2=dict(
+                title=copy["leverage_y"],
+                overlaying="y",
+                side="right",
+                tickformat=".2f",
+                rangemode="tozero",
+            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        st.plotly_chart(fig, width="stretch")
+
+    @staticmethod
+    def _exposure_leverage_frame(returns: pd.DataFrame) -> pd.DataFrame:
+        if returns.empty or "date" not in returns.columns:
+            return pd.DataFrame()
+
+        source = returns.copy()
+        dates = pd.to_datetime(source["date"], errors="coerce")
+        nav = DNAView._capital_series(source)
+        leverage = DNAView._first_numeric_column(
+            source,
+            [
+                "gross_leverage",
+                "portfolio_leverage",
+                "leverage",
+                "gross_exposure_to_nav",
+            ],
+        )
+        long_notional = DNAView._first_numeric_column(
+            source,
+            [
+                "long_notional",
+                "long_exposure",
+                "long_market_value",
+                "long_capital",
+                "long_value",
+            ],
+        )
+        short_notional = DNAView._first_numeric_column(
+            source,
+            [
+                "short_notional",
+                "short_exposure",
+                "short_market_value",
+                "short_capital",
+                "short_value",
+            ],
+        )
+        gross_notional = DNAView._first_numeric_column(
+            source,
+            [
+                "gross_notional",
+                "gross_exposure",
+                "gross_market_value",
+                "gross_capital",
+            ],
+        )
+
+        if long_notional is None and "long_weight" in source.columns and nav is not None:
+            long_notional = pd.to_numeric(source["long_weight"], errors="coerce").fillna(0.0) * nav
+        if short_notional is None and "short_weight" in source.columns and nav is not None:
+            short_notional = pd.to_numeric(source["short_weight"], errors="coerce").fillna(0.0) * nav
+        if gross_notional is None and leverage is not None and nav is not None:
+            gross_notional = leverage.abs() * nav
+        if leverage is None and nav is not None:
+            if gross_notional is not None:
+                leverage = gross_notional.abs() / nav.replace(0.0, np.nan)
+            elif long_notional is not None or short_notional is not None:
+                long_for_lev = long_notional if long_notional is not None else pd.Series(0.0, index=source.index)
+                short_for_lev = short_notional if short_notional is not None else pd.Series(0.0, index=source.index)
+                leverage = (long_for_lev.abs() + short_for_lev.abs()) / nav.replace(0.0, np.nan)
+
+        if long_notional is None:
+            long_notional = pd.Series(np.nan, index=source.index)
+        if short_notional is None:
+            short_notional = pd.Series(np.nan, index=source.index)
+        if leverage is None:
+            leverage = pd.Series(np.nan, index=source.index)
+
+        long_notional = pd.to_numeric(long_notional, errors="coerce")
+        short_notional = -pd.to_numeric(short_notional, errors="coerce").abs()
+        leverage = pd.to_numeric(leverage, errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+        out = pd.DataFrame(
+            {
+                "date": dates,
+                "long_notional": long_notional,
+                "short_notional": short_notional,
+                "gross_leverage": leverage,
+            }
+        ).dropna(subset=["date"])
+        if out.empty:
+            return pd.DataFrame()
+
+        has_notional = bool(
+            out["long_notional"].abs().fillna(0.0).sum() > 1e-9
+            or out["short_notional"].abs().fillna(0.0).sum() > 1e-9
+        )
+        has_leverage = bool(out["gross_leverage"].notna().any())
+        if not has_notional and not has_leverage:
+            return pd.DataFrame()
+        return out.sort_values("date").reset_index(drop=True)
+
+    @staticmethod
+    def _first_numeric_column(df: pd.DataFrame, candidates: list[str]) -> pd.Series | None:
+        for col in candidates:
+            if col not in df.columns:
+                continue
+            series = pd.to_numeric(df[col], errors="coerce")
+            if series.notna().any():
+                return series
+        return None
+
+    @staticmethod
+    def _capital_series(df: pd.DataFrame) -> pd.Series | None:
+        direct = DNAView._first_numeric_column(df, ["equity", "nav", "portfolio_value", "capital"])
+        if direct is not None and direct.notna().any():
+            return direct.replace([np.inf, -np.inf], np.nan)
+
+        initial = DNAView._first_numeric_column(df, ["initial_capital", "starting_capital"])
+        if initial is None or not initial.notna().any():
+            return None
+        base = initial.ffill().bfill()
+        if "net_return" not in df.columns:
+            return base.replace([np.inf, -np.inf], np.nan)
+
+        returns = pd.to_numeric(df["net_return"], errors="coerce").fillna(0.0)
+        curve = (1.0 + returns).cumprod()
+        return (base * curve).replace([np.inf, -np.inf], np.nan)
+
     def _render_trade_charts(self, trades: pd.DataFrame, template: str, copy: dict):
         top_left, top_right = st.columns([0.52, 0.48])
         bottom_left, bottom_right = st.columns([0.52, 0.48])
@@ -401,7 +702,7 @@ class DNAView:
                     yaxis_title="",
                     legend_title_text="",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
         with top_right:
             st.markdown(f"#### {copy['pnl_dist']}")
@@ -439,7 +740,7 @@ class DNAView:
                     yaxis_title=copy["dist_y"],
                     showlegend=False,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
         with bottom_left:
             st.markdown(f"#### {copy['holding_pain']}")
@@ -516,7 +817,7 @@ class DNAView:
                         legend_title_text=copy["hover_side"],
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
         with bottom_right:
             st.markdown(f"#### {copy['edge_stability']}")
@@ -595,7 +896,198 @@ class DNAView:
                 )
                 fig.update_xaxes(tickangle=-45)
                 fig.update_yaxes(autorange="reversed")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
+
+    def _render_breadth_regime_performance(
+        self,
+        run_id: str,
+        trades: pd.DataFrame,
+        template: str,
+        copy: dict,
+    ) -> None:
+        if self.dm is None:
+            return
+
+        runs = self.dm.get_all_runs()
+        run_rows = runs[runs["run_id"].astype(str).eq(str(run_id))] if not runs.empty else pd.DataFrame()
+        asset_class = run_rows.iloc[0].get("asset_class", "FUTURES_CN") if not run_rows.empty else "FUTURES_CN"
+        try:
+            asset_class = normalize_market_vertical(str(asset_class or "FUTURES_CN"))
+        except Exception:
+            asset_class = "FUTURES_CN"
+
+        source = _breadth_source_for_asset_class(asset_class)
+        if source is None:
+            return
+
+        try:
+            regimes = _cached_breadth_regimes_for_dna(
+                str(source),
+                source.stat().st_mtime,
+                asset_class,
+                DNA_BREADTH_CACHE_VERSION,
+            )
+        except Exception:
+            return
+
+        performance = self._breadth_regime_performance_frame(trades, regimes)
+        if performance.empty:
+            return
+
+        st.markdown("---")
+        st.markdown(f"#### {copy['breadth_perf']}")
+        st.caption(copy["breadth_perf_caption"])
+        try:
+            relative_source = source.relative_to(BASE_DIR)
+        except ValueError:
+            relative_source = source
+        st.caption(f"{copy['breadth_source']}: `{relative_source}`")
+
+        label_map = {
+            "Low": copy["breadth_low"],
+            "Normal": copy["breadth_normal"],
+            "High": copy["breadth_high"],
+        }
+        performance["regime_label"] = performance["breadth_regime"].map(label_map)
+        color_map = {
+            copy["breadth_low"]: "#EF4444",
+            copy["breadth_normal"]: "#F59E0B",
+            copy["breadth_high"]: "#22C55E",
+        }
+
+        fig = px.bar(
+            performance,
+            x="regime_label",
+            y="avg_trade_pnl_pct",
+            color="regime_label",
+            color_discrete_map=color_map,
+            custom_data=[
+                "trade_count",
+                "win_rate",
+                "sum_trade_pnl_pct",
+                "avg_holding_hours",
+                "sample_share",
+            ],
+            template=template,
+        )
+        fig.add_hline(y=0, line_dash="dash", line_color="gray")
+        fig.update_traces(
+            hovertemplate=(
+                f"{copy['breadth_regime']}: %{{x}}<br>"
+                f"{copy['breadth_trades']}: %{{customdata[0]:,}}<br>"
+                f"{copy['breadth_win_rate']}: %{{customdata[1]:.1%}}<br>"
+                f"{copy['breadth_sum_trade']}: %{{customdata[2]:+.2f}}%<br>"
+                f"{copy['breadth_avg_hold']}: %{{customdata[3]:.1f}}h<br>"
+                f"{copy['breadth_sample_share']}: %{{customdata[4]:.1%}}"
+                "<extra></extra>"
+            )
+        )
+        fig.update_layout(
+            height=330,
+            margin=dict(l=10, r=10, t=20, b=10),
+            xaxis_title="",
+            yaxis_title=copy["breadth_avg_trade"],
+            showlegend=False,
+        )
+        st.plotly_chart(fig, width="stretch")
+
+        sample_share_label = copy["breadth_sample_share"]
+        display = performance[
+            [
+                "regime_label",
+                "trade_count",
+                "avg_trade_pnl_pct",
+                "sum_trade_pnl_pct",
+                "win_rate",
+                "avg_holding_hours",
+                "sample_share",
+            ]
+        ].rename(
+            columns={
+                "regime_label": copy["breadth_regime"],
+                "trade_count": copy["breadth_trades"],
+                "avg_trade_pnl_pct": copy["breadth_avg_trade"],
+                "sum_trade_pnl_pct": copy["breadth_sum_trade"],
+                "win_rate": copy["breadth_win_rate"],
+                "avg_holding_hours": copy["breadth_avg_hold"],
+                "sample_share": sample_share_label,
+            }
+        )
+
+        def _style_breadth_rows(row: pd.Series) -> list[str]:
+            regime = str(row.get(copy["breadth_regime"], ""))
+            if regime == copy["breadth_low"]:
+                color = "background-color: rgba(239, 68, 68, 0.16)"
+            elif regime == copy["breadth_high"]:
+                color = "background-color: rgba(34, 197, 94, 0.14)"
+            else:
+                color = "background-color: rgba(245, 158, 11, 0.13)"
+            return [color] * len(row)
+
+        st.dataframe(
+            display.style.apply(_style_breadth_rows, axis=1).format(
+                {
+                    copy["breadth_avg_trade"]: "{:+.2f}%",
+                    copy["breadth_sum_trade"]: "{:+.2f}%",
+                    copy["breadth_win_rate"]: "{:.1%}",
+                    copy["breadth_avg_hold"]: "{:.1f}h",
+                    sample_share_label: "{:.1%}",
+                }
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+
+    @staticmethod
+    def _breadth_regime_performance_frame(
+        trades: pd.DataFrame,
+        regimes: pd.DataFrame,
+    ) -> pd.DataFrame:
+        if trades.empty or regimes.empty or "breadth_regime" not in regimes.columns:
+            return pd.DataFrame()
+
+        work = trades.copy()
+        if "trade_pnl_pct" not in work.columns and "trade_pnl" in work.columns:
+            work["trade_pnl_pct"] = pd.to_numeric(work["trade_pnl"], errors="coerce") * 100.0
+        work["trade_pnl_pct"] = pd.to_numeric(work.get("trade_pnl_pct"), errors="coerce")
+        work["holding_period_hours"] = pd.to_numeric(work.get("holding_period_hours"), errors="coerce")
+        entry = pd.to_datetime(work["entry_time"], errors="coerce") if "entry_time" in work.columns else pd.Series(pd.NaT, index=work.index)
+        exit_time = pd.to_datetime(work["exit_time"], errors="coerce") if "exit_time" in work.columns else pd.Series(pd.NaT, index=work.index)
+        work["_regime_time"] = entry.fillna(exit_time)
+        work = work.replace([np.inf, -np.inf], np.nan).dropna(subset=["_regime_time", "trade_pnl_pct"])
+        if work.empty:
+            return pd.DataFrame()
+
+        regime_frame = regimes[["date", "breadth_regime"]].copy()
+        regime_frame["date"] = pd.to_datetime(regime_frame["date"], errors="coerce")
+        regime_frame = regime_frame.dropna(subset=["date", "breadth_regime"]).sort_values("date")
+        if regime_frame.empty:
+            return pd.DataFrame()
+
+        aligned = pd.merge_asof(
+            work.sort_values("_regime_time"),
+            regime_frame,
+            left_on="_regime_time",
+            right_on="date",
+            direction="backward",
+        ).dropna(subset=["breadth_regime"])
+        if aligned.empty:
+            return pd.DataFrame()
+
+        grouped = (
+            aligned.groupby("breadth_regime", as_index=False)
+            .agg(
+                trade_count=("trade_pnl_pct", "size"),
+                avg_trade_pnl_pct=("trade_pnl_pct", "mean"),
+                sum_trade_pnl_pct=("trade_pnl_pct", "sum"),
+                win_rate=("trade_pnl_pct", lambda series: float((series > 0).mean())),
+                avg_holding_hours=("holding_period_hours", "mean"),
+            )
+        )
+        grouped["sample_share"] = grouped["trade_count"] / max(int(grouped["trade_count"].sum()), 1)
+        order = pd.CategoricalDtype(["Low", "Normal", "High"], ordered=True)
+        grouped["breadth_regime"] = grouped["breadth_regime"].astype(order)
+        return grouped.sort_values("breadth_regime").reset_index(drop=True)
 
     def _asset_winner_loser_frame(self, trades: pd.DataFrame) -> pd.DataFrame:
         asset = (
@@ -1063,14 +1555,14 @@ class DNAView:
                 yaxis=dict(title="Equity"),
                 yaxis2=dict(title="Drawdown", overlaying="y", side="right", tickformat=".0%"),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         with right:
             st.markdown(f"#### {copy['daily_return_dist']}")
             fig = px.histogram(df, x="net_return_pct", nbins=60, template=template)
             fig.add_vline(x=0, line_dash="dash", line_color="gray")
             fig.update_layout(height=420, margin=dict(l=10, r=10, t=20, b=10), xaxis_title="Daily Net Return (%)")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         st.markdown(f"#### {copy['turnover_return']}")
         fig = px.scatter(
@@ -1083,7 +1575,7 @@ class DNAView:
         )
         fig.add_hline(y=0, line_dash="dash", line_color="gray")
         fig.update_layout(height=360, margin=dict(l=10, r=10, t=20, b=10), yaxis_title="Daily Net Return (%)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     @staticmethod
     def _pct(value) -> str:

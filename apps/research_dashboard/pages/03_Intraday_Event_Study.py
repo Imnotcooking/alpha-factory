@@ -12,7 +12,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 if os.environ.get("OQP_EMBEDDED_STREAMLIT_PAGE") != "1":
-    st.set_page_config(page_title="Tick Event Study", layout="wide")
+    st.set_page_config(page_title="Intraday Event Study", layout="wide")
 
 from tick_pulse_lab.dashboard import TickPulseLabPage
 

@@ -44,5 +44,5 @@ def render_global_controls_in_sidebar():
         lang_label,
         on_click=toggle_lang,
         key="global_sidebar_lang_toggle",
-        use_container_width=True,
+        width="stretch",
     )

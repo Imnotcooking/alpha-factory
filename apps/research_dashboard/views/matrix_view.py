@@ -50,7 +50,7 @@ class MatrixView:
             val_col: "{:.4f}",
             hold_col: "{:.4f}"
         })
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=300)
+        st.dataframe(styled_df, width="stretch", hide_index=True, height=300)
 
     def render_correlation(self, lang: str = "EN"):
         """Renders the dynamic Factor Orthogonalization Heatmap in Tab 2."""
@@ -103,7 +103,7 @@ class MatrixView:
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)'
                 )
-                st.plotly_chart(fig_corr, use_container_width=True)
+                st.plotly_chart(fig_corr, width="stretch")
             else:
                 st.info(t["corr_select_min"])
         else:

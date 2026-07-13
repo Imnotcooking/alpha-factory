@@ -1,1 +1,1 @@
-"""Tick Event Study UI modules."""
+"""Intraday Event Study UI modules."""

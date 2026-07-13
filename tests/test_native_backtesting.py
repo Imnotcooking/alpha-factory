@@ -6,9 +6,10 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from oqp.native import load_quant_core, quant_core_status
-from oqp.research.backtesting import BacktestEngine, ExecutionBacktestRequest, PythonBacktestBackend
+from oqp.research.backtesting import BacktestEngine, ExecutionBacktestRequest, ExecutionDesk, PythonBacktestBackend
 
 
 class NativeLoaderTests(unittest.TestCase):
@@ -116,6 +117,41 @@ class PythonBacktestBackendTests(unittest.TestCase):
         self.assertEqual(result.backend.backend_id, "python")
         self.assertEqual(result.backend.metadata["asset_class"], "OPTIONS_US")
         self.assertEqual(result.backend.metadata["backtest_route"], "event_driven_options")
+
+
+class ExecutionDeskPolicyTests(unittest.TestCase):
+    def test_continuous_adjusted_futures_proxy_disables_price_limit_lock(self) -> None:
+        dates = pd.bdate_range("2025-01-01", periods=3)
+        frame = pd.DataFrame(
+            {
+                "date": dates,
+                "ticker": ["KQ.i@SHFE.rb"] * 3,
+                "open": [3000.0, 3000.0, 3600.0],
+                "high": [3010.0, 3610.0, 3610.0],
+                "low": [2990.0, 2990.0, 3590.0],
+                "close": [3000.0, 3600.0, 3600.0],
+                "volume": [1_000_000.0, 1_000_000.0, 1_000_000.0],
+                "forward_return": [0.20, 0.0, 0.0],
+                "execution_period_return": [0.20, 0.0, 0.0],
+                "execution_price": [3000.0, 3600.0, 3600.0],
+                "signal": [0.25, 0.0, 0.0],
+            }
+        )
+        frame.attrs["dataset_role"] = "continuous_contract_research"
+        frame.attrs["data_price_source"] = "continuous_adjusted_daily"
+
+        _, _, executed = ExecutionDesk(
+            asset_class="FUTURES_CN",
+            max_leverage=1.0,
+            integer_lots=False,
+            initial_capital=10_000_000.0,
+            capital_currency="CNY",
+            min_trade_weight_delta=0.0,
+        ).run_backtest(frame, signal_col="signal")
+
+        self.assertFalse(bool(executed.attrs["price_limit_enabled"]))
+        self.assertTrue(bool(executed.attrs["price_limit_disabled_for_proxy_data"]))
+        self.assertIn("disabled for continuous_contract_research", executed.attrs["price_limit_model"])
 
 
 if __name__ == "__main__":

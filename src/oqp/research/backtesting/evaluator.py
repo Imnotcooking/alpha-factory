@@ -414,10 +414,32 @@ class ExecutionDesk:
             )
             df.attrs["margin_model"] = f"FuturesMargin(maintenance_req={margin_req:g})"
 
-        has_limits = config_data.get("price_limit", False)
+        taxonomy_has_limits = bool(config_data.get("price_limit", False))
+        data_price_source = str(df.attrs.get("data_price_source") or "").strip().lower()
+        dataset_role = str(df.attrs.get("dataset_role") or "").strip().lower()
+        disable_limits_for_proxy = (
+            taxonomy_has_limits
+            and "FUTURES" in self.asset_class
+            and (
+                data_price_source in {"continuous_adjusted_daily", "daily_index"}
+                or dataset_role in {"continuous_contract_research", "research_index"}
+            )
+        )
+        has_limits = taxonomy_has_limits and not disable_limits_for_proxy
         is_t1 = True if config_data.get("t_settlement", 0) == 1 else False
+        df.attrs["price_limit_taxonomy_enabled"] = taxonomy_has_limits
+        df.attrs["price_limit_disabled_for_proxy_data"] = bool(disable_limits_for_proxy)
         df.attrs["price_limit_enabled"] = bool(has_limits)
         df.attrs["price_limit_model"] = config_data.get("price_limit_model", "none")
+        if disable_limits_for_proxy:
+            df.attrs["price_limit_model"] = (
+                f"{df.attrs['price_limit_model']} "
+                f"(disabled for {dataset_role or data_price_source or 'research proxy'} data)"
+            )
+            print(
+                "   -> Price-limit lock disabled for continuous/index futures research data; "
+                "taxonomy limit policy still applies to executable contract data."
+            )
         df.attrs["t1_enabled"] = bool(is_t1)
 
         if vectorizable:
@@ -523,6 +545,9 @@ class ExecutionDesk:
 
         df['cum_net_equity'] = df['equity'] / self.initial_capital
         df['weight'] = df['executed_weight']
+        executed_weight = pd.to_numeric(df.get('executed_weight', 0.0), errors='coerce').fillna(0.0)
+        df['long_weight_component'] = executed_weight.clip(lower=0.0)
+        df['short_weight_component'] = executed_weight.clip(upper=0.0)
         
         # Calculate true chronological turnover per asset. Do not reorder df here:
         # the C++ equity curve was produced in date/ticker order, so daily equity
@@ -540,7 +565,9 @@ class ExecutionDesk:
             daily_slippage_cost=('slippage_cost', 'sum'),
             daily_exchange_fee=('exchange_fee', 'sum'),
             daily_total_cost=('total_cost', 'sum'),
-            portfolio_leverage=('portfolio_leverage', 'last'),
+            portfolio_leverage=('portfolio_leverage', lambda values: pd.to_numeric(values, errors='coerce').abs().max()),
+            long_weight=('long_weight_component', 'sum'),
+            short_weight=('short_weight_component', 'sum'),
             lot_constrained_rate=('is_lot_constrained', 'mean'),
             fee_constrained_rate=('is_fee_constrained', 'mean'),
             avg_one_lot_weight=('one_lot_weight', 'mean'),
@@ -558,6 +585,13 @@ class ExecutionDesk:
             portfolio['daily_total_cost'].fillna(0.0) / previous_equity * 10000.0
         ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
         portfolio['date'] = pd.to_datetime(portfolio['trading_day'])
+        equity_for_exposure = pd.to_numeric(portfolio['equity'], errors='coerce').fillna(self.initial_capital)
+        long_weight = pd.to_numeric(portfolio.get('long_weight', 0.0), errors='coerce').fillna(0.0).clip(lower=0.0)
+        short_weight = pd.to_numeric(portfolio.get('short_weight', 0.0), errors='coerce').fillna(0.0).clip(upper=0.0)
+        portfolio['long_notional'] = long_weight * equity_for_exposure
+        portfolio['short_notional'] = short_weight * equity_for_exposure
+        portfolio['gross_notional'] = portfolio['long_notional'].abs() + portfolio['short_notional'].abs()
+        portfolio['net_notional'] = portfolio['long_notional'] + portfolio['short_notional']
         
         if benchmark_df is not None and not benchmark_df.empty:
             benchmark_cols = [
@@ -1460,6 +1494,12 @@ class AlphaEvaluator:
             "daily_total_cost",
             "daily_cost_bps",
             "portfolio_leverage",
+            "long_weight",
+            "short_weight",
+            "long_notional",
+            "short_notional",
+            "gross_notional",
+            "net_notional",
             "initial_capital",
             "capital_currency",
             "min_trade_weight_delta",
@@ -1479,6 +1519,25 @@ class AlphaEvaluator:
             if col not in out.columns:
                 out[col] = 0.0
             out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
+        if "gross_notional" not in out.columns and "gross_exposure" in out.columns:
+            out["gross_notional"] = pd.to_numeric(out["gross_exposure"], errors="coerce").fillna(0.0)
+        if "long_notional" not in out.columns:
+            out["long_notional"] = pd.to_numeric(out.get("gross_notional", 0.0), errors="coerce").fillna(0.0)
+        if "short_notional" not in out.columns:
+            out["short_notional"] = 0.0
+        out["long_notional"] = pd.to_numeric(out["long_notional"], errors="coerce").fillna(0.0)
+        out["short_notional"] = -pd.to_numeric(out["short_notional"], errors="coerce").abs().fillna(0.0)
+        if "gross_notional" not in out.columns:
+            out["gross_notional"] = out["long_notional"].abs() + out["short_notional"].abs()
+        if "net_notional" not in out.columns:
+            out["net_notional"] = out["long_notional"] + out["short_notional"]
+        capital = pd.Series(float(initial_capital), index=out.index).replace(0.0, np.nan)
+        if "long_weight" not in out.columns:
+            out["long_weight"] = out["long_notional"] / capital
+        if "short_weight" not in out.columns:
+            out["short_weight"] = out["short_notional"] / capital
+        for col in ("long_weight", "short_weight", "gross_notional", "net_notional"):
+            out[col] = pd.to_numeric(out[col], errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0.0)
         out["benchmark_return"] = 0.0
         out["daily_slippage_cost"] = 0.0
         out["daily_exchange_fee"] = 0.0
@@ -1903,6 +1962,27 @@ class AlphaEvaluator:
             "fee_constrained_rate": float(portfolio.get("fee_constrained_rate", pd.Series([0.0])).mean()),
             "lot_constrained_rate": float(portfolio.get("lot_constrained_rate", pd.Series([0.0])).mean()),
         }
+        signal_diagnostics = self._derive_signal_diagnostics(
+            df,
+            signal_col=execution_signal_col,
+            target_col=df.attrs.get("execution_weight_col") or execution_signal_col,
+            min_delta=float(min_trade_weight_delta),
+        )
+        signal_diagnostics["executed_weight_change_count"] = self._weight_change_count(
+            asset_df,
+            "executed_weight",
+            min_delta=float(min_trade_weight_delta),
+        )
+        signal_diagnostics["execution_trade_event_count"] = int(
+            pd.to_numeric(
+                asset_df.get("trade_contracts", pd.Series(dtype=float)),
+                errors="coerce",
+            )
+            .fillna(0.0)
+            .abs()
+            .gt(0.0)
+            .sum()
+        )
 
         manifest = {
             "run_id": run_id,
@@ -1914,6 +1994,14 @@ class AlphaEvaluator:
             "data": {
                 "source_path": df.attrs.get("source_path") or df.attrs.get("data_file"),
                 "frequency": df.attrs.get("data_frequency"),
+                "prepared_data_start": df.attrs.get("prepared_data_start"),
+                "prepared_data_end": df.attrs.get("prepared_data_end"),
+                "prepared_data_rows": df.attrs.get("prepared_data_rows"),
+                "backtest_start": df.attrs.get("backtest_start"),
+                "backtest_end": df.attrs.get("backtest_end"),
+                "backtest_rows": df.attrs.get("backtest_rows"),
+                "requested_start_date": df.attrs.get("requested_start_date"),
+                "requested_end_date": df.attrs.get("requested_end_date"),
                 "dataset_role": df.attrs.get("dataset_role"),
                 "tradability": df.attrs.get("data_tradability"),
                 "price_source": df.attrs.get("data_price_source"),
@@ -1952,10 +2040,22 @@ class AlphaEvaluator:
                 "direct_weight_row_grid_preserved": df.attrs.get("execution_mode") == "direct",
             },
             "costs_and_slippage": costs_and_slippage,
+            "signal_diagnostics": signal_diagnostics,
             "benchmark": benchmark_summary,
             "realized_summary": {
                 "returns_file_path": returns_file_path,
+                "start_date": (
+                    str(pd.to_datetime(portfolio.get("date"), errors="coerce").dropna().min().date())
+                    if "date" in portfolio.columns and pd.to_datetime(portfolio.get("date"), errors="coerce").notna().any()
+                    else None
+                ),
+                "end_date": (
+                    str(pd.to_datetime(portfolio.get("date"), errors="coerce").dropna().max().date())
+                    if "date" in portfolio.columns and pd.to_datetime(portfolio.get("date"), errors="coerce").notna().any()
+                    else None
+                ),
                 "trading_days": int(len(portfolio)),
+                "annualization_years_252": float(len(portfolio) / 252.0),
                 "avg_daily_turnover": float(portfolio.get("daily_turnover", pd.Series([0.0])).mean()),
                 "avg_daily_cost_bps": avg_daily_cost_bps,
                 "max_portfolio_leverage": float(portfolio.get("portfolio_leverage", pd.Series([0.0])).max()),
@@ -1965,6 +2065,124 @@ class AlphaEvaluator:
             json.dump(manifest, handle, indent=2, sort_keys=True, default=str)
         print(f"   🧾 Saved assumption manifest to {path}")
         return path
+
+    @staticmethod
+    def _derive_signal_diagnostics(
+        frame: pd.DataFrame,
+        *,
+        signal_col: str | None,
+        target_col: str | None = None,
+        min_delta: float = 1e-12,
+    ) -> dict:
+        if frame is None or frame.empty:
+            return {
+                "signal_col": signal_col,
+                "target_col": target_col,
+                "state_col": None,
+                "raw_entry_count": 0,
+                "raw_exit_count": 0,
+                "raw_event_count": 0,
+                "active_signal_row_count": 0,
+                "active_state_row_count": 0,
+                "target_weight_change_count": 0,
+            }
+
+        out = frame.copy()
+        sort_cols = [col for col in ("ticker", "date") if col in out.columns]
+        if sort_cols:
+            out = out.sort_values(sort_cols).reset_index(drop=True)
+
+        threshold = max(float(min_delta), 1e-12)
+        if signal_col and signal_col in out.columns:
+            signal = pd.to_numeric(out[signal_col], errors="coerce").fillna(0.0)
+        else:
+            signal = pd.Series(0.0, index=out.index)
+            signal_col = None
+
+        state_col = AlphaEvaluator._select_state_column(out)
+        if state_col:
+            state = pd.to_numeric(out[state_col], errors="coerce").fillna(0.0)
+        else:
+            state = signal
+        state_sign = np.sign(state)
+        prev_state = AlphaEvaluator._grouped_shift(out, state_sign).fillna(0.0)
+        raw_entries = state_sign.ne(0.0) & prev_state.eq(0.0)
+        raw_exits = state_sign.eq(0.0) & prev_state.ne(0.0)
+        reversals = state_sign.ne(0.0) & prev_state.ne(0.0) & state_sign.ne(prev_state)
+        raw_entry_count = int(raw_entries.sum() + reversals.sum())
+        raw_exit_count = int(raw_exits.sum() + reversals.sum())
+
+        resolved_target_col = AlphaEvaluator._select_target_column(out, target_col, signal_col)
+        target_change_count = AlphaEvaluator._weight_change_count(
+            out,
+            resolved_target_col,
+            min_delta=threshold,
+        )
+
+        return {
+            "signal_col": signal_col,
+            "target_col": resolved_target_col,
+            "state_col": state_col,
+            "raw_entry_count": raw_entry_count,
+            "raw_exit_count": raw_exit_count,
+            "raw_event_count": raw_entry_count + raw_exit_count,
+            "active_signal_row_count": int(signal.abs().gt(threshold).sum()),
+            "active_state_row_count": int(pd.Series(state_sign).abs().gt(0.0).sum()),
+            "target_weight_change_count": int(target_change_count),
+        }
+
+    @staticmethod
+    def _select_state_column(frame: pd.DataFrame) -> str | None:
+        candidates = [str(col) for col in frame.columns]
+        for column in candidates:
+            if column.endswith("active_state"):
+                return column
+        for column in candidates:
+            if "active_state" in column:
+                return column
+        return None
+
+    @staticmethod
+    def _select_target_column(
+        frame: pd.DataFrame,
+        target_col: str | None,
+        signal_col: str | None,
+    ) -> str | None:
+        for column in [
+            target_col,
+            "target_weight",
+            "final_target_weight",
+            "signal",
+            signal_col,
+            "factor_score",
+        ]:
+            if column and column in frame.columns:
+                return str(column)
+        return None
+
+    @staticmethod
+    def _grouped_shift(frame: pd.DataFrame, series: pd.Series) -> pd.Series:
+        if "ticker" in frame.columns:
+            return series.groupby(frame["ticker"], sort=False).shift(1)
+        return series.shift(1)
+
+    @staticmethod
+    def _weight_change_count(
+        frame: pd.DataFrame,
+        column: str | None,
+        *,
+        min_delta: float = 1e-12,
+    ) -> int:
+        if frame is None or frame.empty or not column or column not in frame.columns:
+            return 0
+        out = frame.copy()
+        sort_cols = [col for col in ("ticker", "date") if col in out.columns]
+        if sort_cols:
+            out = out.sort_values(sort_cols).reset_index(drop=True)
+        values = pd.to_numeric(out[column], errors="coerce").fillna(0.0)
+        diff = values.groupby(out["ticker"], sort=False).diff() if "ticker" in out.columns else values.diff()
+        diff = diff.fillna(values).abs()
+        return int(diff.gt(max(float(min_delta), 1e-12)).sum())
 
     @staticmethod
     def _build_benchmark_frame(clean_df: pd.DataFrame, benchmark_policy: dict) -> pd.DataFrame:
@@ -2241,11 +2459,35 @@ class AlphaEvaluator:
             traded_tickers=traded_tickers_str,
         )
 
-        factor_params = df.attrs.get("factor_params", {})
-        factor_event_stats = df.attrs.get("factor_event_stats", {})
         factor_contract = df.attrs.get("factor_contract", {})
         if not isinstance(factor_contract, dict):
             factor_contract = {}
+        signal_diag_col = next(
+            (
+                col
+                for col in [
+                    factor_contract.get("execution_weight_col"),
+                    df.attrs.get("execution_weight_col"),
+                    "signal",
+                    "target_weight",
+                    "final_target_weight",
+                    "factor_score",
+                ]
+                if col and col in df.columns
+            ),
+            None,
+        )
+        inferred_signal_diagnostics = self._derive_signal_diagnostics(
+            df,
+            signal_col=signal_diag_col,
+            target_col=signal_diag_col,
+            min_delta=1e-12,
+        )
+        df.attrs["signal_diagnostics"] = inferred_signal_diagnostics
+        factor_params = df.attrs.get("factor_params", {})
+        factor_event_stats = df.attrs.get("factor_event_stats", {})
+        if not isinstance(factor_event_stats, dict):
+            factor_event_stats = {}
         execution_lot_mode = str(df.attrs.get("execution_lot_mode", ""))
         execution_lot_mode_requested = str(df.attrs.get("execution_lot_mode_requested", "auto"))
         initial_capital = float(df.attrs.get("initial_capital", 1_000_000.0) or 1_000_000.0)
@@ -2265,10 +2507,22 @@ class AlphaEvaluator:
         factor_params_json = json.dumps(factor_params, sort_keys=True)
         selected_product = str(df.attrs.get("selected_product", ""))
         selected_symbol = str(df.attrs.get("selected_symbol", ""))
-        raw_event_count = int(factor_event_stats.get("raw_events", 0) or 0)
-        quality_event_count = int(factor_event_stats.get("quality_events", 0) or 0)
+        raw_event_count = int(
+            factor_event_stats.get("raw_events")
+            or inferred_signal_diagnostics.get("raw_event_count")
+            or 0
+        )
+        quality_event_count = int(
+            factor_event_stats.get("quality_events")
+            or inferred_signal_diagnostics.get("raw_entry_count")
+            or 0
+        )
         throttled_event_count = int(factor_event_stats.get("throttled_events", 0) or 0)
-        active_tick_count = int(factor_event_stats.get("active_ticks", 0) or 0)
+        active_tick_count = int(
+            factor_event_stats.get("active_ticks")
+            or inferred_signal_diagnostics.get("active_signal_row_count")
+            or 0
+        )
         research_family = str(df.attrs.get("research_family") or factor_id)
         params_hash = stable_trial_hash({"factor_params": factor_params})
         trial_signature_payload = {
@@ -2620,6 +2874,12 @@ class AlphaEvaluator:
                 'daily_total_cost',
                 'daily_cost_bps',
                 'portfolio_leverage',
+                'long_weight',
+                'short_weight',
+                'long_notional',
+                'short_notional',
+                'gross_notional',
+                'net_notional',
                 'initial_capital',
                 'capital_currency',
                 'min_trade_weight_delta',

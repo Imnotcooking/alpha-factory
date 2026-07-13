@@ -539,6 +539,17 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "assumptions_available": "Available manifests",
         "assumptions_manifest_path": "Manifest",
         "assumptions_data": "Data",
+        "assumptions_data_health": "Data Health",
+        "assumptions_data_health_note": "Accounting views may forward-fill stale marks, while alpha views must block synthetic inputs.",
+        "assumptions_data_health_missing": "Data health snapshot is unavailable.",
+        "assumptions_health_status": "Status",
+        "assumptions_health_asset": "Asset",
+        "assumptions_health_timeframe": "Timeframe",
+        "assumptions_health_file": "Sample file",
+        "assumptions_health_fresh": "Fresh %",
+        "assumptions_health_synthetic": "Synthetic %",
+        "assumptions_health_expired": "Expired rows",
+        "assumptions_health_policy": "Fill policy",
         "assumptions_signal": "Signal & Execution",
         "assumptions_engine": "Execution Engine",
         "assumptions_liquidity": "Liquidity Policy",
@@ -675,6 +686,15 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "avg_turnover": "Avg Turnover",
         "holdout_ic": "Holdout IC",
         "total_trades": "Total Trades",
+        "test_scope": "Run: {run_id} | Backtest result window used by widgets/charts: {start} to {end} | Return rows: {rows:,} (~{years:.2f}y annualization) | Prepared data: {prepared_window} | Requested filter: {requested_window} | Frequency: {frequency} | Data: {role} | Return clock: {return_clock} | Source: {source}",
+        "raw_entries": "Raw Entries",
+        "raw_exits": "Raw Exits",
+        "target_weight_changes": "Target-Weight Changes",
+        "active_signal_rows": "Active Signal Rows",
+        "axis_cum_return": "Cumulative return (%)",
+        "axis_drawdown": "Drawdown (%)",
+        "axis_gross_leverage": "Gross exposure (x)",
+        "axis_date": "Date",
         "leaderboard_title": "### 🏆 Alpha Leaderboard",
         "corr_select_factors": "🔍 Select Factors to Compare",
         "corr_select_min": "👆 Please select at least two factors from the dropdown above to view the correlation "
@@ -956,6 +976,17 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "assumptions_available": "可用假设清单",
         "assumptions_manifest_path": "清单文件",
         "assumptions_data": "数据",
+        "assumptions_data_health": "数据健康",
+        "assumptions_data_health_note": "会计视图可以前向填充陈旧价格，但 Alpha 视图必须阻止合成输入。",
+        "assumptions_data_health_missing": "数据健康快照不可用。",
+        "assumptions_health_status": "状态",
+        "assumptions_health_asset": "资产",
+        "assumptions_health_timeframe": "周期",
+        "assumptions_health_file": "样本文件",
+        "assumptions_health_fresh": "新鲜占比",
+        "assumptions_health_synthetic": "合成占比",
+        "assumptions_health_expired": "过期行数",
+        "assumptions_health_policy": "填充策略",
         "assumptions_signal": "信号与执行",
         "assumptions_engine": "执行引擎",
         "assumptions_liquidity": "流动性规则",
@@ -1061,6 +1092,15 @@ RESEARCH_TEXT: dict[str, dict[str, Any]] = {
         "avg_turnover": "平均换手率",
         "holdout_ic": "样本外 IC",
         "total_trades": "总交易笔数",
+        "test_scope": "运行：{run_id} | 下方指标/图表使用的回测结果区间：{start} 至 {end} | 收益行数：{rows:,}（约 {years:.2f} 年化）| 准备后数据：{prepared_window} | 请求过滤：{requested_window} | 频率：{frequency} | 数据：{role} | 收益口径：{return_clock} | 来源：{source}",
+        "raw_entries": "原始开仓信号",
+        "raw_exits": "原始平仓信号",
+        "target_weight_changes": "目标权重变化次数",
+        "active_signal_rows": "活跃信号行数",
+        "axis_cum_return": "累计收益 (%)",
+        "axis_drawdown": "回撤 (%)",
+        "axis_gross_leverage": "总风险敞口 (x)",
+        "axis_date": "日期",
         "leaderboard_title": "### 🏆 Alpha 排行榜",
         "corr_select_factors": "🔍 选择要对比的因子",
         "corr_select_min": "👆 请至少选择两个因子以查看相关性矩阵。",
@@ -1656,10 +1696,10 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
     },
     "tick_pulse_lab": {
         "en": {
-            "title": "Tick Event Study",
-            "subtitle": "Tick-level event tests for market microstructure hypotheses.",
+            "title": "Intraday Event Study",
+            "subtitle": "Intraday event tests for market microstructure hypotheses.",
             "file": "Tick parquet file",
-            "nav_label": "Tick Event Study navigation",
+            "nav_label": "Intraday Event Study navigation",
             "loading_file": "Loading tick parquet...",
             "loading_summary": "Building contract universe...",
             "loading_features": "Building selected contract features...",
@@ -1682,8 +1722,8 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
                 "saved_seed": "Saved Discovery seed",
             },
             "saved_seed_select": "Saved seed",
-            "saved_seed_empty": "No saved Pulse Discovery seeds yet. Open Pulse Scan, inspect "
-            "a pulse, then save it as a hypothesis seed.",
+            "saved_seed_empty": "No saved discovery seeds yet. Open Pattern Lab, "
+            "inspect a pulse, then save it as a hypothesis seed.",
             "saved_seed_scope_warning": "This seed was created from `{seed_file}` / `{seed_symbol}`. "
             "You are currently testing `{current_file}` / "
             "`{current_symbol}`.",
@@ -1894,25 +1934,52 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
                 "oi": "Open interest, usually cumulative open contracts.",
             },
             "contracts": "Contract Universe",
-            "asset_ranker_tab": "Asset Download Ranker",
-            "asset_ranker_title": "Asset Download Ranker",
-            "asset_ranker_intro": "Use the whole-market daily parquet to rank Chinese futures by recent "
-            "realized volatility before downloading expensive tick files one by "
-            "one.",
-            "asset_ranker_manual_title": "How to use this list",
+            "asset_ranker_tab": "Pattern Scope",
+            "asset_ranker_title": "Pattern Lens Scope",
+            "asset_ranker_intro": "Choose a lens before ranking assets. Daily, 1-minute, and tick data "
+            "answer different research questions, so their purpose is shown "
+            "explicitly before the metrics.",
+            "asset_ranker_manual_title": "Why use different lenses?",
             "asset_ranker_manual": "\n"
-            "This is a pre-download triage view.\n"
+            "Different timeframes expose different market behavior.\n"
             "\n"
-            "1. Use the all-market daily index parquet as the source.\n"
-            "2. Rank by **Download Priority** when you want volatile but still "
-            "reasonably liquid contracts.\n"
-            "3. Rank by **Recent Volatility** when you only care about price "
-            "movement.\n"
-            "4. Download tick data for the top symbols, then return to the Tick "
-            "Pulse Lab to test hypotheses contract by contract.\n"
+            "1. **Daily Scope** finds broad asset candidates: which markets move "
+            "enough and have enough volume/coverage to deserve deeper work.\n"
+            "2. **1m Intraday** checks whether movement survives inside the day: "
+            "session effects, trendiness, choppiness, and time-of-day clues.\n"
+            "3. **Tick Microstructure** checks execution reality: pulse density, "
+            "spread/noise, liquidity bursts, and whether a pattern can survive "
+            "costs.\n"
             "\n"
             "`Download Priority = 65% volatility percentile + 20% volume "
             "percentile + 10% open-interest percentile + 5% data coverage`.\n",
+            "pattern_lens": "Pattern lens",
+            "pattern_lens_options": {
+                "daily": "Daily Scope",
+                "minute": "1m Intraday",
+                "tick": "Tick Microstructure",
+            },
+            "pattern_lens_purpose": {
+                "daily": "Daily lens: broad triage. Use it to decide which assets are worth deeper research before spending time on intraday or tick data.",
+                "minute": "1m lens: intraday behavior. Use it to compare realized volatility, trendiness, and session effects inside the trading day.",
+                "tick": "Tick lens: execution reality. Use it to inspect pulse density, spread/noise, liquidity bursts, and microstructure feasibility.",
+            },
+            "pattern_lens_data_note": {
+                "daily": "Daily ranking uses close-to-close returns and daily liquidity. It is a broad asset-selection lens, not proof that minute/tick strategies will work.",
+                "minute": "1m ranking uses bar-to-bar returns from intraday parquet. It is closer to strategy behavior, but still ignores order-book execution costs.",
+            },
+            "asset_source_file": {
+                "daily": "Whole-market daily parquet",
+                "minute": "1-minute parquet",
+            },
+            "asset_lookback_by_lens": {
+                "daily": "Volatility lookback (days)",
+                "minute": "Volatility lookback (1m bars)",
+            },
+            "asset_min_obs_by_lens": {
+                "daily": "Minimum valid days",
+                "minute": "Minimum valid 1m bars",
+            },
             "asset_daily_file": "Whole-market daily parquet",
             "asset_lookback": "Volatility lookback",
             "asset_min_obs": "Minimum valid days",
@@ -1931,10 +1998,30 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "asset_rank_download": "Download ranked candidates CSV",
             "manager_demo_download_hidden": "Download disabled in manager demo mode.",
             "asset_rank_chart": "Top Volatility Candidates",
-            "asset_rank_table": "Candidate Download List",
-            "asset_rank_note": "High volatility is useful for pulse discovery, but thin contracts can "
-            "create fake microstructure signals. Prefer names that combine high vol, "
-            "enough volume, and healthy coverage.",
+            "asset_rank_table": "Candidate Pattern List",
+            "asset_rank_chart_by_lens": {
+                "daily": "Daily Volatility Candidates",
+                "minute": "1m Intraday Volatility Candidates",
+            },
+            "asset_rank_table_by_lens": {
+                "daily": "Daily Scope Candidate List",
+                "minute": "1m Pattern Candidate List",
+            },
+            "asset_rank_note": "High volatility is useful, but each lens answers a different question. "
+            "Prefer names that combine movement, enough liquidity, and healthy coverage.",
+            "dataset_timeframe": "Data timeframe",
+            "dataset_start": "Start",
+            "dataset_end": "End",
+            "dataset_assets": "Assets",
+            "dataset_rows": "Rows",
+            "dataset_date_range": "Date range",
+            "tick_lens_title": "Available Tick Files",
+            "tick_lens_caption": "Tick data is not ranked with daily-volatility logic. Use it for pulse density, spread/noise, liquidity bursts, and event-level validation.",
+            "tick_lens_route": "Next step for this lens: open Pulse Workspace for a single contract, or Cross-Asset Map for pulse behavior across downloaded tick files.",
+            "tick_file_count": "Tick files",
+            "tick_file": "Tick file",
+            "tick_size_mb": "Size MB",
+            "tick_modified": "Modified",
             "asset_rank_metrics": {
                 "ranked_assets": "Ranked assets",
                 "top_vol": "Top vol",
@@ -2316,10 +2403,10 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "clear accuracy edge above 50%, and positive average future ticks.\n",
         },
         "zh": {
-            "title": "Tick 事件研究",
-            "subtitle": "用 tick 级数据检验市场微观结构假设。",
+            "title": "日内事件研究",
+            "subtitle": "用日内数据检验市场微观结构假设。",
             "file": "Tick parquet 文件",
-            "nav_label": "Tick 事件研究导航",
+            "nav_label": "日内事件研究导航",
             "loading_file": "正在读取 tick parquet...",
             "loading_summary": "正在构建合约池...",
             "loading_features": "正在计算当前合约特征...",
@@ -2341,7 +2428,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
                 "saved_seed": "已保存发现种子",
             },
             "saved_seed_select": "已保存种子",
-            "saved_seed_empty": "还没有保存的 Pulse Discovery 种子。先打开脉冲发现实验室，检查一个脉冲，然后保存为假设种子。",
+            "saved_seed_empty": "还没有保存的发现种子。先打开模式实验室，检查一个脉冲，然后保存为假设种子。",
             "saved_seed_scope_warning": "这个种子来自 `{seed_file}` / `{seed_symbol}`。你当前正在测试 "
             "`{current_file}` / `{current_symbol}`。",
             "saved_seed_context": "种子规则上下文",
@@ -2511,19 +2598,45 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
                 "oi": "持仓量，通常表示当前未平仓合约数量。",
             },
             "contracts": "合约池",
-            "asset_ranker_tab": "下载候选排序",
-            "asset_ranker_title": "Tick 数据下载候选排序",
-            "asset_ranker_intro": "先用全市场日频 parquet 对中国期货按近期实现波动率排序，再决定哪些品种值得逐个下载 tick 数据。",
-            "asset_ranker_manual_title": "如何使用这个列表",
+            "asset_ranker_tab": "模式范围",
+            "asset_ranker_title": "模式镜头范围",
+            "asset_ranker_intro": "先选择研究镜头，再排序资产。日频、1分钟和 tick 数据回答的是不同问题，所以这里会先把每个镜头的用途说明清楚。",
+            "asset_ranker_manual_title": "为什么要用不同镜头？",
             "asset_ranker_manual": "\n"
-            "这是下载前的筛选页面。\n"
+            "不同时间尺度会暴露不同的市场行为。\n"
             "\n"
-            "1. 数据源选择全市场日频指数 parquet。\n"
-            "2. 如果想找“高波动且相对有流动性”的品种，用 **下载优先级** 排序。\n"
-            "3. 如果只关心价格波动，用 **近期波动率** 排序。\n"
-            "4. 下载排名靠前的品种 tick 数据后，再回到 Tick Event Study 逐个合约验证假设。\n"
+            "1. **日频范围**：先找大方向候选，判断哪些市场有足够波动、成交和覆盖度，值得深入研究。\n"
+            "2. **1分钟日内**：检查波动是否存在于日内，观察交易时段、趋势性、震荡和特定时间线索。\n"
+            "3. **Tick 微观结构**：检查执行现实，包括脉冲密度、价差/噪声、流动性爆发，以及模式是否可能覆盖成本。\n"
             "\n"
             "`下载优先级 = 65% 波动率分位 + 20% 成交量分位 + 10% 持仓量分位 + 5% 数据覆盖率`。\n",
+            "pattern_lens": "模式镜头",
+            "pattern_lens_options": {
+                "daily": "日频范围",
+                "minute": "1分钟日内",
+                "tick": "Tick 微观结构",
+            },
+            "pattern_lens_purpose": {
+                "daily": "日频镜头：用于大范围初筛。先判断哪些资产值得进一步研究，再投入时间看日内或 tick 数据。",
+                "minute": "1分钟镜头：用于观察日内行为。比较日内实现波动、趋势性、震荡性和交易时段效应。",
+                "tick": "Tick 镜头：用于检查执行现实。观察脉冲密度、价差/噪声、流动性爆发和微观结构可交易性。",
+            },
+            "pattern_lens_data_note": {
+                "daily": "日频排序使用收盘到收盘收益和日频流动性。它是资产初筛镜头，不证明分钟级或 tick 级策略一定有效。",
+                "minute": "1分钟排序使用日内 parquet 的 bar-to-bar 收益。它更接近策略行为，但仍未纳入盘口执行成本。",
+            },
+            "asset_source_file": {
+                "daily": "全市场日频 parquet",
+                "minute": "1分钟 parquet",
+            },
+            "asset_lookback_by_lens": {
+                "daily": "波动率回看窗口（日）",
+                "minute": "波动率回看窗口（1分钟 bar）",
+            },
+            "asset_min_obs_by_lens": {
+                "daily": "最少有效天数",
+                "minute": "最少有效1分钟 bar",
+            },
             "asset_daily_file": "全市场日频 parquet",
             "asset_lookback": "波动率回看窗口",
             "asset_min_obs": "最少有效天数",
@@ -2542,8 +2655,29 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "asset_rank_download": "下载候选列表 CSV",
             "manager_demo_download_hidden": "管理层演示模式下已禁用下载。",
             "asset_rank_chart": "高波动候选品种",
-            "asset_rank_table": "候选下载列表",
-            "asset_rank_note": "高波动有利于发现 tick 脉冲，但太不活跃的合约容易产生假的微观结构信号。优先选择高波动、成交量足够、数据覆盖健康的品种。",
+            "asset_rank_table": "模式候选列表",
+            "asset_rank_chart_by_lens": {
+                "daily": "日频波动候选",
+                "minute": "1分钟日内波动候选",
+            },
+            "asset_rank_table_by_lens": {
+                "daily": "日频范围候选列表",
+                "minute": "1分钟模式候选列表",
+            },
+            "asset_rank_note": "高波动有用，但每个镜头回答的是不同问题。优先选择有价格运动、流动性足够、数据覆盖健康的品种。",
+            "dataset_timeframe": "数据周期",
+            "dataset_start": "起始时间",
+            "dataset_end": "结束时间",
+            "dataset_assets": "资产数",
+            "dataset_rows": "行数",
+            "dataset_date_range": "日期区间",
+            "tick_lens_title": "可用 Tick 文件",
+            "tick_lens_caption": "Tick 数据不应套用日频波动排序。它用于观察脉冲密度、价差/噪声、流动性爆发和事件级验证。",
+            "tick_lens_route": "这个镜头的下一步：进入“脉冲工作台”检查单合约，或进入“跨资产地图”比较已下载 tick 文件的脉冲行为。",
+            "tick_file_count": "Tick 文件数",
+            "tick_file": "Tick 文件",
+            "tick_size_mb": "大小 MB",
+            "tick_modified": "修改时间",
             "asset_rank_metrics": {
                 "ranked_assets": "入榜资产数",
                 "top_vol": "最高波动率",
@@ -2878,8 +3012,8 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
     "pulse_discovery_lab": {
         "en": {
             "_lang": "EN",
-            "title": "Pulse Scan",
-            "subtitle": "Scan tick-level price jumps and save reproducible hypothesis seeds.",
+            "title": "Pattern Lab",
+            "subtitle": "Discover daily, intraday, and tick-level patterns before formal validation.",
             "file": "Tick parquet file",
             "symbol": "Contract",
             "window": "Rolling window",
@@ -2913,37 +3047,73 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "top20_avg": "Top20 avg",
             "tab_single": "Single Contract Explorer",
             "tab_cross_summary": "Cross-Asset Pulse Summary",
-            "nav_label": "Pulse Discovery navigation",
-            "section_asset_ranker": "Data Scope",
+            "nav_label": "Pattern Lab navigation",
+            "section_asset_ranker": "Lens Scope",
             "section_contract_universe": "Contract Health",
+            "section_clock_edge": "Clock Edge",
             "section_pulse_discovery": "Pulse Workspace",
             "section_cross_summary": "Cross-Asset Map",
             "workflow_title": "How this page works",
             "workflow_text": "\n"
-            "Use this page as discovery, not proof.\n"
+            "Use this page as discovery, not proof. Start by choosing the right "
+            "lens: daily for broad asset selection, 1-minute for intraday "
+            "behavior, and tick for execution/microstructure reality.\n"
             "\n"
-            "1. **Data Scope** ranks which assets are worth downloading or "
-            "inspecting first.\n"
+            "1. **Lens Scope** ranks or lists assets through the selected "
+            "timeframe lens and states what that lens is meant to reveal.\n"
             "2. **Contract Health** checks the selected tick file, contract "
             "universe, schema, and raw rows.\n"
-            "3. **Pulse Workspace** finds directionless abnormal moves, collapses "
+            "3. **Clock Edge** checks whether the selected contract behaves "
+            "differently by hour/session.\n"
+            "4. **Pulse Workspace** finds directionless abnormal moves, collapses "
             "duplicate rows into events, and lets you inspect one event deeply.\n"
-            "4. **Cross-Asset Map** compares pulse behavior across downloaded "
+            "5. **Cross-Asset Map** compares pulse behavior across downloaded "
             "assets.\n"
             "\n"
             "Healthy workflow: find repeated severe pulses, confirm the selected "
             "event is not a bad tick or wide-spread artifact, then save a "
-            "hypothesis seed for proper testing in Tick Event Study.\n",
-            "ranker_context": "Start here when deciding which assets deserve more tick-data "
-            "attention. This ranking is about volatility and data richness, not "
-            "profitability.",
+            "hypothesis seed for proper testing in Intraday Event Study.\n",
+            "ranker_context": "Start here by choosing a lens. Daily volatility finds broad "
+            "candidates, 1-minute bars test intraday behavior, and tick files "
+            "test microstructure/execution reality. The purpose is not "
+            "profitability proof; it is deciding what deserves deeper research.",
             "universe_context": "Use this as the data-quality gate before trusting pulse events. A "
             "good contract has enough rows, meaningful volume, and raw fields "
             "that support spread/book/flow inspection.",
+            "clock_context": "Use this before writing a minute/tick hypothesis. It decomposes "
+            "the selected contract by trading hour and session so weak night "
+            "slices or stronger afternoon slices are visible early.",
             "workspace_context": "This is the core discovery workspace. It finds unusual movement "
             "first; any alpha idea comes later after behavior testing.",
             "cross_context": "Use this to compare where pulse behavior is common or severe across "
             "assets. It is descriptive, not a trading signal.",
+            "clock_title": "Clock Edge",
+            "clock_caption": "Selected contract `{symbol}` is resampled to 1-minute moves. Use this "
+            "as a pattern clue before testing execution-aware strategy PnL.",
+            "clock_min_bars": "Minimum 1m bars per bucket",
+            "clock_loading": "Building clock-edge profile...",
+            "clock_empty": "Not enough timestamped price rows to estimate clock edge for the "
+            "selected contract.",
+            "clock_best_hour": "Best hour",
+            "clock_weak_hour": "Weak hour",
+            "clock_active_hour": "Most active hour",
+            "clock_bars": "1m bars",
+            "clock_heatmap": "Average 1m Move by Session and Hour",
+            "clock_table": "Clock Edge Summary",
+            "clock_session": "Session",
+            "clock_hour": "Hour",
+            "clock_rows": "1m bars",
+            "clock_avg_move": "Avg 1m move",
+            "clock_avg_move_short": "Avg move",
+            "clock_median_move": "Median 1m move",
+            "clock_positive_share": "Positive share",
+            "clock_avg_abs_move": "Avg abs 1m move",
+            "clock_abs_p95": "p95 abs move",
+            "clock_net_move": "Net move",
+            "clock_session_morning": "Morning",
+            "clock_session_afternoon": "Afternoon",
+            "clock_session_night": "Night",
+            "clock_session_other": "Other",
             "scope_story": "Current scope: `{symbol}` from `{file}` | window `{window}` seconds | "
             "pulse cutoff `p{percentile}`. The scan is directionless: it finds "
             "abnormal movement first, then labels Up/Down afterward.",
@@ -2971,8 +3141,8 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "validity_tiny_threshold": "Weak threshold: the selected tail is less than one tick. "
             "This is usually too small to be economically meaningful.",
             "validity_promising": "Promising discovery sample: enough independent pulses and a "
-            "meaningful threshold. Next step is visual inspection and Tick "
-            "Pulse Lab testing.",
+            "meaningful threshold. Next step is visual inspection and Intraday "
+            "Event Study testing.",
             "validity_ok": "Usable discovery sample: there is enough structure to inspect events, "
             "but treat it as research evidence rather than a trading signal.",
             "no_tick_files": "No tick_all_data parquet files found in "
@@ -3120,7 +3290,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "deterministic rule.\n"
             "\n"
             "This does not create a production factor yet. It simply makes "
-            'the Tick Event Study able to ask: "If we saw this type of pulse '
+            'the Intraday Event Study able to ask: "If we saw this type of pulse '
             'again, did the future price move as expected?"\n'
             "\n"
             "Choose `Continuation` if the after-pulse preview shows price "
@@ -3131,7 +3301,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "seed_behavior_fade": "Fade / reversal",
             "seed_name": "Seed name",
             "seed_save": "Save hypothesis seed",
-            "seed_saved": "Saved hypothesis seed `{seed_id}`. Open Tick Event Study and choose Saved "
+            "seed_saved": "Saved hypothesis seed `{seed_id}`. Open Intraday Event Study and choose Saved "
             "Discovery Seed as the hypothesis source.",
             "manager_demo_read_only": "Manager demo mode is read-only: saving hypothesis seeds is "
             "disabled.",
@@ -3313,8 +3483,8 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
         },
         "zh": {
             "_lang": "ZH",
-            "title": "脉冲扫描",
-            "subtitle": "扫描 tick 级价格跳动，并保存可复现的假设种子。",
+            "title": "模式实验室",
+            "subtitle": "在正式验证前，发现日频、日内和 tick 级模式。",
             "file": "Tick parquet 文件",
             "symbol": "合约",
             "window": "滚动时间窗口",
@@ -3348,26 +3518,54 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "top20_avg": "Top20 平均",
             "tab_single": "单合约观察",
             "tab_cross_summary": "跨资产脉冲汇总",
-            "nav_label": "脉冲发现导航",
-            "section_asset_ranker": "数据范围",
+            "nav_label": "模式实验室导航",
+            "section_asset_ranker": "镜头范围",
             "section_contract_universe": "合约健康",
+            "section_clock_edge": "时段边际",
             "section_pulse_discovery": "脉冲工作台",
             "section_cross_summary": "跨资产地图",
             "workflow_title": "这个页面如何工作",
             "workflow_text": "\n"
-            "把这个页面当成“发现工具”，不是“证明工具”。\n"
+            "把这个页面当成“发现工具”，不是“证明工具”。先选择合适的镜头：日频用于大范围资产初筛，1分钟用于观察日内行为，tick 用于检查执行和微观结构现实。\n"
             "\n"
-            "1. **数据范围**：先判断哪些品种值得下载或优先检查 tick 数据。\n"
+            "1. **镜头范围**：通过所选时间尺度镜头排序或列出资产，并明确说明这个镜头要揭示什么。\n"
             "2. **合约健康**：检查选中 tick 文件、合约池、字段结构和原始行。\n"
-            "3. **脉冲工作台**：先找无方向异常跳动，把相邻重复行合并成事件，再深入检查单个事件。\n"
-            "4. **跨资产地图**：比较多个已下载品种的脉冲频率和强度。\n"
+            "3. **时段边际**：检查当前合约在不同小时/交易时段的行为是否明显不同。\n"
+            "4. **脉冲工作台**：先找无方向异常跳动，把相邻重复行合并成事件，再深入检查单个事件。\n"
+            "5. **跨资产地图**：比较多个已下载品种的脉冲频率和强度。\n"
             "\n"
-            "健康流程：先找到重复出现的剧烈脉冲，确认不是坏 tick 或宽价差噪声，再保存为假设种子，交给 Tick Event Study "
+            "健康流程：先找到重复出现的剧烈脉冲，确认不是坏 tick 或宽价差噪声，再保存为假设种子，交给日内事件研究 "
             "做正式检验。\n",
-            "ranker_context": "决定哪些品种值得更多 tick 数据关注时，从这里开始。这个排序看的是波动和数据丰富度，不代表盈利能力。",
+            "ranker_context": "从选择镜头开始。日频波动用于大范围初筛，1分钟 bar 用于检验日内行为，tick 文件用于检查微观结构和执行现实。这里不是盈利证明，而是决定什么值得深入研究。",
             "universe_context": "在信任脉冲事件前，先把这里当成数据质量关口。好的合约应有足够行数、有效成交量，以及支持价差/盘口/主动流检查的原始字段。",
+            "clock_context": "在写分钟级或 tick 级假设之前，先用这里按交易小时和交易时段拆解当前合约。夜盘偏弱、下午偏强这类线索会更早暴露出来。",
             "workspace_context": "这是核心发现工作台。它先找异常运动；alpha 假设要等后续行为检验之后再讨论。",
             "cross_context": "用这里比较哪些品种更常出现或更剧烈地出现脉冲。这是描述统计，不是交易信号。",
+            "clock_title": "时段边际",
+            "clock_caption": "当前合约 `{symbol}` 会被重采样为 1 分钟价格变动。这里先找模式线索，正式结论仍要用考虑执行成本的策略 PnL 验证。",
+            "clock_min_bars": "每组最少 1分钟 bar",
+            "clock_loading": "正在生成时段画像...",
+            "clock_empty": "当前合约没有足够带时间戳的价格行，无法估计时段边际。",
+            "clock_best_hour": "最强小时",
+            "clock_weak_hour": "最弱小时",
+            "clock_active_hour": "最活跃小时",
+            "clock_bars": "1分钟 bar",
+            "clock_heatmap": "按交易时段和小时统计的平均1分钟变动",
+            "clock_table": "时段边际汇总",
+            "clock_session": "交易时段",
+            "clock_hour": "小时",
+            "clock_rows": "1分钟 bar",
+            "clock_avg_move": "平均1分钟变动",
+            "clock_avg_move_short": "平均变动",
+            "clock_median_move": "中位1分钟变动",
+            "clock_positive_share": "上涨占比",
+            "clock_avg_abs_move": "平均绝对1分钟变动",
+            "clock_abs_p95": "p95绝对变动",
+            "clock_net_move": "净变动",
+            "clock_session_morning": "早盘",
+            "clock_session_afternoon": "午后",
+            "clock_session_night": "夜盘",
+            "clock_session_other": "其他",
             "scope_story": "当前范围：`{symbol}` 来自 `{file}` | 窗口 `{window}` 秒 | 脉冲阈值 "
             "`p{percentile}`。扫描本身是无方向的：先找异常运动，再事后标记 Up/Down。",
             "metric_help_title": "如何解读这些指标",
@@ -3382,7 +3580,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "validity_sparse": "样本偏弱：滚动窗口行数太少，脉冲研究不够稳健。任何事件都只能当作个案。",
             "validity_few_events": "早期样本：独立脉冲数量偏少。可以人工观察，但不要在未做更广泛检验前推广。",
             "validity_tiny_threshold": "阈值偏弱：尾部分位对应的跳动小于一个 tick，通常缺少经济意义。",
-            "validity_promising": "有潜力的发现样本：独立脉冲数量足够，阈值也有意义。下一步是视觉检查和 Tick Event Study 检验。",
+            "validity_promising": "有潜力的发现样本：独立脉冲数量足够，阈值也有意义。下一步是视觉检查和日内事件研究检验。",
             "validity_ok": "可用的发现样本：已经有足够结构可以检查事件，但仍应视为研究证据，而不是交易信号。",
             "no_tick_files": "在 runtime/data/futures_cn/tick 中没有找到 tick_all_data "
             "parquet 文件。",
@@ -3500,7 +3698,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "seed_promote_help": "\n"
             "当你觉得某个脉冲值得后续验证，就用这个功能保存。这个“假设种子”是一个可复现的研究交接：数据文件、合约、时间戳、脉冲质量，以及第一版确定性规则。\n"
             "\n"
-            "它还不是生产因子，也不是已经验证的策略。它只是让 Tick Event Study "
+            "它还不是生产因子，也不是已经验证的策略。它只是让日内事件研究 "
             "可以继续问：如果未来再次出现这种脉冲，之后价格有没有按我们预期走？\n"
             "\n"
             "如果“脉冲之后走势预览”显示价格继续顺着脉冲方向走，选择 `延续`；如果价格很快反向回撤，选择 `反转 / fade`。\n",
@@ -3509,7 +3707,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "seed_behavior_fade": "反转 / fade",
             "seed_name": "种子名称",
             "seed_save": "保存假设种子",
-            "seed_saved": "已保存假设种子 `{seed_id}`。打开 Tick Event Study，并选择“已保存发现种子”作为假设来源。",
+            "seed_saved": "已保存假设种子 `{seed_id}`。打开日内事件研究，并选择“已保存发现种子”作为假设来源。",
             "manager_demo_read_only": "管理层演示模式为只读：已禁用保存假设种子。",
             "how": "定义",
             "how_text": "\n"
@@ -4091,7 +4289,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "pca_variance": "PCA explained variance",
             "pca_loadings": "Component loadings",
             "pca_market_note": "Feature PCA here diagnoses engineered-feature redundancy. Use "
-            "the Risk Breadth for market covariance PCA and "
+            "the Market Breadth Lab for market covariance PCA and "
             "achievable breadth.",
             "component": "Component",
             "shortlist": "Suggested representative features",
@@ -4234,8 +4432,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "missing_bar": "各特征缺失率",
             "pca_variance": "PCA 解释方差",
             "pca_loadings": "主成分载荷",
-            "pca_market_note": "这里的 PCA 用来诊断工程化特征冗余。市场协方差 PCA 与可实现广度，请看 Risk Factor Breadth "
-            "Lab。",
+            "pca_market_note": "这里的 PCA 用来诊断工程化特征冗余。市场协方差 PCA 与可实现广度，请看市场广度实验室。",
             "component": "主成分",
             "shortlist": "建议保留的代表特征",
             "comparison": "研究比较协议",
@@ -4294,19 +4491,27 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
     },
     "risk_factor_breadth_lab": {
         "en": {
-            "title": "Risk Breadth",
-            "subtitle": "PCA covariance analysis for independent market risk dimensions.",
-            "source": "Daily futures file",
+            "title": "Market Breadth Lab",
+            "subtitle": "Taxonomy-aware PCA of market covariance breadth across vectorizable asset universes.",
+            "asset_class": "Asset class",
+            "source": "Daily market file",
             "variance": "Variance threshold",
             "window": "Rolling window",
+            "max_assets": "Max assets",
+            "risk_view": "Risk data lens",
+            "risk_ffill": "Forward-fill",
+            "risk_bridge": "Brownian Bridge",
+            "unsupported_asset": "This asset class is not vectorizable in the taxonomy yet, so covariance PCA is disabled.",
+            "options_note": "Options market breadth needs a separate options risk engine using underlying returns, IV moves, Greeks, expiry buckets, and liquidity. Plain option price PCA is deliberately disabled here.",
+            "no_source": "no daily parquet files found for this asset class.",
             "manual_title": "How to read this lab",
             "manual": "\n"
-            "This page asks: **how many independent bets does the Chinese futures "
-            "universe really contain?**\n"
+            "This page asks: **how many independent market dimensions does the selected "
+            "asset universe really contain?**\n"
             "\n"
-            "If 75 contracts mostly move through 10 independent risk drivers, then "
-            "treating BR as 75 in Grinold-style expectations is fantasy. PCA gives a "
-            "conservative linear estimate of the market's dimensional rank.\n"
+            "If hundreds of assets mostly move through a small number of common covariance "
+            "drivers, treating every ticker as an independent bet overstates diversification. "
+            "PCA gives a conservative linear estimate of the market's dimensional rank.\n"
             "\n"
             "Workflow:\n"
             "\n"
@@ -4314,11 +4519,11 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "components needed to explain 95% of market variance.\n"
             "2. Use the eigen spectrum to see whether variance is concentrated in a "
             "few giant common drivers.\n"
-            "3. Use the sector risk map to understand what each PC physically means: "
-            "black metals vs energy, rates vs commodities, precious metals, etc.\n"
+            "3. Use the sector/family map to understand what each PC physically means: "
+            "industrials, banks, commodities, rates, growth baskets, or other common risk groups.\n"
             "4. Use rolling breadth to see whether the market becomes more "
             "one-dimensional during stress.\n",
-            "cards": "Breadth Snapshot",
+            "cards": "Market Breadth Snapshot",
             "naive": "Naive Breadth",
             "valid": "Valid Assets",
             "br95": "BR95",
@@ -4326,8 +4531,8 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "participation": "Participation Ratio",
             "haircut": "Breadth Haircut",
             "spectrum": "Eigen Spectrum",
-            "sector": "Sector Risk Map",
-            "rolling": "Rolling Breadth",
+            "sector": "Sector / Family Map",
+            "rolling": "Rolling Market Breadth",
             "absolute": "Absolute sector contribution",
             "signed": "Signed mean loading",
             "component": "Component",
@@ -4347,7 +4552,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "rolling_empty": "Rolling breadth unavailable. The selected history may be shorter "
             "than the rolling window or too sparse.",
             "skipped": "Skipped rolling windows",
-            "error": "Risk breadth analysis failed",
+            "error": "Market breadth analysis failed",
             "feature_link": "Note: Feature Governance PCA analyzes feature redundancy. This "
             "page analyzes market covariance breadth.",
             "metric_toggle": "Metric guide: what is healthy?",
@@ -4394,28 +4599,70 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "variance. That is a valid and plausible number: large enough to show "
             "a real common macro driver, but not so high that the whole Chinese "
             "futures market is behaving as one single trade.\n",
-            "component_interpreter": "Component Interpreter",
+            "component_interpreter": "Component Diagnostics",
+            "component_col": "PC",
+            "variance_col": "Variance",
+            "cumulative_col": "Cumulative",
+            "label_col": "Label",
+            "positive_basket": "Positive Basket",
+            "negative_basket": "Negative Basket",
+            "label_confidence": "Label Confidence",
+            "interpretation_col": "Interpretation",
+            "confidence_note": "Label Confidence is a heuristic semantic score based on loading concentration and signed-basket readability. It is not a statistical confidence interval.",
+            "component_stability": "Component Stability",
+            "component_stability_note": "Rolling PCA stability compares recent-window component loadings with the full-sample component. It is robustness evidence, not a statistical confidence interval.",
+            "component_stability_empty": "Component stability is unavailable for this source/window.",
+            "date_col": "Date",
+            "loading_similarity": "Loading Similarity",
+            "windows_col": "Windows",
+            "avg_similarity": "Avg Similarity",
+            "min_similarity": "Min Similarity",
+            "label_match_rate": "Label Match",
+            "sector_match_rate": "Sector Match",
+            "avg_label_confidence": "Avg Label Confidence",
+            "latest_label": "Latest Label",
+            "latest_sector": "Latest Sector",
+            "regime_periods": "Breadth Regime Periods",
+            "regime_periods_caption": "Low/Normal/High breadth blocks are adaptive quantiles of the rolling breadth haircut. Red is compressed breadth; green is expanded breadth.",
+            "regime_start": "Start",
+            "regime_end": "End",
+            "regime_col": "Regime",
+            "regime_low": "Low / Compressed",
+            "regime_normal": "Normal",
+            "regime_high": "High / Expanded",
+            "avg_br95": "Avg BR95",
+            "avg_effective_rank": "Avg Effective Rank",
+            "avg_haircut": "Avg Haircut",
+            "research_use": "Research Use",
         },
         "zh": {
-            "title": "风险广度",
-            "subtitle": "用 PCA 分析市场中可独立分散的风险维度。",
-            "source": "日频期货文件",
+            "title": "市场广度实验室",
+            "subtitle": "基于资产分类，对可向量化资产宇宙做市场协方差广度 PCA。",
+            "asset_class": "资产类别",
+            "source": "日频市场文件",
             "variance": "解释方差阈值",
             "window": "滚动窗口",
+            "max_assets": "最大资产数",
+            "risk_view": "风险数据视角",
+            "risk_ffill": "前向填充",
+            "risk_bridge": "Brownian Bridge",
+            "unsupported_asset": "该资产类别在资产分类中尚不可向量化，因此不启用协方差 PCA。",
+            "options_note": "期权市场广度需要独立的期权风险引擎，使用标的收益、IV 变动、Greeks、到期分组和流动性。这里有意禁用简单期权价格 PCA。",
+            "no_source": "该资产类别未找到日频 parquet 文件。",
             "manual_title": "如何阅读本页面",
             "manual": "\n"
-            "这个页面回答：**中国期货市场到底有多少个真正独立的下注维度？**\n"
+            "这个页面回答：**所选资产宇宙到底有多少个真正独立的市场维度？**\n"
             "\n"
-            "如果 75 个合约主要由 10 个独立风险驱动控制，那么在 Grinold 公式里把 BR 当成 75 就是在高估自己。PCA "
+            "如果几百甚至几千个资产主要由少数共同协方差驱动控制，那么把每个 ticker 都当成独立下注会高估分散化。PCA "
             "给出一个保守的线性市场维度估计。\n"
             "\n"
             "阅读顺序：\n"
             "\n"
             "1. 先看顶部广度卡片。`BR95` 表示解释 95% 市场方差需要多少个主成分。\n"
             "2. 看特征值谱，判断市场方差是否集中在少数几个共同驱动里。\n"
-            "3. 看板块风险地图，理解每个 PC 的物理含义：黑色 vs 能源、利率 vs 商品、贵金属等。\n"
+            "3. 看板块/资产族地图，理解每个 PC 的物理含义：工业品、银行、商品、利率、成长篮子或其他共同风险组。\n"
             "4. 看滚动广度，观察市场在压力期是否变得更加“一维化”。\n",
-            "cards": "广度快照",
+            "cards": "市场广度快照",
             "naive": "名义广度",
             "valid": "有效资产数",
             "br95": "BR95",
@@ -4423,8 +4670,8 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "participation": "参与率",
             "haircut": "广度折扣",
             "spectrum": "特征值谱",
-            "sector": "板块风险地图",
-            "rolling": "滚动广度",
+            "sector": "板块 / 资产族地图",
+            "rolling": "滚动市场广度",
             "absolute": "板块绝对贡献",
             "signed": "带符号平均载荷",
             "component": "主成分",
@@ -4439,7 +4686,7 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "low_assets": "有效资产少于 20 个。结果仍会展示，但广度解释稳定性会下降。",
             "rolling_empty": "无法计算滚动广度。所选历史可能短于滚动窗口，或资产覆盖太稀疏。",
             "skipped": "跳过的滚动窗口",
-            "error": "风险广度分析失败",
+            "error": "市场广度分析失败",
             "feature_link": "提示：Feature Governance 的 PCA 分析特征冗余；本页面分析市场协方差广度。",
             "metric_toggle": "指标说明：什么范围比较健康？",
             "metric_guide": "\n"
@@ -4469,7 +4716,41 @@ RESEARCH_PAGE_TEXT: dict[str, dict[str, dict[str, Any]]] = {
             "pc1_valid": "\n"
             "在默认全市场文件中，PC1 解释约 29% "
             "的总方差。这个数字是有效且合理的：它足够大，说明存在真实的共同宏观驱动；但又没有大到说明整个中国期货市场只剩下一笔单一交易。\n",
-            "component_interpreter": "主成分解释器",
+            "component_interpreter": "主成分诊断",
+            "component_col": "PC",
+            "variance_col": "解释方差",
+            "cumulative_col": "累计方差",
+            "label_col": "标签",
+            "positive_basket": "正载荷篮子",
+            "negative_basket": "负载荷篮子",
+            "label_confidence": "标签可信度",
+            "interpretation_col": "解释",
+            "confidence_note": "标签可信度是基于载荷集中度和正负篮子可读性的语义启发式分数，不是统计置信区间。",
+            "component_stability": "主成分稳定性",
+            "component_stability_note": "滚动 PCA 稳定性会比较近期窗口的主成分载荷与全样本主成分。它是稳健性证据，不是统计置信区间。",
+            "component_stability_empty": "当前数据源或窗口无法计算主成分稳定性。",
+            "date_col": "日期",
+            "loading_similarity": "载荷相似度",
+            "windows_col": "窗口数",
+            "avg_similarity": "平均相似度",
+            "min_similarity": "最低相似度",
+            "label_match_rate": "标签匹配率",
+            "sector_match_rate": "板块匹配率",
+            "avg_label_confidence": "平均标签可信度",
+            "latest_label": "最新标签",
+            "latest_sector": "最新板块",
+            "regime_periods": "市场广度阶段",
+            "regime_periods_caption": "低/正常/高广度阶段由滚动广度折扣的自适应分位数划分。红色表示广度压缩，绿色表示广度扩张。",
+            "regime_start": "开始",
+            "regime_end": "结束",
+            "regime_col": "阶段",
+            "regime_low": "低广度 / 压缩",
+            "regime_normal": "正常",
+            "regime_high": "高广度 / 扩张",
+            "avg_br95": "平均 BR95",
+            "avg_effective_rank": "平均有效秩",
+            "avg_haircut": "平均广度折扣",
+            "research_use": "研究用途",
         },
     },
 }

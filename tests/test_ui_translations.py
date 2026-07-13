@@ -68,7 +68,7 @@ class UiTranslationTests(unittest.TestCase):
 
         self.assertEqual(
             research_page_text("tick_pulse_lab", "ZH", "title"),
-            "Tick 事件研究",
+            "日内事件研究",
         )
         self.assertEqual(
             research_page_tabs("adaptive_relationship_lab", "zh", "tabs")[0],

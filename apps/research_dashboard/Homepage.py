@@ -88,7 +88,7 @@ for _, row in runs_df.iterrows():
     # Inject the Asset Class and Universe into the button text
     label = f"{status_icon} {row['name']} (v{row['round_number']})\n[{asset_label} | {tickers}] | IC: {row['holdout_ic']:.4f}"
     
-    if st.sidebar.button(label, key=row['run_id'], use_container_width=True):
+    if st.sidebar.button(label, key=row['run_id'], width="stretch"):
         st.session_state.selected_run = row['run_id']
 
 # ==========================================
@@ -102,7 +102,7 @@ with st.expander("Asset Taxonomy / 资产分类", expanded=False):
     )
     st.dataframe(
         dashboard_taxonomy_frame(language=st.session_state.lang.lower()),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         height=230,
     )
@@ -124,7 +124,7 @@ if not runtime_df.empty:
             "Heuristic wall-clock ranges based on latest ledger row counts and asset route. "
             "The C++ execution pass is usually fast; factor computation often dominates."
         )
-        st.dataframe(runtime_df, use_container_width=True, hide_index=True, height=220)
+        st.dataframe(runtime_df, width="stretch", hide_index=True, height=220)
 
 st.markdown("---")
 

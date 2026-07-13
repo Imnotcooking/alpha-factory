@@ -112,11 +112,11 @@ Most alpha Streamlit pages already have an app-side destination:
 | Alpha page | App destination |
 | --- | --- |
 | `ui_v2/pages/09_Data_Artifact_Health.py` | `apps/research_dashboard/pages/01_Data_Health.py` |
-| `ui_v2/pages/02_Pulse_Scan.py` | `apps/research_dashboard/pages/02_Pulse_Scan.py` |
-| `ui_v2/pages/03_Tick_Event_Study.py` | `apps/research_dashboard/pages/03_Tick_Event_Study.py` |
+| `ui_v2/pages/02_Pulse_Scan.py` | `apps/research_dashboard/pages/02_Pattern_Lab.py` |
+| `ui_v2/pages/03_Tick_Event_Study.py` | `apps/research_dashboard/pages/03_Intraday_Event_Study.py` |
 | `ui_v2/pages/04_Arbitrage_Lab.py` | `apps/research_dashboard/pages/04_Arbitrage_Lab.py` |
 | `ui_v2/pages/06_Regime_Characterisation.py` | `apps/research_dashboard/pages/05_Regime_Analysis.py` |
-| `ui_v2/pages/08_Risk_Factor_Breadth_Lab.py` | `apps/research_dashboard/pages/06_Risk_Breadth.py` |
+| `ui_v2/pages/08_Risk_Factor_Breadth_Lab.py` | `apps/research_dashboard/pages/06_Market_Breadth_Lab.py` |
 | `ui_v2/pages/07_Feature_Review.py` | `apps/research_dashboard/pages/07_Feature_Review.py` |
 | `ui_v2/pages/01_Factor_Promotion_Pipeline.py` | `apps/research_dashboard/pages/08_Factor_Review.py` |
 | `ui_v2/pages/05_Strategy_Comparison.py` | `apps/research_dashboard/pages/09_Strategy_Comparison.py` |

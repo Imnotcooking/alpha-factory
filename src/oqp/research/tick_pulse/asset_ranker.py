@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from oqp.data.futures_cn import normalize_futures_cn_daily_frame
-from oqp.data.runtime_paths import futures_cn_daily_roots
+from oqp.data.runtime_paths import futures_cn_daily_roots, futures_cn_intraday_roots
 from oqp.risk.factor_breadth import extract_base_symbol, map_chinese_futures_sector
 
 
@@ -16,6 +16,7 @@ REQUIRED_DAILY_COLUMNS = {"date", "ticker", "close"}
 __all__ = [
     "REQUIRED_DAILY_COLUMNS",
     "discover_daily_universe_files",
+    "discover_intraday_universe_files",
     "filter_ranked_assets",
     "load_daily_universe",
     "rank_daily_asset_volatility",
@@ -31,15 +32,37 @@ def load_daily_universe(path: str | Path) -> pd.DataFrame:
 
 
 def discover_daily_universe_files(project_root: str | Path) -> list[dict]:
+    return _discover_bar_universe_files(
+        project_root,
+        futures_cn_daily_roots(),
+        ("*1d*.parquet", "*daily*.parquet", "*universe*.parquet"),
+        include_universe_root=True,
+    )
+
+
+def discover_intraday_universe_files(project_root: str | Path) -> list[dict]:
+    return _discover_bar_universe_files(
+        project_root,
+        futures_cn_intraday_roots(),
+        ("*1m*.parquet", "*intraday*.parquet", "*.parquet"),
+        include_universe_root=False,
+    )
+
+
+def _discover_bar_universe_files(
+    project_root: str | Path,
+    search_roots: tuple[Path, ...],
+    patterns: tuple[str, ...],
+    include_universe_root: bool,
+) -> list[dict]:
     repo_root = Path(project_root)
 
     candidates: dict[Path, None] = {}
-    search_roots = (
-        *futures_cn_daily_roots(),
-        repo_root / "runtime" / "data" / "universes",
-    )
-    for data_dir in search_roots:
-        for pattern in ["*1d*.parquet", "*universe*.parquet"]:
+    roots = search_roots
+    if include_universe_root:
+        roots = (*roots, repo_root / "runtime" / "data" / "universes")
+    for data_dir in roots:
+        for pattern in patterns:
             for path in data_dir.glob(pattern) if data_dir.exists() else []:
                 if path.is_file() and "tick" not in path.name.lower():
                     candidates[path.resolve()] = None

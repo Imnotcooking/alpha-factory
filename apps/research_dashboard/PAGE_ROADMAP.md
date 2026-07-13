@@ -33,11 +33,11 @@ Preferred tab count: **3-4 top-level tabs maximum**. If a page needs more specia
 | Order | Page | Research Role | Main User Question |
 |---:|---|---|---|
 | 1 | Data Health | Trust layer | Is the platform/data ready enough to believe anything downstream? |
-| 2 | Pulse Scan | Event discovery | Where are the largest raw market pulses before any alpha hypothesis? |
-| 3 | Tick Event Study | Microstructure hypothesis testing | Does a specific tick-level pulse idea have directional follow-through? |
+| 2 | Pattern Lab | Multi-timeframe discovery | Which daily, intraday, or tick patterns deserve a formal hypothesis test? |
+| 3 | Intraday Event Study | Microstructure hypothesis testing | Does a specific intraday/tick-level event idea have directional follow-through? |
 | 4 | Arbitrage Lab | Relationship/opportunity discovery | Which pairs/spreads look dislocated but still stable enough to research? |
 | 5 | Regime Analysis | Market state context | What state is the market/asset in, and can the state model be trusted? |
-| 6 | Risk Breadth | Portfolio risk geometry | How many independent market bets do we really have? |
+| 6 | Market Breadth Lab | Portfolio risk geometry | How many independent market dimensions do we really have? |
 | 7 | Feature Review | Feature validation | Which features are clean, useful, redundant, or dangerous? |
 | 8 | Factor Review | Research governance | Which factors have enough evidence to move forward? |
 | 9 | Strategy Comparison | Strategy review | Which completed strategy profile is better after risk, path, and trade checks? |
@@ -92,38 +92,45 @@ Potential new landing page later: **Research Overview**, a compact dashboard lin
 
 **Next action:** If core data is healthy, move to discovery pages. If not, fix data/artifacts before researching.
 
-## 02 Pulse Scan
+## 02 Pattern Lab
 
-**Purpose:** Find the biggest raw, directionless price pulses before forming an alpha hypothesis.
+**Purpose:** Find promising patterns across daily, 1-minute, and tick data before forming an alpha hypothesis.
 
 **Current state:** Rich and educational, but it is a long single page with many controls and sections.
 
-**Recommended UX:** Keep it to four tabs:
+**Recommended UX:** Keep it to five focused modes:
 
-1. **Pulse Radar**
+1. **Lens Scope**
+   - Daily lens for broad asset candidates.
+   - 1-minute lens for intraday volatility and session behavior.
+   - Tick lens for microstructure/pulse feasibility.
+
+2. **Pulse Radar**
    - File/contract selector.
    - Severity distribution.
    - Pulse/hour and percentile ladder.
    - Candidate event table.
 
-2. **Event Inspector**
+3. **Event Inspector**
    - Pick one pulse event.
    - Price/volume/spread/book-depth window around the event.
    - Pulse fingerprint.
    - Event quality interpretation.
 
-3. **Behavior Preview**
+4. **Behavior Preview**
    - What happened after the pulse.
    - Forward move bands.
    - Directionless behavior, not alpha yet.
 
-4. **Cross-Asset Map**
+5. **Cross-Asset Map**
    - Compare pulse severity across downloaded contracts.
    - Severity zones.
    - Best contracts to inspect next.
 
 **Key metrics:**
 
+- Daily/1m realized volatility by asset.
+- Session/time-of-day edge.
 - Pulses/hour.
 - p99/p99.5 move in ticks.
 - Median spread in ticks.
@@ -132,13 +139,15 @@ Potential new landing page later: **Research Overview**, a compact dashboard lin
 
 **How to interpret:**
 
-- **Valid pulse candidate:** large tick move, enough rows in sample, reasonable spread, visible event structure.
+- **Valid daily candidate:** enough movement, enough liquidity, and enough coverage to justify deeper work.
+- **Valid 1m candidate:** intraday movement appears in tradable sessions rather than only daily gaps.
+- **Valid tick candidate:** large tick move, enough rows in sample, reasonable spread, visible event structure.
 - **Weak candidate:** one-off spike, sparse sample, stale file, or wide spread.
-- **Promising for research:** repeated severe pulses with clean data and a visible after-pulse pattern.
+- **Promising for research:** repeated structure across the right lens, with clean data and a visible behavioral clue.
 
-**Next action:** Promote a good pulse into a hypothesis seed, then test it in Tick Event Study.
+**Next action:** Promote a good pulse or clock pattern into a hypothesis seed, then test it in Intraday Event Study.
 
-## 03 Tick Event Study
+## 03 Intraday Event Study
 
 **Purpose:** Test whether a specific tick-level pulse hypothesis has directional follow-through.
 
@@ -267,9 +276,9 @@ Potential new landing page later: **Research Overview**, a compact dashboard lin
 
 **Next action:** Use regime context to judge strategies, features, and arbitrage candidates under different market states.
 
-## 06 Risk Breadth
+## 06 Market Breadth Lab
 
-**Purpose:** Estimate how many independent market risk bets the universe really contains.
+**Purpose:** Estimate how many independent market dimensions the selected taxonomy universe really contains.
 
 **Current state:** No top-level tabs, but the page is long. It already has good explanation toggles.
 
@@ -444,25 +453,25 @@ Potential new landing page later: **Research Overview**, a compact dashboard lin
 
 ## Suggested Analyst Workflow
 
-1. **Data Health**  
+1. **Data Health**
    Start with the trust gate. If users are lost here, every other page feels suspicious.
 
-2. **Pulse Scan**  
+2. **Pattern Lab**
    Find raw event structure before writing alpha hypotheses.
 
-3. **Tick Event Study**  
+3. **Intraday Event Study**
    Turn interesting event structure into a testable microstructure hypothesis.
 
-4. **Arbitrage Lab**  
+4. **Arbitrage Lab**
    Scan relationships and spread dislocations that may become candidates.
 
-5. **Regime Analysis**  
+5. **Regime Analysis**
    Add market-state context before judging any signal or strategy.
 
-6. **Risk Breadth**  
-   Check whether the universe really offers independent risk capacity.
+6. **Market Breadth Lab**
+   Check whether the selected universe really offers independent market capacity.
 
-7. **Feature Review**  
+7. **Feature Review**
    Decide which features are clean, useful, redundant, or dangerous.
 
 8. **Factor Review**  

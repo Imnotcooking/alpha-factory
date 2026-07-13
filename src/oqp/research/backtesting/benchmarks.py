@@ -8,6 +8,8 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
+from oqp.data.views import build_market_data_views
+
 
 BENCHMARK_RETURN_COL = "benchmark_return"
 BENCHMARK_ABSOLUTE = "ABSOLUTE"
@@ -685,16 +687,62 @@ def resolve_default_benchmark_policy(
             strict=False,
             column="benchmark_return_nanhua",
         )
-        return {**primary, "secondary_benchmarks": [nanhua]}
+        same_horizon_control = _benchmark_policy_item(
+            BENCHMARK_BUY_AND_HOLD,
+            "Futures active-universe equal-weight same-horizon control",
+            "same_horizon_universe_control",
+            (),
+            strict=False,
+            column=BENCHMARK_SAME_HORIZON_COL,
+            return_mode="same_horizon",
+        )
+        if _prefers_same_horizon_active_universe(metadata, factor_id=factor_id):
+            same_horizon_primary = {
+                **same_horizon_control,
+                "benchmark_column": BENCHMARK_RETURN_COL,
+            }
+            passive_context = {
+                **primary,
+                "benchmark_column": "benchmark_return_passive_active_universe",
+            }
+            return {
+                **same_horizon_primary,
+                "secondary_benchmarks": [passive_context, nanhua],
+            }
+        return {
+            **primary,
+            "secondary_benchmarks": [nanhua],
+            "same_horizon_controls": [same_horizon_control],
+        }
 
     if asset == "FUTURES_US":
-        return _benchmark_policy_item(
+        primary = _benchmark_policy_item(
             BENCHMARK_BUY_AND_HOLD,
             "Dynamic equal-weight active US futures universe",
             "active_universe_futures_basket",
             (),
             strict=False,
         )
+        same_horizon_control = _benchmark_policy_item(
+            BENCHMARK_BUY_AND_HOLD,
+            "US futures active-universe equal-weight same-horizon control",
+            "same_horizon_universe_control",
+            (),
+            strict=False,
+            column=BENCHMARK_SAME_HORIZON_COL,
+            return_mode="same_horizon",
+        )
+        if _prefers_same_horizon_active_universe(metadata, factor_id=factor_id):
+            same_horizon_primary = {
+                **same_horizon_control,
+                "benchmark_column": BENCHMARK_RETURN_COL,
+            }
+            passive_context = {
+                **primary,
+                "benchmark_column": "benchmark_return_passive_active_universe",
+            }
+            return {**same_horizon_primary, "secondary_benchmarks": [passive_context]}
+        return {**primary, "same_horizon_controls": [same_horizon_control]}
 
     if asset == "CRYPTO_PERP":
         return _benchmark_policy_item(
@@ -801,6 +849,32 @@ def _prefers_full_universe_equal_weight(metadata: dict, *, factor_id: str | None
         "ALL_A_SHARE",
         "ALL A SHARE",
         "指增",
+    )
+    return any(token in text for token in tokens)
+
+
+def _prefers_same_horizon_active_universe(metadata: dict, *, factor_id: str | None = None) -> bool:
+    text = " ".join(
+        str(value)
+        for value in (
+            factor_id,
+            metadata.get("factor_id"),
+            metadata.get("name"),
+            metadata.get("category"),
+            metadata.get("universe_id"),
+            metadata.get("benchmark_style"),
+            metadata.get("benchmark_preference"),
+            metadata.get("benchmark_hint"),
+        )
+        if value is not None
+    ).upper()
+    tokens = (
+        "SAME_HORIZON_ACTIVE_UNIVERSE",
+        "SAME HORIZON ACTIVE UNIVERSE",
+        "SAME_HORIZON",
+        "SAME HORIZON",
+        "NEXT_BAR_CONTROL",
+        "NEXT BAR CONTROL",
     )
     return any(token in text for token in tokens)
 
@@ -934,11 +1008,14 @@ def _daily_ticker_returns(raw: pd.DataFrame, *, stale_limit: int = 3, return_col
         return daily.pivot(index="date", columns="ticker", values=return_col).sort_index()
 
     daily = raw.groupby(["date", "ticker"], as_index=False)["close"].last()
-    prices = (
-        daily.pivot(index="date", columns="ticker", values="close")
-        .sort_index()
-        .ffill(limit=stale_limit)
+    views = build_market_data_views(
+        daily,
+        timestamp_col="date",
+        asset_col="ticker",
+        price_cols=("close",),
+        max_stale_bars=stale_limit,
     )
+    prices = views.accounting.pivot(index="date", columns="ticker", values="close").sort_index()
     return prices.pct_change(fill_method=None)
 
 

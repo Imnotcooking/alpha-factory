@@ -222,7 +222,7 @@ class MLView:
             showlegend=False,
             coloraxis_showscale=False,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         return True
 
     def _render_ic_decay_panel(
@@ -345,7 +345,7 @@ class MLView:
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig_ic, use_container_width=True)
+        st.plotly_chart(fig_ic, width="stretch")
 
         with st.expander(t.get("ic_decay_help_title", "How to read IC decay")):
             st.markdown(t.get("ic_decay_help", ""))
@@ -395,7 +395,7 @@ class MLView:
             plot_bgcolor="rgba(0,0,0,0)",
             showlegend=False,
         )
-        st.plotly_chart(fig_imp, use_container_width=True)
+        st.plotly_chart(fig_imp, width="stretch")
 
         st.markdown("#### Institutional Interpretation")
         top_features = plot_data.tail(2)["Feature"].tolist()

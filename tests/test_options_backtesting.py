@@ -132,6 +132,19 @@ class OptionsBacktestingTests(unittest.TestCase):
         self.assertEqual(len(result.trades), 2)
         self.assertEqual(result.trades["reason"].tolist(), ["signal_entry", "signal_exit"])
         self.assertGreater(result.final_equity, 10_000.0)
+        returns = result.to_returns_frame()
+        self.assertTrue(
+            {
+                "long_weight",
+                "short_weight",
+                "long_notional",
+                "short_notional",
+                "gross_notional",
+                "net_notional",
+            }.issubset(returns.columns)
+        )
+        self.assertGreater(float(returns["long_notional"].max()), 0.0)
+        self.assertEqual(float(returns["short_notional"].abs().sum()), 0.0)
         execution_result = option_result_to_execution_result(result)
         self.assertEqual(execution_result.backend.backend_id, "options_event_driven")
 

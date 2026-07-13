@@ -75,6 +75,59 @@ class ResearchDashboardDNAViewTests(unittest.TestCase):
         self.assertEqual(concentration["profit_concentration_total"], 3)
         self.assertAlmostEqual(concentration["profit_concentration_share"], 0.80)
 
+    def test_exposure_leverage_frame_uses_saved_long_short_notional(self) -> None:
+        returns = pd.DataFrame(
+            {
+                "date": ["2026-01-02", "2026-01-03"],
+                "long_notional": [1_200_000, 1_500_000],
+                "short_notional": [400_000, -600_000],
+                "portfolio_leverage": [1.6, 2.1],
+            }
+        )
+
+        frame = DNAView._exposure_leverage_frame(returns)
+
+        self.assertEqual(len(frame), 2)
+        self.assertEqual(frame["long_notional"].tolist(), [1_200_000, 1_500_000])
+        self.assertEqual(frame["short_notional"].tolist(), [-400_000, -600_000])
+        self.assertEqual(frame["gross_leverage"].tolist(), [1.6, 2.1])
+
+    def test_exposure_leverage_frame_derives_notional_from_weights_and_capital(self) -> None:
+        returns = pd.DataFrame(
+            {
+                "date": ["2026-01-02", "2026-01-03"],
+                "net_return": [0.0, 0.10],
+                "initial_capital": [1_000_000, 1_000_000],
+                "long_weight": [0.8, 0.7],
+                "short_weight": [-0.3, -0.2],
+            }
+        )
+
+        frame = DNAView._exposure_leverage_frame(returns)
+
+        self.assertAlmostEqual(frame["long_notional"].iloc[0], 800_000)
+        self.assertAlmostEqual(frame["short_notional"].iloc[0], -300_000)
+        self.assertAlmostEqual(frame["long_notional"].iloc[1], 770_000)
+        self.assertAlmostEqual(frame["short_notional"].iloc[1], -220_000)
+        self.assertAlmostEqual(frame["gross_leverage"].iloc[0], 1.1)
+        self.assertAlmostEqual(frame["gross_leverage"].iloc[1], 0.9)
+
+    def test_exposure_leverage_frame_allows_legacy_leverage_only_runs(self) -> None:
+        returns = pd.DataFrame(
+            {
+                "date": ["2026-01-02", "2026-01-03"],
+                "portfolio_leverage": [0.5, 1.2],
+                "initial_capital": [1_000_000, 1_000_000],
+            }
+        )
+
+        frame = DNAView._exposure_leverage_frame(returns)
+
+        self.assertEqual(len(frame), 2)
+        self.assertTrue(frame["long_notional"].isna().all())
+        self.assertTrue(frame["short_notional"].isna().all())
+        self.assertEqual(frame["gross_leverage"].tolist(), [0.5, 1.2])
+
     def test_asset_winner_loser_frame_uses_top_five_each_side_and_names(self) -> None:
         tickers = [f"W{i}" for i in range(6)] + [f"L{i}" for i in range(6)]
         pnls = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, -0.01, -0.02, -0.03, -0.04, -0.05, -0.06]
@@ -232,6 +285,38 @@ class ResearchDashboardDNAViewTests(unittest.TestCase):
             frame["entry_period"].eq("2026-03") & frame["hold_bucket"].eq("<1d")
         ].iloc[0]
         self.assertAlmostEqual(float(fallback_exit["avg_pnl"]), 4.0)
+
+    def test_breadth_regime_performance_groups_trades_by_latest_prior_regime(self) -> None:
+        trades = pd.DataFrame(
+            {
+                "entry_time": [
+                    "2026-01-15",
+                    "2026-02-15",
+                    "2026-03-15",
+                    "2026-04-15",
+                ],
+                "trade_pnl_pct": [2.0, -1.0, 3.0, -2.0],
+                "holding_period_hours": [24, 48, 72, 96],
+            }
+        )
+        regimes = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2026-01-01", "2026-03-01", "2026-04-01"]),
+                "breadth_regime": ["Low", "Normal", "High"],
+            }
+        )
+
+        frame = DNAView._breadth_regime_performance_frame(trades, regimes)
+
+        self.assertEqual(frame["breadth_regime"].astype(str).tolist(), ["Low", "Normal", "High"])
+        low = frame[frame["breadth_regime"].astype(str).eq("Low")].iloc[0]
+        normal = frame[frame["breadth_regime"].astype(str).eq("Normal")].iloc[0]
+        high = frame[frame["breadth_regime"].astype(str).eq("High")].iloc[0]
+        self.assertEqual(int(low["trade_count"]), 2)
+        self.assertAlmostEqual(float(low["avg_trade_pnl_pct"]), 0.5)
+        self.assertAlmostEqual(float(normal["avg_trade_pnl_pct"]), 3.0)
+        self.assertAlmostEqual(float(high["sum_trade_pnl_pct"]), -2.0)
+        self.assertAlmostEqual(float(frame["sample_share"].sum()), 1.0)
 
 
 if __name__ == "__main__":
