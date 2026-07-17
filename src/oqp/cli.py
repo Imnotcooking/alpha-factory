@@ -1,4 +1,4 @@
-"""Public command-line front door for Oxford Quant Pipeline."""
+"""Public command-line front door for Alpha Factory."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ DASHBOARDS = {
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="oqp",
-        description="Oxford Quant Pipeline onboarding and local runtime commands.",
+        description="Alpha Factory onboarding and local runtime commands.",
     )
     parser.add_argument("--repo-root", help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -104,7 +104,7 @@ def dashboard_command(
 
 def _init_command(args: argparse.Namespace, root: Path) -> int:
     result = seed_demo_profile(root, as_of=args.as_of, force=args.force)
-    print(f"Initialized OQP profile: {result.profile}")
+    print(f"Initialized Alpha Factory profile: {result.profile}")
     print(f"Runtime: {result.paths.runtime_root}")
     print(
         f"Fixtures: {result.research_runs} research runs, "

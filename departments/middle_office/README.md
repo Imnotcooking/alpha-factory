@@ -3,7 +3,7 @@
 ## Purpose
 
 Middle Office is now the account truth and reconciliation layer inside the
-active OQP architecture. It answers:
+active Alpha Factory architecture. It answers:
 
 - What do the brokers say we own?
 - What does the unified portfolio ledger say we own?

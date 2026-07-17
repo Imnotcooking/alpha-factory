@@ -1,6 +1,6 @@
 # Start Here
 
-This guide explains how to approach Oxford Quant Pipeline without already
+This guide explains how to approach Alpha Factory without already
 knowing its folder structure, brokers, or research history.
 
 ## 1. Pick An Audience Path

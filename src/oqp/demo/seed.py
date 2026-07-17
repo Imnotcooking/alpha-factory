@@ -1,4 +1,4 @@
-"""Deterministic fixtures for the broker-free OQP demo profile."""
+"""Deterministic fixtures for the broker-free Alpha Factory demo profile."""
 
 from __future__ import annotations
 

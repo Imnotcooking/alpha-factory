@@ -22,7 +22,7 @@ python -m pytest -q tests -k "trading or execution"
 
 | Folder | Role | Active code home |
 | --- | --- | --- |
-| `paper_trading/` | Paper-trading process docs, safety switches, submitter notes, and next-phase checklist. | `src/oqp/paper_trading/`, `scripts/run_paper_*`, Ops Dashboard Paper page. |
+| `paper_trading/` | Paper-trading process docs, safety switches, submitter notes, and next-phase checklist. | `src/oqp/paper_trading/`, `scripts/trading/run_paper_*`, Ops Dashboard Paper page. |
 | `order_management/` | Public-safe example payloads for research signals and draft trade proposals. | `src/oqp/contracts/`, `src/oqp/execution/`, `src/oqp/paper_trading/order_router.py`. |
 
 Broker gateway operating notes currently belong in

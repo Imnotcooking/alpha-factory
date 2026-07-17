@@ -1,6 +1,6 @@
 # Documentation Index
 
-`docs/` is the public reading path for OQP. It provides orientation and links
+`docs/` is the public reading path for Alpha Factory. It provides orientation and links
 to the owning technical or departmental document instead of duplicating every
 policy here.
 

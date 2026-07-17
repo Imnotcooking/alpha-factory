@@ -62,4 +62,4 @@ def test_public_navigation_links_resolve() -> None:
 
 def test_architecture_uses_public_project_name() -> None:
     first_line = (REPO_ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8").splitlines()[0]
-    assert first_line == "# Oxford Quant Pipeline Architecture"
+    assert first_line == "# Alpha Factory Architecture"

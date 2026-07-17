@@ -13,7 +13,7 @@ python -m pip install -e ".[dashboard,research,dev]"
 oqp doctor
 ```
 
-The detailed package inventory is in [OQP Package Ownership](oqp/README.md).
+The detailed package inventory is in [Alpha Factory Python Package](oqp/README.md).
 
 ## Why The Extra `oqp` Level Exists
 

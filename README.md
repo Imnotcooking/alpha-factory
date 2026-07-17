@@ -1,9 +1,35 @@
-# Oxford Quant Pipeline
+# Alpha Factory
 
-Oxford Quant Pipeline (OQP) is a modular quantitative research and trading
+Alpha Factory is a modular quantitative research and trading
 operations platform. It combines reproducible factor research, taxonomy-aware
 backtesting, portfolio and options analytics, paper-trading controls, account
 ledgers, and two Streamlit dashboards.
+
+It is being developed for two connected purposes: as a practical system for
+day-to-day strategy research and portfolio operations, and as a public
+engineering portfolio for quantitative finance master's applications. The
+project identity is deliberately institution-neutral; **Alpha Factory** is the
+name of the platform regardless of where the work is reviewed.
+
+The installed command and Python namespace remain `oqp` for compatibility.
+They are technical identifiers, not the public project name.
+
+## Platform At A Glance
+
+Alpha Factory has two primary user surfaces:
+
+- **Research Dashboard**: data diagnostics, pattern and market-breadth labs,
+  factor backtesting, strategy comparison, robustness analysis, and promotion
+  evidence.
+- **Ops Dashboard**: read-only portfolio monitoring, paper-trading review,
+  options analytics, reconciliation, health checks, and guarded operational
+  workflows.
+
+Reusable logic lives in `src/oqp/`. The `apps/` layer renders it, `scripts/`
+orchestrates repeatable jobs, `departments/` records ownership and policy, and
+`runtime/` contains local data, artifacts, ledgers, and logs. The full system
+design and current restructuring status are documented in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 The fastest way to understand the project is the broker-free demo. It creates a
 deterministic synthetic market, research ledger, trade history, option chain,
@@ -16,7 +42,7 @@ Python 3.11 or 3.12 is recommended.
 
 ```bash
 git clone <repository-url>
-cd oxford_quant_pipeline
+cd alpha-factory
 
 python -m venv .venv
 source .venv/bin/activate
@@ -221,6 +247,6 @@ See `ARCHITECTURE.md`, `departments/research/public_private_boundary.md`, and
 
 ## Project Status
 
-OQP is an active research and engineering platform, not a finished brokerage
+Alpha Factory is an active research and engineering platform, not a finished brokerage
 product. Live execution remains future-gated while reproducibility, paper
 evidence, and operational controls continue to mature.

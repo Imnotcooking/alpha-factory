@@ -1,4 +1,4 @@
-"""Oxford Quant Pipeline shared backend package."""
+"""Alpha Factory shared backend package."""
 
 __all__ = ["__version__"]
 

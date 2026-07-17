@@ -1,6 +1,6 @@
 # Dependency Management
 
-OQP uses `pyproject.toml` as the canonical declaration of package metadata,
+Alpha Factory uses `pyproject.toml` as the canonical declaration of package metadata,
 runtime dependencies, optional extras, and the `oqp` console command.
 
 ## Start Here

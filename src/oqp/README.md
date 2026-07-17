@@ -1,4 +1,4 @@
-# OQP Package Ownership
+# Alpha Factory Python Package
 
 `src/oqp/` is intentionally one level below `src/`. This is the standard
 Python `src` layout: `src` is the import root and `oqp` is the installable

@@ -1,6 +1,6 @@
 # Applications
 
-`apps/` contains OQP's Streamlit user interfaces. Applications compose and
+`apps/` contains Alpha Factory's Streamlit user interfaces. Applications compose and
 present package-owned capabilities; reusable calculations, contracts, storage,
 and safety rules belong in `src/oqp/`.
 

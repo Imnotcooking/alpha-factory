@@ -3,7 +3,7 @@
 Last reviewed: 2026-07-17
 
 Risk owns independent measurement, risk appetite, limit definitions, scenario
-standards, model-risk review, and breach escalation across OQP. It consumes
+standards, model-risk review, and breach escalation across Alpha Factory. It consumes
 reconciled account truth and approved market data. It does not create alpha,
 change broker records, or submit orders.
 

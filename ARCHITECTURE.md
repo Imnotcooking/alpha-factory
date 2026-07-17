@@ -1,10 +1,58 @@
-# Oxford Quant Pipeline Architecture
+# Alpha Factory Architecture
 
-Last reviewed: 2026-07-06
+Last reviewed: 2026-07-17
 
-This document is the current restructuring checkpoint. The repo is converging
-toward two dashboard surfaces backed by shared, testable modules under
-`src/oqp`: a research lab and a unified operations cockpit.
+Alpha Factory is a modular quantitative research and trading-operations system.
+It is designed both as a working research platform and as reproducible evidence
+of quantitative engineering practice. The public identity is institution-neutral;
+`oqp` remains only the stable Python package and command namespace.
+
+This document is the complete current architecture checkpoint. The repository
+is organized around two dashboard surfaces backed by shared, testable modules
+under `src/oqp`: a research lab and a unified operations cockpit. It describes
+the intended ownership boundaries as well as the parts that are already wired,
+still guarded, or deliberately kept private.
+
+## Architecture Principles
+
+1. **Reproducible research**: data lineage, assumptions, configurations, seeds,
+   artifacts, and tests must make a result explainable and repeatable.
+2. **Domain ownership**: calculations and rules live in the owning `src/oqp/`
+   domain; dashboards display them and scripts orchestrate them.
+3. **Broker and vendor neutrality**: canonical contracts separate the platform
+   from IBKR, QMT, Massive, FMP, and other optional integrations.
+4. **Taxonomy awareness**: data, factors, backtests, risk models, and options
+   workflows declare the asset classes and market lanes they support.
+5. **Truthful data handling**: accounting views may value from forward-filled
+   observations, while alpha and execution paths honor freshness and missingness
+   flags rather than treating synthetic prices as new information.
+6. **Guarded execution**: research promotion, proposals, review, tickets,
+   submission, and reconciliation remain separate stages. Live execution is
+   disabled by default.
+7. **Public/private separation**: framework code and sanitized examples can be
+   published without exposing live alpha, broker state, credentials, or vendor
+   data.
+
+## End-To-End Lifecycle
+
+```mermaid
+flowchart LR
+    Sources["Exchange, vendor, broker, or demo sources"] --> Normalize["Canonical data and instrument taxonomy"]
+    Normalize --> Quality["Quality, missingness, freshness, and lineage checks"]
+    Quality --> Research["Factors, patterns, regimes, and backtests"]
+    Research --> Evidence["Diagnostics, robustness, assumptions, and artifacts"]
+    Evidence --> Promotion["Research promotion decision"]
+    Promotion --> Paper["Paper proposal, review, ticket, and guarded submission"]
+    Paper --> Reconcile["Account snapshots, fills, valuation, and reconciliation"]
+    Reconcile --> Ops["Ops Dashboard, risk, options, and health monitoring"]
+    Ops --> Feedback["Observed performance and operational evidence"]
+    Feedback --> Research
+```
+
+The lifecycle is intentionally not one monolithic engine. Research can run
+without a broker, the dashboards can run from deterministic demo state, and a
+broker adapter can be replaced without rewriting factor, portfolio, or risk
+logic.
 
 ## Current Shape
 
@@ -17,22 +65,24 @@ flowchart TD
 
     subgraph Core["src/oqp Shared Core"]
         Config["config and paths"]
+        Data["data contracts and adapters"]
         Brokers["broker adapters"]
         Accounts["account ledger and reporting"]
         PaperCore["paper trading ledger and safety"]
         Execution["proposal contracts and guardrails"]
         Risk["risk analytics"]
-        Intelligence["intelligence engines"]
+        ResearchCore["research models and backtesting"]
         Options["options analytics"]
         Investing["investing and valuation"]
         OpsCore["ops health probes"]
     end
 
     subgraph State["Runtime State"]
+        RuntimeData["runtime/data"]
         Artifacts["runtime/artifacts"]
         AccountDB["runtime/db/accounts/account_ledger.db"]
         PaperDB["runtime/db/paper_trading/paper_trading.db"]
-        Logs["logs"]
+        Logs["runtime/logs"]
     end
 
     subgraph External["External Systems"]
@@ -43,12 +93,15 @@ flowchart TD
     end
 
     Research --> Artifacts
+    Research --> Data
+    Data --> RuntimeData
+    Data --> Vendors
     Research --> Execution
     Ops --> Accounts
     Ops --> PaperCore
     Ops --> Execution
     Ops --> Risk
-    Ops --> Intelligence
+    Research --> ResearchCore
     Ops --> Options
     Ops --> Investing
     Ops --> OpsCore
@@ -75,21 +128,22 @@ src/oqp/
   brokers/                     broker contracts and IBKR read-only adapters
   config/                      settings, paths, environment loading
   contracts/                   strategy candidate artifacts
+  data/                        data contracts, taxonomy, adapters, and quality views
   execution/                   proposal contracts and guardrails
   investing/                   valuation and portfolio utilities
-  intelligence/                modular advisory engines and coordinator
   market/                      price-history and volatility helpers
   ops/                         operational health models
   options/                     options analytics
   paper_trading/               paper ledgers, reviews, tickets, runner, submitter gates
   portfolio/                   legacy/live portfolio ingestion and NAV helpers
+  research/                    factors, backtesting, ML, regimes, and diagnostics
   risk/                        risk analytics
 
 departments/
   research/                    alpha-lab policy and public/private boundary
   trading/                     paper trading process docs and order examples
-  risk/                        options risk policy and promotion notes
-  data_platform/               storage map and data process notes
+  risk/                        risk appetite, limits, scenarios, and model policy
+  data_platform/               data catalog, governance contracts, and runbooks
   middle_office/               account contracts, controls, reconciliation
   platform/                    deployment and scheduler runbooks
 ```
@@ -100,8 +154,7 @@ departments/
 flowchart LR
     Candidate["research candidate artifact"] --> Approval["strategy approval / promotion"]
     Approval --> Registry["approved paper strategy registry"]
-    Registry --> Intelligence["portfolio manager intelligence layer"]
-    Intelligence --> Trigger["runtime trigger decision"]
+    Registry --> Trigger["runtime trigger decision"]
     Trigger --> Proposal["trade proposal artifact"]
     Proposal --> Review["safety review"]
     Review --> Ticket["order ticket"]
@@ -140,8 +193,6 @@ flowchart TD
     Ops --> Live["Live Portfolio: overview, holdings, exposure, options hub, reconciliation"]
     Ops --> Paper["Paper Trading: paper account, reviews, tickets, paper ledger"]
     Ops --> Workbench["Discretionary Workbench: watchlist, opportunity hub, API status"]
-    Ops --> Risk["Risk Control Room: policy, allocation lab, risk snapshots"]
-    Ops --> Execution["Execution Strategy Monitor: strategy roster, proposals, reviews, tickets"]
     Ops --> Journal["Journal Reports: notes, daily summaries, report archive"]
 ```
 
@@ -175,95 +226,19 @@ Shared helpers:
   and underlying exposure
 - `src/oqp/portfolio/live_reporting.py`: enriched live holdings table
 
-## Intelligence Engine Layer
+## Domain Ownership
 
-The intelligence layer follows the same modular ideology as the decommissioned
-alpha lab: each category owns its own folder, base contracts, and future model
-implementations, while one coordinator runs the selected engines. This keeps
-model logic out of Streamlit pages and makes dashboard decisions testable.
+Model code is grouped by accountable domain rather than by a generic engine
+type. `research` owns backtests, factor contracts, ML, regime estimation, and
+optional allocators; `risk` owns independent measurements, limits, and
+scenarios; `options` owns contract lifecycle and derivatives analytics;
+`investing` owns discretionary research evidence. Dashboard pages consume
+these APIs but do not define model rules or thresholds.
 
-```mermaid
-flowchart TD
-    subgraph Inputs["Runtime Context"]
-        AccountLedger["Unified account ledger"]
-        PaperLedger["Paper trading ledger"]
-        OpsStatus["Ops health checks"]
-        Settings["Safety settings"]
-    end
-
-    Context["EngineContext"]
-    Registry["EngineRegistry"]
-    Coordinator["IntelligenceCoordinator"]
-
-    subgraph Engines["src/oqp/intelligence"]
-        PM["PortfolioManagerEngine"]
-        RiskRoom["risk_engine/RiskControlRoomEngine"]
-        Regime["regime_engine/MarketHMM + RegimeSnapshotEngine"]
-        ML["ml_engine/base.py"]
-        Allocation["allocation_engine/HRP + Kelly + Vol Target"]
-        Signal["signal_engine/base.py"]
-    end
-
-    subgraph Outputs["Dashboard Outputs"]
-        Summary["summary metrics"]
-        Flags["risk flags"]
-        Frames["dataframes for tables/charts"]
-        Signals["advisory signals"]
-    end
-
-    AccountLedger --> Context
-    PaperLedger --> Context
-    OpsStatus --> Context
-    Settings --> Context
-    Registry --> Coordinator
-    Context --> Coordinator
-    Coordinator --> PM
-    Coordinator --> RiskRoom
-    Coordinator --> Regime
-    Coordinator -. future .-> ML
-    Coordinator --> Allocation
-    Coordinator -. future .-> Signal
-    PM --> Summary
-    PM --> Flags
-    PM --> Signals
-    RiskRoom --> Summary
-    RiskRoom --> Flags
-    RiskRoom --> Frames
-    RiskRoom --> Signals
-    Summary --> OpsIntel["Ops Dashboard Intelligence page"]
-    Flags --> OpsIntel
-    Frames --> OpsIntel
-    Flags --> OpsRisk["Ops Dashboard Risk page"]
-```
-
-Current implementation:
-
-- `EngineContext` carries live/paper summaries, NAV history, positions, events,
-  approved strategy rosters, strategy signals, and safety settings.
-- `BaseEngine` and `EngineResult` define the common interface.
-- `EngineRegistry` and `IntelligenceCoordinator` run engines by id and capture
-  failures into structured results.
-- `PortfolioManagerEngine` is the post-approval command layer. Once a strategy
-  is approved, this engine decides runtime posture: triggerable, waiting for
-  signal, paper paused, or live locked.
-- `risk_engine/RiskControlRoomEngine` produces account risk summaries,
-  concentration reads, and warning flags for the Ops Risk page.
-- `regime_engine/MarketHMM` and `MarketGMMHMM` mirror the alpha-lab HMM class
-  layout: emissions, `fit`, `_align_states`, `predict`, `predict_proba`,
-  `save`, and `load`, with state alignment by volatility.
-- `regime_engine/RegimeSnapshotEngine` gives the Ops Dashboard a lightweight
-  return/volatility regime read before a trained HMM artifact is promoted.
-- `allocation_engine` now has HRP, fractional Kelly, volatility targeting, and
-  weight constraint helpers. The registered allocation advisory engine stays
-  skipped until research returns/signals are passed into `EngineContext`.
-
-Intelligence is not the research approval gate. Research approval says a
-strategy is allowed to run in a given market/account lane. The intelligence
-layer is the portfolio-manager command center that decides whether approved
-strategies should trigger now, what sizing posture is sensible, or whether the
-strategy should pause because of regime, cash, drawdown, risk, or account
-constraints. Execution still remains behind the existing proposal, review,
-ticket, and submitter gates.
+The former generic intelligence coordinator had no active runtime caller and
+duplicated research allocation and Risk policy. It was removed after its useful
+HMM and directional lens moved to `research.regimes` and
+`investing.directional_lens`.
 
 ## Live Trading Boundary
 
@@ -296,7 +271,7 @@ Private by default:
 Before staging a public commit:
 
 ```bash
-python scripts/check_public_commit_hygiene.py
+python scripts/platform/check_public_commit_hygiene.py
 git diff --cached --stat
 git diff --cached --name-only
 ```
@@ -304,7 +279,7 @@ git diff --cached --name-only
 To audit the current dirty worktree:
 
 ```bash
-python scripts/check_public_commit_hygiene.py --all
+python scripts/platform/check_public_commit_hygiene.py --all
 ```
 
 The dirty-worktree audit is expected to fail while private alpha-lab work is in
@@ -321,7 +296,7 @@ Done:
 - server deployment has reproducible runbooks, env templates, and systemd units
 - live and paper IBKR gateways are separated
 - paper account storage, dashboard reporting, and Discord reporting are wired
-- modular intelligence engine layer is wired into Ops Intelligence and Risk pages
+- domain-owned research, investing, and risk services are wired into Ops and Research pages
 - guarded paper order submission path exists but is not enabled by default
 - public/private alpha research policy exists
 

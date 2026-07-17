@@ -1,4 +1,4 @@
-"""Central runtime settings for the Oxford Quant Pipeline."""
+"""Central runtime settings for Alpha Factory."""
 
 from __future__ import annotations
 

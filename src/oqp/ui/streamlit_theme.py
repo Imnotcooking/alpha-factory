@@ -43,8 +43,8 @@ def page_header(
     language: str,
     title_zh: str | None = None,
     subtitle_zh: str | None = None,
-    kicker: str = "Oxford Quant Pipeline",
-    kicker_zh: str = "Oxford Quant Pipeline",
+    kicker: str = "Alpha Factory",
+    kicker_zh: str = "Alpha Factory",
 ) -> None:
     """Render a compact styled page header."""
 
