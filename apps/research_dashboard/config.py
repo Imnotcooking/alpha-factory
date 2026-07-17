@@ -18,8 +18,10 @@ if SRC_DIR.exists() and str(SRC_DIR) not in sys.path:
 from oqp.ui.research_dashboard_config import *  # noqa: F401,F403,E402
 from oqp.data.runtime_paths import FUTURES_CN_DAILY_DATA_ROOT  # noqa: E402
 
-RUNTIME_ROOT = REPO_ROOT / "runtime"
-ALPHA_RUNTIME_DATA_ROOT = RUNTIME_ROOT / "data"
+RUNTIME_ROOT = Path(os.environ.get("OQP_RUNTIME_ROOT", REPO_ROOT / "runtime"))
+ALPHA_RUNTIME_DATA_ROOT = Path(
+    os.environ.get("ALPHA_RUNTIME_DATA_ROOT", RUNTIME_ROOT / "data")
+)
 ALPHA_RUNTIME_ARTIFACT_ROOT = RUNTIME_ROOT / "artifacts" / "research"
 RESEARCH_ARTIFACT_ROOT = Path(
     os.environ.get(

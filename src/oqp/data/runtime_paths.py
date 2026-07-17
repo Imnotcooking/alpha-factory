@@ -17,14 +17,28 @@ def _path_from_env(value: str | Path) -> Path:
     return path if path.is_absolute() else REPO_ROOT / path
 
 
+RUNTIME_DATA_ROOT = _path_from_env(
+    os.environ.get("ALPHA_RUNTIME_DATA_ROOT", "runtime/data")
+)
+
+
 FUTURES_CN_DAILY_DATA_ROOT = _path_from_env(
-    os.environ.get("FUTURES_CN_DAILY_DATA_ROOT", "runtime/data/futures_cn/daily")
+    os.environ.get(
+        "FUTURES_CN_DAILY_DATA_ROOT",
+        RUNTIME_DATA_ROOT / "futures_cn" / "daily",
+    )
 )
 FUTURES_CN_INTRADAY_DATA_ROOT = _path_from_env(
-    os.environ.get("FUTURES_CN_INTRADAY_DATA_ROOT", "runtime/data/futures_cn/intraday")
+    os.environ.get(
+        "FUTURES_CN_INTRADAY_DATA_ROOT",
+        RUNTIME_DATA_ROOT / "futures_cn" / "intraday",
+    )
 )
 FUTURES_CN_TICK_DATA_ROOT = _path_from_env(
-    os.environ.get("FUTURES_CN_TICK_DATA_ROOT", "runtime/data/futures_cn/tick")
+    os.environ.get(
+        "FUTURES_CN_TICK_DATA_ROOT",
+        RUNTIME_DATA_ROOT / "futures_cn" / "tick",
+    )
 )
 
 
@@ -35,7 +49,7 @@ def asset_class_runtime_data_root(asset_class: str, timeframe: str = "daily") ->
     timeframe = str(timeframe).strip().lower()
     if not timeframe:
         timeframe = "daily"
-    return REPO_ROOT / "runtime" / "data" / normalized / timeframe
+    return RUNTIME_DATA_ROOT / normalized / timeframe
 
 
 def futures_cn_daily_roots() -> tuple[Path, ...]:

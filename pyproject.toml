@@ -1,0 +1,70 @@
+[build-system]
+requires = [
+    "setuptools==81.0.0",
+    "wheel==0.47.0",
+    "pybind11==3.0.4",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oxford-quant-pipeline"
+version = "0.1.0"
+description = "Oxford Quant Pipeline shared backend package"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.2,<3",
+    "pandas>=3.0,<4",
+    "scipy>=1.15,<2",
+    "pyarrow>=19,<25",
+    "PyYAML>=6,<7",
+    "requests>=2.32,<3",
+    "yfinance>=1.0,<2",
+    "python-dotenv>=1.0,<2",
+]
+
+[project.scripts]
+oqp = "oqp.cli:main"
+
+[project.optional-dependencies]
+dashboard = [
+    "streamlit>=1.50,<2",
+    "plotly>=6,<7",
+    "streamlit-aggrid>=1.2,<2",
+    "kaleido>=1,<2",
+]
+research = [
+    "polars>=1.30,<2",
+    "matplotlib>=3.10,<4",
+    "arch>=7,<9",
+    "hmmlearn>=0.3,<0.4",
+    "joblib>=1.4,<2",
+    "lightgbm>=4.5,<5",
+    "numba>=0.61,<0.62",
+    "optuna>=4,<5",
+    "scikit-learn>=1.6,<2",
+    "shap>=0.48,<0.53",
+    "xgboost>=3,<4",
+    "torch>=2.7,<3",
+]
+brokers = [
+    "ib-insync>=0.9.86,<0.10",
+]
+notebooks = [
+    "ipykernel>=7,<8",
+    "nbclient>=0.10,<0.12",
+    "nbconvert>=7.16,<8",
+    "nbformat>=5.10,<6",
+]
+dev = [
+    "pytest>=9,<10",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

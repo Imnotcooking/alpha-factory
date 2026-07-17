@@ -112,6 +112,7 @@ def collect_ops_status(
     server_ibkr_readiness_path: str | Path = DEFAULT_SERVER_IBKR_READINESS_PATH,
     max_age_hours: float = 36.0,
     repo_root: str | Path = REPO_ROOT,
+    demo_mode: bool = False,
 ) -> OpsStatusSnapshot:
     active_settings = settings or load_settings()
     ledger_path = Path(account_ledger_path) if account_ledger_path else default_account_ledger_path()
@@ -120,6 +121,29 @@ def collect_ops_status(
     account_rows = latest_account_rows(ledger_path)
     event_rows = latest_account_event_rows(ledger_path)
     items: list[OpsStatusItem] = []
+    if demo_mode:
+        items.append(
+            OpsStatusItem(
+                "Runtime",
+                "Broker-free demo profile",
+                "pass",
+                "Using deterministic synthetic accounts; no broker, vendor, or scheduler is contacted.",
+                {"Source": "oqp_demo"},
+            )
+        )
+        items.extend(account_freshness_items(account_rows, max_age_hours=max_age_hours))
+        items.extend(account_event_items(event_rows))
+        items.extend(safety_status_items(active_settings, snapshot_mode=True))
+        host_summary = host_summary_values(root)
+        items.extend(host_health_items(host_summary, snapshot_mode=True))
+        return OpsStatusSnapshot(
+            checked_at=datetime.now(timezone.utc),
+            items=tuple(items),
+            account_rows=tuple(account_rows),
+            event_rows=tuple(event_rows),
+            host_summary=host_summary,
+        )
+
     status_source = active_settings.ops_status_source
     items.append(
         OpsStatusItem(

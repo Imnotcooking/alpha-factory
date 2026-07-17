@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from setuptools import Extension, find_packages, setup
+from setuptools import Extension, setup
 
 try:
     import pybind11
@@ -15,15 +15,9 @@ ext_modules = [
         include_dirs=[pybind11.get_include()],
         language="c++",
         extra_compile_args=["-O3", "-std=c++17"],
+        optional=True,
     )
 ]
 
 
-setup(
-    name="oxford-quant-pipeline",
-    version="0.1.0",
-    description="Oxford Quant Pipeline shared backend package",
-    package_dir={"": "src"},
-    packages=find_packages("src"),
-    ext_modules=ext_modules,
-)
+setup(ext_modules=ext_modules)

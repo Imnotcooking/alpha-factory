@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -818,6 +819,7 @@ def pipeline_rows(
     paper_summary: dict[str, Any],
     paper_review_ready: bool,
     paper_submit_ready: bool,
+    demo_mode: bool = False,
 ) -> list[dict[str, str]]:
     paper = check_subset(items, contains=("Paper",))
     live = check_subset(items, contains=("Live", "Portfolio Snapshot"))
@@ -856,21 +858,33 @@ def pipeline_rows(
         },
         {
             "Layer": "QMT Connector",
-            "Mode": "Read-only / guarded submit",
-            "Status": status_label(worst_status(qmt)),
-            "Signal": status_detail(qmt, "QMT bridge is installed; connector state follows runtime flags."),
+            "Mode": "Not connected" if demo_mode else "Read-only / guarded submit",
+            "Status": "DEMO" if demo_mode else status_label(worst_status(qmt)),
+            "Signal": (
+                "Optional adapter; no QMT process is contacted in demo mode."
+                if demo_mode
+                else status_detail(qmt, "QMT bridge is installed; connector state follows runtime flags.")
+            ),
         },
         {
             "Layer": "IBKR And Server",
-            "Mode": "Monitoring",
-            "Status": status_label(worst_status(gateway)),
-            "Signal": status_detail(gateway, "IBKR sockets and API heartbeats are stable."),
+            "Mode": "Not connected" if demo_mode else "Monitoring",
+            "Status": "DEMO" if demo_mode else status_label(worst_status(gateway)),
+            "Signal": (
+                "Optional adapter; no IBKR gateway or server is contacted in demo mode."
+                if demo_mode
+                else status_detail(gateway, "IBKR sockets and API heartbeats are stable.")
+            ),
         },
         {
             "Layer": "Jobs And Alerts",
-            "Mode": "Automated",
-            "Status": status_label(worst_status(ops)),
-            "Signal": status_detail(ops, "Snapshot timers, host, and Discord checks are stable."),
+            "Mode": "Not scheduled" if demo_mode else "Automated",
+            "Status": "DEMO" if demo_mode else status_label(worst_status(ops)),
+            "Signal": (
+                "Schedulers and notifications are intentionally inactive in demo mode."
+                if demo_mode
+                else status_detail(ops, "Snapshot timers, host, and Discord checks are stable.")
+            ),
         },
     ]
 
@@ -1095,7 +1109,20 @@ def render_account_section(
 
 
 settings = load_settings()
-snapshot = collect_ops_status(settings=settings)
+status_kwargs: dict[str, Path] = {}
+if os.getenv("OQP_PROFILE") == "demo":
+    demo_log_root = Path(os.environ.get("OQP_RUNTIME_ROOT", REPO_ROOT / "runtime" / "demo")) / "logs"
+    status_kwargs = {
+        "portfolio_health_path": demo_log_root / "portfolio_snapshot_health.json",
+        "paper_health_path": demo_log_root / "paper_trading_health.json",
+        "ibkr_heartbeat_health_path": demo_log_root / "ibkr_adapter_heartbeat_health.json",
+        "server_ibkr_readiness_path": demo_log_root / "server_ibkr_readiness_health.json",
+    }
+snapshot = collect_ops_status(
+    settings=settings,
+    demo_mode=os.getenv("OQP_PROFILE") == "demo",
+    **status_kwargs,
+)
 items_df = pd.DataFrame(snapshot.item_rows)
 account_status_df = pd.DataFrame(snapshot.account_rows)
 event_status_df = pd.DataFrame(snapshot.event_rows)
@@ -1191,7 +1218,8 @@ ready_review_count = (
 ibkr_metrics = read_json(DEFAULT_IBKR_METRICS_PATH)
 manual_inputs = read_json(DEFAULT_PORTFOLIO_MANUAL_INPUTS_PATH)
 banked_profits = read_json(DEFAULT_BANKED_PROFITS_PATH)
-server_sync = read_json(REPO_ROOT / "runtime" / "state" / "server_sync" / "status.json")
+active_runtime_root = Path(os.environ.get("OQP_RUNTIME_ROOT", REPO_ROOT / "runtime"))
+server_sync = read_json(active_runtime_root / "state" / "server_sync" / "status.json")
 action_queue = pd.DataFrame(
     action_queue_rows(
         items=items_df,
@@ -1336,6 +1364,7 @@ with st.container(border=True):
                 paper_summary=paper_summary,
                 paper_review_ready=paper_review_ready,
                 paper_submit_ready=paper_submit_ready,
+                demo_mode=os.getenv("OQP_PROFILE") == "demo",
             )
         ),
         empty_message=T("no_pipeline_rows"),

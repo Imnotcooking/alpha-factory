@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from oqp.data import InstrumentMaster
-from oqp.native import load_quant_core
+from oqp.native import QuantCoreUnavailable, load_quant_core
 from oqp.research.backtesting.capital_policy import attach_capital_attrs, resolve_execution_capital
 from oqp.research.backtesting.trade_policy import (
     DEFAULT_MIN_TRADE_WEIGHT_DELTA,
@@ -31,17 +31,20 @@ from oqp.research.backtesting.models import ExecutionBacktestRequest, ExecutionB
 from oqp.research.backtesting.python_backend import PythonBacktestBackend
 
 _legacy_native_dir = os.environ.get("OQP_LEGACY_QUANT_CORE_DIR", "").strip()
-qc = load_quant_core(
-    (
-        "CryptoOrderBookTCA",
-        "SquareRootTCA",
-        "StochasticTCAWrapper",
-        "FuturesMargin",
-        "EquitiesMargin",
-        "ExecutionEngine",
-    ),
-    legacy_paths=(Path(_legacy_native_dir),) if _legacy_native_dir else (),
-)
+try:
+    qc = load_quant_core(
+        (
+            "CryptoOrderBookTCA",
+            "SquareRootTCA",
+            "StochasticTCAWrapper",
+            "FuturesMargin",
+            "EquitiesMargin",
+            "ExecutionEngine",
+        ),
+        legacy_paths=(Path(_legacy_native_dir),) if _legacy_native_dir else (),
+    )
+except QuantCoreUnavailable:
+    qc = None
 warnings.filterwarnings('ignore')
 
 
@@ -291,7 +294,8 @@ class ExecutionDesk:
 
         config_data = ASSET_TAXONOMY.get(self.asset_class, ASSET_TAXONOMY.get("FUTURES_CN", {}))
         backtest_route = str(config_data.get("backtest_route") or "vectorized")
-        vectorizable = bool(config_data.get("vectorizable", True))
+        requested_vectorizable = bool(config_data.get("vectorizable", True))
+        vectorizable = requested_vectorizable and qc is not None
         engine_label = "C++ Execution Engine" if vectorizable else "Python event-driven execution path"
         fixed_slippage_ticks_per_side = self._fixed_slippage_ticks_per_side(config_data)
         df.attrs["execution_engine_label"] = engine_label
@@ -385,7 +389,14 @@ class ExecutionDesk:
                     initial_capital=self.initial_capital,
                     deadband=self.min_trade_weight_delta,
                     integer_lots=self.integer_lots,
-                    metadata={"source": "ExecutionDesk", "route": backtest_route},
+                    metadata={
+                        "source": "ExecutionDesk",
+                        "route": (
+                            "python_fallback"
+                            if requested_vectorizable and qc is None
+                            else backtest_route
+                        ),
+                    },
                 )
             )
             self._attach_backend_result(df, result)
