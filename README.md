@@ -5,12 +5,6 @@ operations platform. It combines reproducible factor research, taxonomy-aware
 backtesting, portfolio and options analytics, paper-trading controls, account
 ledgers, and two Streamlit dashboards.
 
-It is being developed for two connected purposes: as a practical system for
-day-to-day strategy research and portfolio operations, and as a public
-engineering portfolio for quantitative finance master's applications. The
-project identity is deliberately institution-neutral; **Alpha Factory** is the
-name of the platform regardless of where the work is reviewed.
-
 The installed command and Python namespace remain `oqp` for compatibility.
 They are technical identifiers, not the public project name.
 
@@ -101,6 +95,7 @@ server. `oqp doctor --json` produces machine-readable diagnostics.
 | Goal | Start here |
 | --- | --- |
 | Tour the platform without credentials | `oqp init --profile demo` |
+| Review the mathematical and research progression | [Research notebooks](notebooks/README.md) |
 | Review a factor or backtest | [Research Dashboard](apps/research_dashboard/README.md) and `scripts/research/` |
 | Inspect portfolios, paper state, or options | Ops Dashboard |
 | Add reusable Python logic | [Source layout](src/README.md) |
@@ -140,6 +135,41 @@ flowchart LR
 The package namespace is intentionally `src/oqp/`. The `src/` layout prevents
 accidental imports from an uninstalled working directory, while the `oqp`
 namespace gives every reusable module one stable public import path.
+
+## Research Notebook Programme
+
+The [research notebooks](notebooks/README.md) form a structured quantitative
+curriculum and evidence layer rather than a collection of disconnected demos.
+More than 80 notebooks progress from mathematical foundations to empirical
+research, derivatives, portfolio construction, validation, and market
+microstructure.
+
+| Phase | Focus | Representative topics |
+| --- | --- | --- |
+| 0 | Mathematical and computational foundations | Probability, martingales, Brownian motion, numerical linear algebra, convex optimization, Python/C++ kernels |
+| 1 | Data infrastructure and empirical diagnostics | Vendor schemas, missing-data treatment, continuous futures, bias control, leakage tests, realized volatility |
+| 2 | Stochastic modelling and derivatives | Martingale pricing, Black-Scholes, Monte Carlo, volatility surfaces, Heston, SABR, Dupire local volatility, Greeks |
+| 3 | Alpha research and statistical learning | GARCH/HAR, regime models, VAR, cointegration, Kalman filters, statistical arbitrage, feature decay, time-series ML |
+| 4 | Portfolio construction and risk | Attribution, volatility targeting, PCA risk, VaR/CVaR, HRP, Black-Litterman, hedging, stochastic control |
+| 5 | Backtesting and research hygiene | Event-driven simulation, transaction costs, walk-forward testing, purged CV, deflated Sharpe, PBO, White's Reality Check |
+| 6 | Execution and market microstructure | Almgren-Chriss, market impact, Hawkes order flow, fill probability, market making, routing, latency, order-book reconstruction |
+| 7 | Integrated research programmes | Frozen hypotheses, preregistered gates, private research boundaries, sanitized publication mirrors, and manuscript evidence |
+
+The notebook programme deliberately includes failed replications and warning
+cases alongside successful implementations. Examples include cross-market
+volatility-state replication, Chinese-futures regime research, intraday
+microstructure studies, and tests that stop when a preregistered gate fails.
+This makes model risk, transportability, costs, and negative evidence part of
+the research record rather than details removed after the fact. The integrated
+programmes are indexed in the
+[Phase 7 research map](notebooks/Phase_7_Research_Projects/README.md).
+
+Each notebook records or inherits a dataset contract, universe, date range,
+parameters, seed, and reproduction path. Once an experiment becomes reusable,
+its implementation moves into `src/oqp/`, its verification moves into `tests/`,
+and generated data or model artifacts remain under ignored `runtime/` paths.
+The notebook remains the explanatory research narrative, not a second
+production pipeline.
 
 ## Repository Map
 

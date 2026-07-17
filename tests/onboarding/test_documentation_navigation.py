@@ -63,3 +63,11 @@ def test_public_navigation_links_resolve() -> None:
 def test_architecture_uses_public_project_name() -> None:
     first_line = (REPO_ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8").splitlines()[0]
     assert first_line == "# Alpha Factory Architecture"
+
+
+def test_root_readme_leads_with_work_instead_of_audience_pitch() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "## Research Notebook Programme" in readme
+    assert "[Research notebooks](notebooks/README.md)" in readme
+    assert "master's applications" not in readme.lower()
