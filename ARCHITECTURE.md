@@ -1,4 +1,4 @@
-# Alpha Factory Architecture
+# Oxford Quant Pipeline Architecture
 
 Last reviewed: 2026-07-06
 

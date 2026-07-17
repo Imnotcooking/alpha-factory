@@ -7,6 +7,17 @@ docs, execution examples, approval boundaries, and runbooks. Active reusable
 execution code lives under `src/oqp/`, while local broker/account state lives
 under `runtime/`.
 
+## Start Here
+
+Begin with demo or paper evidence. Do not configure submission while learning
+the repository:
+
+```bash
+oqp init --profile demo
+oqp dashboard ops
+python -m pytest -q tests -k "trading or execution"
+```
+
 ## What Belongs Here
 
 | Folder | Role | Active code home |

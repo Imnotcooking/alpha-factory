@@ -1,4 +1,4 @@
-# Alpha Research Dashboard Page Roadmap
+# Research Dashboard Page Roadmap
 
 This document is the working product map for `apps/research_dashboard`. Its job is to make each page understandable before we keep adding functionality.
 

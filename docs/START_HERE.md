@@ -33,8 +33,8 @@ snapshots use `src/oqp/accounts/`; portfolio valuation uses
 
 ### Contributor
 
-Read `ARCHITECTURE.md` and the repository map in `README.md`. Add reusable logic
-to the owning `src/oqp/` domain and a focused test to the matching test
+Read `ARCHITECTURE.md`, `scripts/README.md`, and `tests/README.md`. Add reusable
+logic to the owning `src/oqp/` domain and a focused test to the matching test
 directory.
 
 ## 2. Understand The Four Layers
@@ -104,9 +104,9 @@ Use the smallest relevant lane first:
 ```bash
 oqp doctor
 oqp test smoke
-pytest -q tests/accounts
-pytest -q tests/options
-pytest -q tests/research
+python -m pytest -q tests -k account
+python -m pytest -q tests -k option
+python -m pytest -q tests -k research
 ```
 
 The complete suite is intentionally broad. Begin with the smallest directory or

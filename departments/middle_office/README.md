@@ -13,6 +13,17 @@ active OQP architecture. It answers:
 This department is read-only with respect to broker accounts. It can ingest,
 reconcile, report, and raise control warnings, but it should not place trades.
 
+## Start Here
+
+Use the broker-free Ops Dashboard to understand canonical account and portfolio
+views before configuring an adapter:
+
+```bash
+oqp init --profile demo
+oqp dashboard ops
+python -m pytest -q tests -k "account or portfolio or ops"
+```
+
 ## Active Homes
 
 The old standalone Middle Office application has been retired. Its useful logic

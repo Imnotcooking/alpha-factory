@@ -7,6 +7,17 @@ source-code home and it is not runtime storage. Its job is to hold research
 policy, private factor material, public/private boundary docs, and
 human-readable research notes.
 
+## Start Here
+
+```bash
+oqp init --profile demo
+oqp dashboard research
+python -m pytest -q tests -k research
+```
+
+New factors begin with the public factor template and package-owned backtesting
+contracts; generated evidence belongs in `runtime/artifacts/research/`.
+
 ## Where The Former Alpha Lab Went
 
 The old `alpha_research_lab/` folder was deliberately split by responsibility:

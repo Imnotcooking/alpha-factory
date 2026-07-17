@@ -46,7 +46,8 @@ src/oqp/data/**/__pycache__/
 src/oqp/data/**/*.py[cod]
 src/oqp/data/**/.DS_Store
 offline_quant_lab/data/
-runtime/
+runtime/*
+!runtime/README.md
 logs/
 **/execution_logs/
 **/Portfolio/raw_data/

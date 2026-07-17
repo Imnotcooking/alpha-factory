@@ -75,13 +75,13 @@ server. `oqp doctor --json` produces machine-readable diagnostics.
 | Goal | Start here |
 | --- | --- |
 | Tour the platform without credentials | `oqp init --profile demo` |
-| Review a factor or backtest | Research Dashboard and `scripts/research/` |
+| Review a factor or backtest | [Research Dashboard](apps/research_dashboard/README.md) and `scripts/research/` |
 | Inspect portfolios, paper state, or options | Ops Dashboard |
-| Add reusable Python logic | `src/oqp/<domain>/` |
-| Run an operational job | `scripts/` |
-| Understand test lanes | `tests/` |
+| Add reusable Python logic | [Source layout](src/README.md) |
+| Run an operational job | [Script entrypoints](scripts/README.md) |
+| Understand test lanes | [Test organization](tests/README.md) |
 | Configure a real broker or server | `departments/platform/deployment/` |
-| Understand ownership and policy | `departments/<department>/README.md` |
+| Understand ownership and policy | [Department map](departments/README.md) |
 
 The more detailed public orientation is in [docs/START_HERE.md](docs/START_HERE.md).
 
@@ -143,6 +143,9 @@ src/oqp/                    Reusable application and domain logic
 scripts/                    Thin operator and research command entrypoints
 tests/                      Domain-organized verification lanes
 departments/                Ownership, policy, contracts, and runbooks
+docs/                       Public orientation and documentation index
+notebooks/                  Reproducible research narratives and evidence
+requirements/               Constrained dependency installation
 runtime/                    Ignored local data, artifacts, ledgers, and logs
 ```
 
