@@ -23,6 +23,21 @@ from oqp.research.dataset_fingerprints import (
     register_dataset_manifest,
 )
 
+_PLACEHOLDER_SECTOR_LABELS = frozenset(
+    {
+        "",
+        "macro",
+        "n/a",
+        "na",
+        "nan",
+        "none",
+        "null",
+        "unclassified",
+        "unknown",
+        "unspecified",
+    }
+)
+
 
 @dataclass(frozen=True)
 class FactorPortfolioDataBundle:
@@ -273,18 +288,72 @@ def attach_instrument_classification(
     frame: pd.DataFrame,
     market_vertical: str,
 ) -> pd.DataFrame:
-    """Fill absent sector metadata from the canonical instrument master."""
+    """Replace an absent or wholly-placeholder sector with canonical taxonomy.
+
+    A dataset that contains at least one genuine sector label remains
+    authoritative and is returned unchanged.  InstrumentMaster enrichment is
+    therefore limited to datasets whose sector column is absent or consists
+    entirely of generic placeholders such as ``Macro`` or ``Unknown``.
+
+    Instrument classification is static contract metadata keyed only by the
+    ticker/root symbol.  It does not use future prices or observations.
+    """
 
     out = frame.copy()
-    if "sector" in out.columns and out["sector"].notna().any():
-        return out
+    attrs = dict(frame.attrs)
+    sector_was_present = "sector" in out.columns
+    if sector_was_present:
+        normalized_sector = (
+            out["sector"].astype("string").fillna("").str.strip().str.casefold()
+        )
+        observed_labels = set(normalized_sector.unique())
+        if not observed_labels.issubset(_PLACEHOLDER_SECTOR_LABELS):
+            out.attrs.update(attrs)
+            out.attrs["instrument_classification"] = {
+                "schema_version": 1,
+                "source": "dataset_sector",
+                "market_vertical": str(market_vertical),
+                "enriched": False,
+                "reason": "genuine_dataset_sector_preserved",
+                "time_semantics": "dataset_provided",
+            }
+            return out
+
+    input_state = "absent" if not sector_was_present else "placeholder_only"
     master = InstrumentMaster(market_vertical)
     unique_tickers = out["ticker"].dropna().astype(str).unique()
-    sector_map = {
-        ticker: master.get_profile(ticker).sector
-        for ticker in unique_tickers
+    sector_map: dict[str, str] = {}
+    unresolved_tickers: list[str] = []
+    for ticker in unique_tickers:
+        profile = master.get_profile(ticker)
+        exchange = str(profile.exchange or "").strip().casefold()
+        sector = str(profile.sector or "").strip()
+        if (
+            not sector
+            or sector.casefold() in _PLACEHOLDER_SECTOR_LABELS
+            or exchange in {"", "unknown"}
+        ):
+            sector_map[ticker] = "Unknown"
+            unresolved_tickers.append(ticker)
+        else:
+            sector_map[ticker] = sector
+
+    ticker_series = out["ticker"].astype(str)
+    out["sector"] = ticker_series.map(sector_map).fillna("Unknown")
+    unresolved_mask = out["sector"].eq("Unknown")
+    out.attrs.update(attrs)
+    out.attrs["instrument_classification"] = {
+        "schema_version": 1,
+        "source": "instrument_master",
+        "market_vertical": str(market_vertical),
+        "enriched": True,
+        "reason": f"{input_state}_sector_enriched",
+        "time_semantics": "static_instrument_taxonomy_no_market_observations",
+        "resolved_tickers": int(len(unique_tickers) - len(unresolved_tickers)),
+        "unresolved_tickers": sorted(unresolved_tickers),
+        "resolved_rows": int((~unresolved_mask).sum()),
+        "unresolved_rows": int(unresolved_mask.sum()),
     }
-    out["sector"] = out["ticker"].astype(str).map(sector_map).fillna("Unknown")
     return out
 
 

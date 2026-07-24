@@ -25,6 +25,8 @@ VALID_EXTRACTED_RULE_FAMILIES = {
     "top_bottom_n",
     "fixed_event_hold",
     "residual_event_ttl",
+    "atr_donchian_exit_state",
+    "atr_chandelier_exit_state",
     "rank_hysteresis_long_only",
     "intraday_session_state",
     "intraday_fixed_weight_state",

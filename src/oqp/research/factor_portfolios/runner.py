@@ -302,6 +302,7 @@ class FactorPortfolioRunner:
             required_geometry = {
                 "time_series_stateful": "time_series",
                 "cross_sectional": "cross_sectional",
+                "cross_sectional_stateful": "cross_sectional",
             }.get(construction_geometry)
             if required_geometry is None:
                 raise ValueError(
@@ -314,10 +315,11 @@ class FactorPortfolioRunner:
                     f"{factor_contract.evaluation_geometry!r} != "
                     f"{construction_geometry!r}"
                 )
-        sleeve_config = replace(
-            sleeve_config,
-            signal_col=factor_contract.alpha_signal_col,
-        )
+        if not isinstance(sleeve_config, ExtractedSleeveConfig):
+            sleeve_config = replace(
+                sleeve_config,
+                signal_col=factor_contract.alpha_signal_col,
+            )
         sleeve_input = self._attest_reusable_sleeve_alignment(
             factor_frame,
             prepared=prepared,

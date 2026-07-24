@@ -401,6 +401,7 @@ def _factor_sleeve_execution_support(
         required_geometry = {
             "time_series_stateful": "time_series",
             "cross_sectional": "cross_sectional",
+            "cross_sectional_stateful": "cross_sectional",
         }.get(construction_geometry)
         if required_geometry != factor_geometry:
             return StrategyExecutionSupport(

@@ -29,6 +29,16 @@ CROSS_SECTIONAL_DAILY_NEXT_OPEN = {
     "supported_markets": ["FUTURES_CN"],
 }
 
+CROSS_SECTIONAL_DAILY_NEXT_OPEN_TO_NEXT_OPEN = {
+    "evaluation_geometry": "cross_sectional",
+    "execution_mode": "risk_desk",
+    "alpha_signal_col": "factor_score",
+    "execution_weight_col": "factor_score",
+    "execution_lag": "next_open",
+    "return_assumption": "close_signal_next_open_to_next_open",
+    "supported_markets": ["FUTURES_CN"],
+}
+
 TIME_SERIES_DAILY_ALREADY_LAGGED = {
     "evaluation_geometry": "time_series",
     "execution_mode": "risk_desk",

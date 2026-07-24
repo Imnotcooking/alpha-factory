@@ -260,6 +260,18 @@ STATUS_LABELS = {
     },
 }
 
+ZH_PURPOSE_LABELS = {
+    "factor_parameter": "Factor parameters / 因子参数",
+    "sleeve_parameter": "Sleeve construction / 因子转仓规则",
+    "router_parameter": "Router rules / 路由规则",
+    "allocator_parameter": "Allocator controls / 资金分配控制",
+    "overlay_parameter": "Risk-overlay rules / 风险叠加规则",
+    "model_hyperparameter": "ML hyperparameters / 机器学习超参数",
+    "model_weight_training": "ML model weights / 机器学习模型权重",
+    "portfolio_allocation": "Direct portfolio weights / 直接组合权重",
+    "universe_selection": "Universe selection / 品种池筛选",
+}
+
 
 @st.cache_data(show_spinner=False)
 def load_optimization_workspace(artifact_root: str) -> dict[str, Any]:
@@ -717,7 +729,14 @@ def render_optimization_workspace_panel(
 
     purpose_ids = list(registry.purposes)
     purpose_labels = {
-        purpose_id: registry.resolve_purpose(purpose_id).label
+        purpose_id: (
+            ZH_PURPOSE_LABELS.get(
+                purpose_id,
+                registry.resolve_purpose(purpose_id).label,
+            )
+            if lang == "ZH"
+            else registry.resolve_purpose(purpose_id).label
+        )
         for purpose_id in purpose_ids
     }
     selected_id = st.selectbox(

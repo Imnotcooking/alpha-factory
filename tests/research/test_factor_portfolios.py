@@ -387,6 +387,68 @@ def test_instrument_master_supplies_missing_futures_sector() -> None:
     assert enriched["sector"].tolist() == ["贵金属", "化工"]
 
 
+def test_instrument_master_replaces_placeholder_futures_sectors() -> None:
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2025-01-02", "2025-01-02"]),
+            "ticker": ["黄金(au)[指数]", "TA609"],
+            "close": [500.0, 6000.0],
+            "sector": ["Macro", "unknown"],
+        }
+    )
+
+    enriched = attach_instrument_classification(frame, "FUTURES_CN")
+
+    assert enriched["sector"].tolist() == ["贵金属", "化工"]
+    assert enriched.attrs["instrument_classification"] == {
+        "schema_version": 1,
+        "source": "instrument_master",
+        "market_vertical": "FUTURES_CN",
+        "enriched": True,
+        "reason": "placeholder_only_sector_enriched",
+        "time_semantics": "static_instrument_taxonomy_no_market_observations",
+        "resolved_tickers": 2,
+        "unresolved_tickers": [],
+        "resolved_rows": 2,
+        "unresolved_rows": 0,
+    }
+
+
+def test_instrument_master_preserves_genuine_dataset_sectors() -> None:
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2025-01-02", "2025-01-02"]),
+            "ticker": ["黄金(au)[指数]", "TA609"],
+            "close": [500.0, 6000.0],
+            "sector": ["Custom Metals", "Macro"],
+        }
+    )
+
+    enriched = attach_instrument_classification(frame, "FUTURES_CN")
+
+    assert enriched["sector"].tolist() == ["Custom Metals", "Macro"]
+    assert enriched.attrs["instrument_classification"]["source"] == "dataset_sector"
+    assert enriched.attrs["instrument_classification"]["enriched"] is False
+
+
+def test_instrument_master_marks_unresolved_futures_sector_explicitly() -> None:
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2025-01-02", "2025-01-02"]),
+            "ticker": ["黄金(au)[指数]", "not_a_contract"],
+            "close": [500.0, 100.0],
+            "sector": ["Macro", "Macro"],
+        }
+    )
+
+    enriched = attach_instrument_classification(frame, "FUTURES_CN")
+
+    assert enriched["sector"].tolist() == ["贵金属", "Unknown"]
+    diagnostics = enriched.attrs["instrument_classification"]
+    assert diagnostics["unresolved_tickers"] == ["not_a_contract"]
+    assert diagnostics["unresolved_rows"] == 1
+
+
 def test_router_inventory_is_separate_and_market_filterable() -> None:
     module = SimpleNamespace(
         __name__="synthetic_router",
