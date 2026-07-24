@@ -340,7 +340,12 @@ class FactorLibraryView:
         tabs = st.tabs(tab_labels)
 
         with tabs[0]:
-            self._render_family_mix(snapshot.manifest, theme_mode, copy)
+            self._render_family_mix(
+                snapshot.manifest,
+                theme_mode,
+                copy,
+                lang=lang,
+            )
             frequency_col, market_col = st.columns(2)
             with frequency_col:
                 self._render_dimension_mix(
@@ -350,6 +355,7 @@ class FactorLibraryView:
                     theme_mode=theme_mode,
                     count_label=copy["factor_count"],
                     share_label=copy["share"],
+                    lang=lang,
                 )
             with market_col:
                 self._render_dimension_mix(
@@ -359,6 +365,7 @@ class FactorLibraryView:
                     theme_mode=theme_mode,
                     count_label=copy["factor_count"],
                     share_label=copy["share"],
+                    lang=lang,
                 )
             st.markdown(f"#### {copy['inventory']}")
             filtered = self._render_inventory_filters(snapshot.manifest, copy)
@@ -658,13 +665,20 @@ class FactorLibraryView:
         st.dataframe(display, use_container_width=True, hide_index=True, height=320)
 
     @staticmethod
-    def _render_family_mix(manifest: pd.DataFrame, theme_mode: str, copy: dict[str, Any]) -> None:
+    def _render_family_mix(
+        manifest: pd.DataFrame,
+        theme_mode: str,
+        copy: dict[str, Any],
+        *,
+        lang: str,
+    ) -> None:
         counts = manifest.groupby("factor_family", as_index=False).size()
         counts = counts.rename(columns={"size": "count"}).sort_values("count")
         counts["label"] = counts["factor_family"].map(
             lambda value: FactorLibraryView._dimension_label(
                 "factor_family",
                 value,
+                lang=lang,
             )
         )
         counts["share"] = counts["count"] / counts["count"].sum()
@@ -701,6 +715,7 @@ class FactorLibraryView:
         theme_mode: str,
         count_label: str,
         share_label: str,
+        lang: str,
     ) -> None:
         if manifest.empty or dimension not in manifest.columns:
             return
@@ -714,7 +729,11 @@ class FactorLibraryView:
             .sort_values("count")
         )
         counts["label"] = counts[dimension].map(
-            lambda value: FactorLibraryView._dimension_label(dimension, value)
+            lambda value: FactorLibraryView._dimension_label(
+                dimension,
+                value,
+                lang=lang,
+            )
         )
         counts["share"] = counts["count"] / counts["count"].sum()
         fig = px.bar(
@@ -751,9 +770,32 @@ class FactorLibraryView:
         )
 
     @staticmethod
-    def _dimension_label(dimension: str, value: Any) -> str:
+    def _dimension_label(
+        dimension: str,
+        value: Any,
+        *,
+        lang: str = "EN",
+    ) -> str:
         raw = str(value).strip()
-        labels = {
+        english_labels = {
+            "factor_family": {
+                "price_volume": "Price Volume",
+                "price_action": "Price Action",
+                "trend": "Trend",
+                "mean_reversion": "Mean Reversion",
+                "composite": "Composite",
+                "market_relative": "Market Relative",
+                "flow_positioning": "Flow Positioning",
+                "value_carry": "Value Carry",
+                "momentum": "Momentum",
+                "machine_learning": "Machine Learning",
+                "hybrid": "Hybrid",
+                "adaptive": "Adaptive",
+                "relative_value": "Relative Value",
+                "multifactor_residual": "Multifactor Residual",
+                "ensemble": "Ensemble",
+                "breakout": "Breakout",
+            },
             "data_frequency": {
                 "daily": "Daily",
                 "intraday_1m": "Intraday (1m)",
@@ -766,12 +808,51 @@ class FactorLibraryView:
                 "EQUITY_US": "US Equities",
                 "OPTIONS_CN": "CN Options",
                 "OPTIONS_US": "US Options",
+                "FUTURES_US": "US Futures",
             },
         }
-        return labels.get(dimension, {}).get(
+        fallback = english_labels.get(dimension, {}).get(
             raw,
             raw.replace("_", " ").strip().title(),
         )
+        if lang != "ZH":
+            return fallback
+
+        chinese_labels = {
+            "factor_family": {
+                "price_volume": "Price Volume / 价量",
+                "price_action": "Price Action / 价格行为",
+                "trend": "Trend / 趋势",
+                "mean_reversion": "Mean Reversion / 均值回归",
+                "composite": "Composite / 复合因子",
+                "market_relative": "Market Relative / 市场相对",
+                "flow_positioning": "Flow Positioning / 资金流与持仓",
+                "value_carry": "Value Carry / 价值与展期收益",
+                "momentum": "Momentum / 动量",
+                "machine_learning": "Machine Learning / 机器学习",
+                "hybrid": "Hybrid / 混合",
+                "adaptive": "Adaptive / 自适应",
+                "relative_value": "Relative Value / 相对价值",
+                "multifactor_residual": "Multifactor Residual / 多因子残差",
+                "ensemble": "Ensemble / 集成",
+                "breakout": "Breakout / 突破",
+            },
+            "data_frequency": {
+                "daily": "Daily / 日频",
+                "intraday_1m": "Intraday (1m) / 日内（1分钟）",
+                "minute": "Minute / 分钟级",
+                "tick": "Tick / 逐笔",
+            },
+            "native_market": {
+                "FUTURES_CN": "CN Futures / 中国期货",
+                "EQUITY_CN": "CN Equities / 中国股票",
+                "EQUITY_US": "US Equities / 美国股票",
+                "OPTIONS_CN": "CN Options / 中国期权",
+                "OPTIONS_US": "US Options / 美国期权",
+                "FUTURES_US": "US Futures / 美国期货",
+            },
+        }
+        return chinese_labels.get(dimension, {}).get(raw, fallback)
 
     @staticmethod
     def _style_distribution_chart(
