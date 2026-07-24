@@ -398,8 +398,11 @@ class DNAView:
                     x=exposure["date"],
                     y=exposure["long_notional"],
                     name=copy["long_notional"],
-                    marker_color="#FCA5A5",
-                    opacity=0.86,
+                    marker=dict(
+                        color="#EF4444",
+                        line=dict(color="#B91C1C", width=0.25),
+                    ),
+                    opacity=0.94,
                     hovertemplate=(
                         "%{x|%Y-%m-%d}<br>"
                         f"{copy['long_notional']}: %{{y:,.0f}}"
@@ -413,8 +416,11 @@ class DNAView:
                     x=exposure["date"],
                     y=exposure["short_notional"],
                     name=copy["short_notional"],
-                    marker_color="#6EE7B7",
-                    opacity=0.86,
+                    marker=dict(
+                        color="#10B981",
+                        line=dict(color="#047857", width=0.25),
+                    ),
+                    opacity=0.94,
                     hovertemplate=(
                         "%{x|%Y-%m-%d}<br>"
                         f"{copy['short_notional']}: %{{y:,.0f}}"
