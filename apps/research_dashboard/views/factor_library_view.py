@@ -20,7 +20,7 @@ COPY = {
         "title": "Factor Library",
         "subtitle": "Live factor inventory and factor-level research evidence.",
         "active_factors": "Normalized factors",
-        "review_only": "Outside normalized library",
+        "review_only": "Review-only",
         "review_only_help": (
             "Factor IDs visible on the Review Board but absent from the normalized "
             "Factor Library manifest. These are historical, legacy, or database-only "
@@ -94,7 +94,7 @@ COPY = {
         "title": "因子库",
         "subtitle": "动态展示因子库存与单因子研究证据。",
         "active_factors": "标准化在库因子",
-        "review_only": "未纳入标准库",
+        "review_only": "仅审查看板",
         "review_only_help": (
             "已出现在审查看板、但不在标准化因子库清单中的因子 ID。它们属于历史、遗留或"
             "仅存在于数据库的记录，不属于当前标准化在库因子。"
