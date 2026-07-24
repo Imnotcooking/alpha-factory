@@ -1,0 +1,190 @@
+schema_version: 1
+registry_id: oqp_transaction_costs_v1
+as_of: 2026-07-22
+
+default_profiles:
+  FUTURES_CN: cn_futures_broker_v1
+  FUTURES_US: us_futures_broker_pending
+  EQUITY_US: ibkr_pro_fixed_us_equity_v1
+  EQUITY_CN: cn_equity_broker_pending
+  EQUITY_HK: hk_equity_broker_pending
+  OPTIONS_US: ibkr_pro_us_options_v1
+  OPTIONS_CN: cn_options_broker_pending
+  FX_SPOT: fx_spot_broker_pending
+  CRYPTO_PERP: crypto_perp_venue_pending
+
+profiles:
+  cn_futures_broker_v1:
+    market_vertical: FUTURES_CN
+    status: verified
+    completeness: complete
+    currency: CNY
+    effective_from: 2026-07-01
+    research_net_ready: true
+    production_ready: true
+    engine_support: costed
+    commission:
+      model: instrument_master_schedule
+      schedule_id: cn_futures_instrument_master_v1
+      supports_open_close_split: true
+      supports_same_day_close: true
+    third_party_fees:
+      model: included_in_instrument_schedule
+    slippage:
+      model: fixed_ticks
+      ticks_per_side: 0.5
+    sources:
+      - kind: internal_instrument_master
+        reference: src/oqp/data/instruments.py
+    limitations:
+      - Fee schedules must be re-versioned when the Chinese broker schedule changes.
+
+  ibkr_pro_fixed_us_equity_v1:
+    market_vertical: EQUITY_US
+    status: verified
+    completeness: broker_and_regulatory_schedule
+    currency: USD
+    effective_from: 2026-07-22
+    research_net_ready: false
+    production_ready: false
+    engine_support: estimator_only
+    commission:
+      model: per_share_order_bounds
+      rate_per_share: 0.005
+      minimum_per_order: 1.0
+      maximum_trade_value_rate: 0.01
+    third_party_fees:
+      model: us_equity_regulatory_fixed_plan
+      sec_sale_value_rate: 0.0000206
+      finra_taf_per_share_sold: 0.000195
+      finra_taf_max_per_trade: 9.79
+      finra_cat_per_share: 0.000003
+    slippage:
+      model: square_root_tca
+      base_rate: 0.0001
+      gamma: 0.05
+      status: research_assumption
+    sources:
+      - kind: official_broker_schedule
+        reference: https://www.interactivebrokers.com/en/pricing/commissions-stocks.php
+    limitations:
+      - The shared backtest engine does not yet apply per-order minimums and caps exactly.
+      - The square-root slippage parameters remain a research assumption, not broker fees.
+
+  ibkr_pro_us_options_v1:
+    market_vertical: OPTIONS_US
+    status: verified
+    completeness: partial
+    currency: USD
+    effective_from: 2026-07-22
+    research_net_ready: false
+    production_ready: false
+    engine_support: estimator_only
+    commission:
+      model: option_premium_tiered_per_contract
+      supported_monthly_contracts_max: 10000
+      minimum_per_order: 1.0
+      premium_tiers:
+        - premium_lt: 0.05
+          rate_per_contract: 0.25
+        - premium_lt: 0.10
+          rate_per_contract: 0.50
+        - premium_gte: 0.10
+          rate_per_contract: 0.65
+    third_party_fees:
+      model: us_options_known_fees
+      contract_multiplier: 100
+      occ_clearing_per_contract: 0.025
+      finra_cat_per_contract: 0.0003
+      sec_sale_value_rate: 0.0000206
+      finra_taf_per_contract_sold: 0.00329
+      exchange_and_orf_model: pending_venue_route
+    slippage:
+      model: bid_ask_half_spread
+      requires_quote_data: true
+      status: data_driven
+    sources:
+      - kind: official_broker_schedule
+        reference: https://www.interactivebrokers.com/en/pricing/commissions-options.php
+    limitations:
+      - Exchange fees and the exchange-specific Options Regulatory Fee require route data.
+      - The event-driven option ledger does not yet apply premium tiers and order minimums.
+
+  cn_equity_broker_pending:
+    market_vertical: EQUITY_CN
+    status: placeholder
+    completeness: placeholder
+    currency: CNY
+    research_net_ready: false
+    production_ready: false
+    engine_support: gross_only
+    commission: {model: pending_broker_schedule}
+    third_party_fees: {model: pending}
+    slippage: {model: pending}
+    limitations:
+      - Awaiting the Chinese broker commission, stamp duty, transfer fee, and minimum-order schedule.
+
+  cn_options_broker_pending:
+    market_vertical: OPTIONS_CN
+    status: placeholder
+    completeness: placeholder
+    currency: CNY
+    research_net_ready: false
+    production_ready: false
+    engine_support: gross_only
+    commission: {model: pending_broker_schedule}
+    third_party_fees: {model: pending}
+    slippage: {model: pending}
+    limitations:
+      - Awaiting product-level Chinese option fees and broker schedule.
+
+  us_futures_broker_pending:
+    market_vertical: FUTURES_US
+    status: placeholder
+    completeness: placeholder
+    currency: USD
+    research_net_ready: false
+    production_ready: false
+    engine_support: gross_only
+    commission: {model: pending_broker_and_exchange_schedule}
+    third_party_fees: {model: pending}
+    slippage: {model: pending}
+    limitations:
+      - US futures are outside the current implementation scope.
+      - No US contract-specification registry exists, so execution backtests are blocked.
+
+  hk_equity_broker_pending:
+    market_vertical: EQUITY_HK
+    status: placeholder
+    completeness: placeholder
+    currency: HKD
+    research_net_ready: false
+    production_ready: false
+    engine_support: gross_only
+    commission: {model: pending_broker_schedule}
+    third_party_fees: {model: pending}
+    slippage: {model: pending}
+
+  fx_spot_broker_pending:
+    market_vertical: FX_SPOT
+    status: placeholder
+    completeness: placeholder
+    currency: USD
+    research_net_ready: false
+    production_ready: false
+    engine_support: gross_only
+    commission: {model: pending_broker_schedule}
+    third_party_fees: {model: pending}
+    slippage: {model: pending}
+
+  crypto_perp_venue_pending:
+    market_vertical: CRYPTO_PERP
+    status: placeholder
+    completeness: placeholder
+    currency: USD
+    research_net_ready: false
+    production_ready: false
+    engine_support: gross_only
+    commission: {model: pending_venue_schedule}
+    third_party_fees: {model: pending}
+    slippage: {model: pending}

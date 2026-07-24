@@ -1,6 +1,6 @@
 # Repository Commit Readiness
 
-Last reviewed: 2026-07-06
+Last reviewed: 2026-07-24
 
 This note records the safe Git boundary for the OQP restructuring work. The
 goal is to keep the main architecture commit clean while avoiding accidental
@@ -37,7 +37,7 @@ Architecture commits should include the active platform surface:
 
 The former `alpha_research_lab/` folder is now decommissioned. Committing its
 deletion is allowed once active code imports from `apps/research_dashboard/`,
-`src/oqp/research/`, `src/oqp/intelligence/`, `scripts/research/`, and
+`src/oqp/research/`, `scripts/research/`, and
 `departments/research/` instead.
 
 The restructuring commit should include old root app deletions only when we are
@@ -69,10 +69,11 @@ Already retired during cleanup:
   logs, mark the factor as retired/deprecated, and move or copy it into a
   public examples or retired-factors path before staging.
 - The fuller policy lives in
-  `departments/research/public_private_boundary.md`.
-- `backtest_1-main/` and `manager_research_demo/` are local scratch/reference
-  projects. They stay ignored unless they are deliberately migrated into
-  `src/oqp`, `apps/`, `departments/`, or `notebooks/` after review.
+  `departments/research/docs/governance/public_private_boundary.md`.
+- `backtest_1-main/` and the former nested `manager_research_demo/` are not
+  public source trees. The manager repository is produced separately through
+  `scripts/platform/export_manager_repository.py`, which includes private
+  research components but excludes middle-office and runtime state.
 - Existing churn in `Photos/`, old notebooks, compiled objects, and old model
   artifacts should be reviewed separately before any final Git commit.
 - Ignored local folders under archived legacy projects, especially old
@@ -87,7 +88,7 @@ the staged diff. Avoid `git add -A`; use explicit path staging instead.
 Run the hygiene checker before committing:
 
 ```bash
-python scripts/check_public_commit_hygiene.py
+python scripts/platform/check_public_commit_hygiene.py
 git diff --cached --stat
 git diff --cached --name-only
 ```
@@ -95,7 +96,7 @@ git diff --cached --name-only
 For a broader audit of everything currently dirty:
 
 ```bash
-python scripts/check_public_commit_hygiene.py --all
+python scripts/platform/check_public_commit_hygiene.py --all
 ```
 
 The `--all` audit may fail while another workstream is actively editing private

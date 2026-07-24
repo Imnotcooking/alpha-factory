@@ -1,15 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-try:
-    import optuna
-except Exception:  # pragma: no cover - optional research dependency
-    optuna = None
-
+from oqp.optimization import (
+    ConstraintSpec,
+    FrozenResearchInputs,
+    ObjectiveSpec,
+    OptimizationComparisonResult,
+    OptimizationStudyResult,
+    OptimizationStudyRunner,
+    OptimizationStudySpec,
+    OptimizationStudyStore,
+    SearchBudget,
+    TrialEvaluation,
+    build_component_parameter_schema,
+    require_dataset_fingerprint,
+    stable_optimization_hash,
+)
 from oqp.research.tick_pulse.cpp_bridge import compute_rtv_frame
 
 
@@ -36,6 +48,8 @@ class TickPulseCalibrationConfig:
     min_success_min: float = 0.5
     min_success_max: float = 5.0
     min_success_step: float = 0.5
+    sampler_id: str = "tpe"
+    compare_random_baseline: bool = True
 
 
 class TickPulseHeuristicOptimizer:
@@ -49,34 +63,102 @@ class TickPulseHeuristicOptimizer:
     by Optuna.
     """
 
-    def __init__(self, config: TickPulseCalibrationConfig):
+    def __init__(
+        self,
+        config: TickPulseCalibrationConfig,
+        *,
+        store: OptimizationStudyStore | None = None,
+        study_id: str | None = None,
+    ):
         if config.hypothesis not in {"relative_velocity", "relative_velocity_fade"}:
             raise ValueError("Tick pulse calibration currently supports relative_velocity hypotheses only.")
         self.config = config
-        self.study: optuna.Study | None = None
+        self.store = store or OptimizationStudyStore()
+        self.study_id = study_id
+        self.study: OptimizationStudyResult | None = None
+        self.optimization_comparison: OptimizationComparisonResult | None = None
         self.best_events: pd.DataFrame | None = None
         self.feature_frame: pd.DataFrame | None = None
+        self._development_feature_frame: pd.DataFrame | None = None
+        self._calibration_dates: np.ndarray = np.array([])
+        self._holdout_dates: np.ndarray = np.array([])
+        self._frozen_split_info: dict = {}
         self.backend_counts: dict[str, int] = {}
 
     def run(self, features: pd.DataFrame) -> dict:
-        if optuna is None:
-            raise ImportError("optuna is required for TickPulseHeuristicOptimizer.")
         self.backend_counts = {}
         self.feature_frame = self._prepare_features(features)
-        sampler = optuna.samplers.TPESampler(seed=self.config.random_state)
-        self.study = optuna.create_study(direction="maximize", sampler=sampler)
-        self.study.optimize(self._objective, n_trials=self.config.n_trials, show_progress_bar=False)
+        dataset_fingerprint = require_dataset_fingerprint(features)
+        self._freeze_temporal_split(self.feature_frame)
+        event_dates = pd.to_datetime(self.feature_frame["datetime"]).dt.normalize()
+        self._development_feature_frame = self.feature_frame.loc[
+            event_dates.isin(self._calibration_dates)
+        ].copy()
 
-        best_params = self.study.best_params.copy()
+        schema = self._parameter_schema()
+        identity_payload = {
+            "component": "tick_pulse_heuristic",
+            "dataset_fingerprint": dataset_fingerprint,
+            "config": asdict(self.config),
+            "split": self._frozen_split_info,
+            "schema": schema.to_dict(),
+        }
+        resolved_study_id = self.study_id or (
+            "tick_pulse_heuristic_"
+            + stable_optimization_hash(identity_payload)[:16]
+        )
+        spec = OptimizationStudySpec(
+            study_id=resolved_study_id,
+            purpose="factor_parameter",
+            component_id=schema.component_id,
+            sampler_id=self.config.sampler_id,
+            objectives=(ObjectiveSpec("walk_forward_score", "score", "maximize"),),
+            constraints=(
+                ConstraintSpec("minimum_events", "events", ">=", self.config.min_events),
+                ConstraintSpec("minimum_folds", "fold_count", ">=", 2),
+                ConstraintSpec(
+                    "minimum_events_per_fold",
+                    "min_fold_events",
+                    ">=",
+                    self.config.min_fold_events,
+                ),
+            ),
+            frozen_inputs=FrozenResearchInputs(
+                dataset_fingerprint=dataset_fingerprint,
+                holdout_fingerprint=stable_optimization_hash(
+                    self._frozen_split_info
+                ),
+            ),
+            budget=SearchBudget(max_trials=self.config.n_trials, n_jobs=1),
+            seed=self.config.random_state,
+            metadata={"hypothesis": self.config.hypothesis},
+        )
+        runner = OptimizationStudyRunner(self.store)
+        if self.config.compare_random_baseline and self.config.sampler_id != "random":
+            comparison = runner.run_with_random_baseline(
+                spec, schema, self._evaluate_candidate
+            )
+        else:
+            result = runner.run(spec, schema, self._evaluate_candidate)
+            comparison = OptimizationComparisonResult(result, result)
+        self.optimization_comparison = comparison
+        self.study = comparison.challenger
+        if not self.study.candidates:
+            raise ValueError(
+                "No tick-pulse parameter set satisfied the frozen event and fold constraints"
+            )
+
+        best_candidate = self.study.candidates[0]
+        best_params = dict(best_candidate.parameters)
         best_events = self._build_event_dataset(self.feature_frame, best_params)
         calibration_events, holdout_events, fold_metrics, split_info = self._split_events(best_events)
         self.best_events = best_events
 
-        trials = self._trial_dataframe()
+        trials = self._trial_dataframe(self.study)
         return {
-            "optimizer": "optuna_tpe_walk_forward_heuristic",
+            "optimizer": f"shared_{self.config.sampler_id}_walk_forward_heuristic",
             "hypothesis": self.config.hypothesis,
-            "best_value": float(self.study.best_value),
+            "best_value": float(best_candidate.objective_values[0]),
             "best_params": best_params,
             "split": split_info,
             "fold_metrics": fold_metrics,
@@ -86,6 +168,8 @@ class TickPulseHeuristicOptimizer:
             "trials": trials,
             "backend": best_events.attrs.get("tick_pulse_backend", "unknown"),
             "backend_counts": self.backend_counts.copy(),
+            "optimization": self.study.to_dict(),
+            "random_baseline": comparison.baseline.to_dict(),
             "objective_note": (
                 "Objective scores chronological day folds before the final holdout. It rewards "
                 "Wilson lower-bound accuracy and expected move, then penalizes fold instability. "
@@ -93,66 +177,29 @@ class TickPulseHeuristicOptimizer:
             ),
         }
 
-    def _objective(self, trial: optuna.Trial) -> float:
-        params = {
-            "fast_window_ticks": trial.suggest_int(
-                "fast_window_ticks",
-                self.config.fast_min,
-                self.config.fast_max,
-            ),
-            "slow_window_ticks": trial.suggest_int(
-                "slow_window_ticks",
-                self.config.slow_min,
-                self.config.slow_max,
-                step=self.config.slow_step,
-            ),
-            "percentile": trial.suggest_float(
-                "percentile",
-                self.config.percentile_min,
-                self.config.percentile_max,
-            ),
-            "min_fast_move_ticks": trial.suggest_float(
-                "min_fast_move_ticks",
-                self.config.min_fast_move_min,
-                self.config.min_fast_move_max,
-                step=self.config.min_fast_move_step,
-            ),
-            "horizon_ticks": trial.suggest_categorical(
-                "horizon_ticks",
-                list(self.config.horizon_choices),
-            ),
-            "min_success_ticks": trial.suggest_float(
-                "min_success_ticks",
-                self.config.min_success_min,
-                self.config.min_success_max,
-                step=self.config.min_success_step,
-            ),
-        }
-
-        events = self._build_event_dataset(self.feature_frame, params)
-        trial.set_user_attr("backend", events.attrs.get("tick_pulse_backend", "unknown"))
+    def _evaluate_candidate(self, params: dict, context) -> TrialEvaluation:
+        context.require_development_only()
+        if self._development_feature_frame is None:
+            raise RuntimeError("Tick-pulse development frame has not been frozen")
+        events = self._build_event_dataset(self._development_feature_frame, params)
         calibration_events, _, fold_metrics, _ = self._split_events(events)
         metrics = self._score_events(calibration_events)
         fold_score = self._score_walk_forward_folds(fold_metrics)
-
-        trial.set_user_attr("events", metrics["events"])
-        trial.set_user_attr("accuracy", metrics["accuracy"])
-        trial.set_user_attr("ci_low", metrics["ci_low"])
-        trial.set_user_attr("avg_expected_move_ticks", metrics["avg_expected_move_ticks"])
-        trial.set_user_attr("fold_count", fold_score["fold_count"])
-        trial.set_user_attr("min_fold_events", fold_score["min_fold_events"])
-        trial.set_user_attr("min_fold_accuracy", fold_score["min_fold_accuracy"])
-        trial.set_user_attr("mean_fold_accuracy", fold_score["mean_fold_accuracy"])
-        trial.set_user_attr("fold_accuracy_std", fold_score["fold_accuracy_std"])
-
-        if metrics["events"] < self.config.min_events:
-            return -1.0 + metrics["events"] / max(self.config.min_events, 1)
-        if fold_score["fold_count"] < 2:
-            return -0.75
-        if fold_score["min_fold_events"] < self.config.min_fold_events:
-            return -0.5 + fold_score["min_fold_events"] / max(self.config.min_fold_events, 1)
-
-        return float(fold_score["score"])
+        combined = {
+            **metrics,
+            **fold_score,
+        }
+        combined = {
+            name: float(value) if np.isfinite(value) else 0.0
+            for name, value in combined.items()
+        }
+        return TrialEvaluation(
+            metrics=combined,
+            fold_metrics=tuple(fold_metrics.to_dict(orient="records")),
+            metadata={
+                "backend": events.attrs.get("tick_pulse_backend", "unknown")
+            },
+        )
 
     def _prepare_features(self, features: pd.DataFrame) -> pd.DataFrame:
         required = {"symbol", "datetime", "mid_price", "tick_size_est"}
@@ -164,6 +211,88 @@ class TickPulseHeuristicOptimizer:
         group_keys = _group_keys(out)
         out["_event_row_pos"] = out.groupby(group_keys, sort=False).cumcount()
         return out
+
+    def _parameter_schema(self):
+        midpoint = lambda low, high: (float(low) + float(high)) / 2.0
+        return build_component_parameter_schema(
+            "tick_pulse_relative_velocity_heuristic",
+            "factor",
+            {
+                "fast_window_ticks": {
+                    "default": int(self.config.fast_min),
+                    "type": "int",
+                    "low": self.config.fast_min,
+                    "high": self.config.fast_max,
+                    "tunable": True,
+                },
+                "slow_window_ticks": {
+                    "default": int(self.config.slow_min),
+                    "type": "int",
+                    "low": self.config.slow_min,
+                    "high": self.config.slow_max,
+                    "step": self.config.slow_step,
+                    "tunable": True,
+                },
+                "percentile": {
+                    "default": midpoint(
+                        self.config.percentile_min,
+                        self.config.percentile_max,
+                    ),
+                    "type": "float",
+                    "low": self.config.percentile_min,
+                    "high": self.config.percentile_max,
+                    "tunable": True,
+                },
+                "min_fast_move_ticks": {
+                    "default": float(self.config.min_fast_move_min),
+                    "type": "float",
+                    "low": self.config.min_fast_move_min,
+                    "high": self.config.min_fast_move_max,
+                    "step": self.config.min_fast_move_step,
+                    "tunable": True,
+                },
+                "horizon_ticks": {
+                    "default": int(self.config.horizon_choices[0]),
+                    "type": "categorical",
+                    "choices": list(self.config.horizon_choices),
+                    "tunable": True,
+                },
+                "min_success_ticks": {
+                    "default": float(self.config.min_success_min),
+                    "type": "float",
+                    "low": self.config.min_success_min,
+                    "high": self.config.min_success_max,
+                    "step": self.config.min_success_step,
+                    "tunable": True,
+                },
+            },
+        )
+
+    def _freeze_temporal_split(self, features: pd.DataFrame) -> None:
+        feature_dates = pd.to_datetime(features["datetime"]).dt.normalize()
+        unique_dates = np.array(sorted(feature_dates.dropna().unique()))
+        if len(unique_dates) < 4:
+            raise ValueError(
+                "Tick-pulse optimization requires at least four trading days "
+                "so one fixed chronological holdout can be reserved"
+            )
+        holdout_days = int(np.ceil(len(unique_dates) * self.config.holdout_fraction))
+        holdout_days = max(1, min(holdout_days, len(unique_dates) - 2))
+        self._calibration_dates = unique_dates[:-holdout_days]
+        self._holdout_dates = unique_dates[-holdout_days:]
+        self._frozen_split_info = {
+            "calibration_days": int(len(self._calibration_dates)),
+            "holdout_days": int(len(self._holdout_dates)),
+            "calibration_start": str(
+                pd.Timestamp(self._calibration_dates[0]).date()
+            ),
+            "calibration_end": str(
+                pd.Timestamp(self._calibration_dates[-1]).date()
+            ),
+            "holdout_start": str(pd.Timestamp(self._holdout_dates[0]).date()),
+            "holdout_end": str(pd.Timestamp(self._holdout_dates[-1]).date()),
+            "split_type": "frozen_walk_forward_by_day",
+        }
 
     def _build_event_dataset(self, features: pd.DataFrame, params: dict) -> pd.DataFrame:
         try:
@@ -283,64 +412,29 @@ class TickPulseHeuristicOptimizer:
         return events
 
     def _split_events(self, events: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
-        if events.empty:
-            return events.copy(), events.copy(), pd.DataFrame(), {
-                "calibration_rows": 0,
-                "holdout_rows": 0,
-                "split_row": 0,
-                "embargo_events": 0,
-                "split_type": "empty",
-            }
-
         events = events.sort_values(["datetime", "symbol"]).copy()
         events["_event_date"] = pd.to_datetime(events["datetime"]).dt.normalize()
-        unique_dates = np.array(sorted(events["_event_date"].dropna().unique()))
-        if len(unique_dates) >= 4:
-            holdout_days = int(np.ceil(len(unique_dates) * self.config.holdout_fraction))
-            holdout_days = max(1, min(holdout_days, len(unique_dates) - 2))
-            calibration_dates = unique_dates[:-holdout_days]
-            holdout_dates = unique_dates[-holdout_days:]
-
-            calibration_events = events.loc[events["_event_date"].isin(calibration_dates)].copy()
-            holdout_events = events.loc[events["_event_date"].isin(holdout_dates)].copy()
-            fold_metrics = self._build_day_fold_metrics(calibration_events, calibration_dates)
-            return (
-                calibration_events.drop(columns=["_event_date"], errors="ignore"),
-                holdout_events.drop(columns=["_event_date"], errors="ignore"),
-                fold_metrics,
-                {
-                    "calibration_rows": int(len(calibration_events)),
-                    "holdout_rows": int(len(holdout_events)),
-                    "calibration_days": int(len(calibration_dates)),
-                    "holdout_days": int(len(holdout_dates)),
-                    "fold_count": int(len(fold_metrics)),
-                    "embargo_events": 0,
-                    "split_type": "walk_forward_by_day",
-                    "calibration_start": str(pd.Timestamp(calibration_dates[0]).date()) if len(calibration_dates) else "",
-                    "calibration_end": str(pd.Timestamp(calibration_dates[-1]).date()) if len(calibration_dates) else "",
-                    "holdout_start": str(pd.Timestamp(holdout_dates[0]).date()) if len(holdout_dates) else "",
-                    "holdout_end": str(pd.Timestamp(holdout_dates[-1]).date()) if len(holdout_dates) else "",
-                },
-            )
-
-        split_idx = int(len(events) * (1.0 - self.config.holdout_fraction))
-        embargo_events = max(5, min(50, int(round(len(events) * 0.02))))
-        calibration_end = max(0, split_idx - embargo_events)
-        calibration_events = events.iloc[:calibration_end].copy()
-        holdout_events = events.iloc[split_idx:].copy()
-        fold_metrics = self._build_event_fallback_fold_metrics(calibration_events)
+        calibration_events = events.loc[
+            events["_event_date"].isin(self._calibration_dates)
+        ].copy()
+        holdout_events = events.loc[
+            events["_event_date"].isin(self._holdout_dates)
+        ].copy()
+        fold_metrics = self._build_day_fold_metrics(
+            calibration_events, self._calibration_dates
+        )
+        split_info = {
+            **self._frozen_split_info,
+            "calibration_rows": int(len(calibration_events)),
+            "holdout_rows": int(len(holdout_events)),
+            "fold_count": int(len(fold_metrics)),
+            "embargo_events": 0,
+        }
         return (
             calibration_events.drop(columns=["_event_date"], errors="ignore"),
             holdout_events.drop(columns=["_event_date"], errors="ignore"),
             fold_metrics,
-            {
-            "calibration_rows": int(len(calibration_events)),
-            "holdout_rows": int(len(holdout_events)),
-            "split_row": int(split_idx),
-            "embargo_events": int(embargo_events),
-            "fold_count": int(len(fold_metrics)),
-            "split_type": "event_fallback_insufficient_days",
-            },
+            split_info,
         )
 
     def _build_day_fold_metrics(self, calibration_events: pd.DataFrame, calibration_dates: np.ndarray) -> pd.DataFrame:
@@ -449,28 +543,33 @@ class TickPulseHeuristicOptimizer:
             "avg_expected_move_ticks": float(events["expected_move_ticks"].mean()) if total else np.nan,
         }
 
-    def _trial_dataframe(self) -> pd.DataFrame:
-        if self.study is None:
+    def _trial_dataframe(
+        self, result: OptimizationStudyResult | None
+    ) -> pd.DataFrame:
+        if result is None or not result.artifact_path:
             return pd.DataFrame()
-
+        trials_path = Path(result.artifact_path).with_name("trials.json")
+        if not trials_path.exists():
+            return pd.DataFrame()
+        payload = json.loads(trials_path.read_text(encoding="utf-8"))
         rows = []
-        for trial in self.study.trials:
+        for trial in payload:
+            user_attrs = dict(trial.get("user_attrs") or {})
+            metrics = dict(user_attrs.get("metrics") or {})
             row = {
-                "trial": trial.number,
-                "score": trial.value,
-                **trial.params,
-                "events": trial.user_attrs.get("events", np.nan),
-                "accuracy": trial.user_attrs.get("accuracy", np.nan),
-                "ci_low": trial.user_attrs.get("ci_low", np.nan),
-                "avg_expected_move_ticks": trial.user_attrs.get("avg_expected_move_ticks", np.nan),
-                "fold_count": trial.user_attrs.get("fold_count", np.nan),
-                "min_fold_events": trial.user_attrs.get("min_fold_events", np.nan),
-                "min_fold_accuracy": trial.user_attrs.get("min_fold_accuracy", np.nan),
-                "mean_fold_accuracy": trial.user_attrs.get("mean_fold_accuracy", np.nan),
-                "fold_accuracy_std": trial.user_attrs.get("fold_accuracy_std", np.nan),
+                "trial": trial.get("number"),
+                "score": (trial.get("values") or [np.nan])[0],
+                **dict(trial.get("resolved_parameters") or trial.get("params") or {}),
+                **metrics,
             }
             rows.append(row)
-        return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+        if not rows:
+            return pd.DataFrame()
+        return (
+            pd.DataFrame(rows)
+            .sort_values("score", ascending=False)
+            .reset_index(drop=True)
+        )
 
 
 def _group_keys(df: pd.DataFrame) -> list[str]:

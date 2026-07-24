@@ -198,8 +198,8 @@ set -a
 source /home/ubuntu/.oqp_server_env
 set +a
 
-PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile live --adapter-check
-PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile paper --adapter-check
+PYTHONPATH=src:. python scripts/ops/check_ibkr_server_readiness.py --profile live --adapter-check
+PYTHONPATH=src:. python scripts/ops/check_ibkr_server_readiness.py --profile paper --adapter-check
 ```
 
 Expected result:
@@ -245,8 +245,8 @@ set -a
 source /home/ubuntu/.oqp_server_env
 set +a
 
-PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile live --adapter-check
-PYTHONPATH=src:. python scripts/check_ibkr_adapter_heartbeat.py --profile live
+PYTHONPATH=src:. python scripts/ops/check_ibkr_server_readiness.py --profile live --adapter-check
+PYTHONPATH=src:. python scripts/ops/check_ibkr_adapter_heartbeat.py --profile live
 ```
 
 The paper Gateway does not need to be restarted for a live username rotation.
@@ -339,9 +339,9 @@ set -a
 source /home/ubuntu/.oqp_server_env
 set +a
 
-PYTHONPATH=src:. python scripts/check_portfolio_snapshot_health.py --notify-always
-PYTHONPATH=src:. python scripts/check_paper_trading_health.py --notify-always
-PYTHONPATH=src:. python scripts/check_ibkr_adapter_heartbeat.py --notify-always
+PYTHONPATH=src:. python scripts/ops/check_portfolio_snapshot_health.py --notify-always
+PYTHONPATH=src:. python scripts/ops/check_paper_trading_health.py --notify-always
+PYTHONPATH=src:. python scripts/ops/check_ibkr_adapter_heartbeat.py --notify-always
 ```
 
 Expected status files:

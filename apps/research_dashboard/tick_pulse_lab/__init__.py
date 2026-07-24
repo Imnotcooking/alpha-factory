@@ -1,1 +1,1 @@
-"""Intraday Event Study UI modules."""
+"""Intraday event-study components embedded in Discovery Lab."""

@@ -12,13 +12,13 @@ http://127.0.0.1:8529
 Install or refresh the agent:
 
 ```bash
-./scripts/install_macos_ops_dashboard_agent.sh
+./scripts/platform/install_macos_ops_dashboard_agent.sh
 ```
 
 Remove the agent:
 
 ```bash
-./scripts/uninstall_macos_ops_dashboard_agent.sh
+./scripts/platform/uninstall_macos_ops_dashboard_agent.sh
 ```
 
 Logs:
@@ -37,7 +37,7 @@ Documents is protected by privacy controls. If the installer refuses to run,
 either keep using the screen-based helper:
 
 ```bash
-./scripts/restart_ops_dashboard_screen.sh
+./scripts/platform/restart_ops_dashboard_screen.sh
 ```
 
 or move the repo to an unprotected project directory such as:

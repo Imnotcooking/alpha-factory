@@ -237,7 +237,7 @@ these APIs but do not define model rules or thresholds.
 
 The former generic intelligence coordinator had no active runtime caller and
 duplicated research allocation and Risk policy. It was removed after its useful
-HMM and directional lens moved to `research.regimes` and
+HMM and directional lens moved to `research.ml.regimes` and
 `investing.directional_lens`.
 
 ## Live Trading Boundary

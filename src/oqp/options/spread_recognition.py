@@ -221,6 +221,7 @@ def underlying_exposure_report(
         "Market Value",
         "Direct Market Value",
         "Option Market Value",
+        "Option Cost Basis",
         "Unrealized P&L",
         "Option Contract Shares",
         "Gross Option Contract Shares",
@@ -246,6 +247,7 @@ def underlying_exposure_report(
                 "Market Value": 0.0,
                 "Direct Market Value": 0.0,
                 "Option Market Value": 0.0,
+                "Option Cost Basis": 0.0,
                 "Unrealized P&L": 0.0,
                 "Option Contract Shares": 0.0,
                 "Gross Option Contract Shares": 0.0,
@@ -283,11 +285,13 @@ def underlying_exposure_report(
                 row_underlyings = [_canonical_underlying(parsed.underlying if parsed else symbol)]
             value_share = float(market_value) / max(len(row_underlyings), 1)
             pnl_share = float(unrealized) / max(len(row_underlyings), 1)
+            cost_share = (float(market_value) - float(unrealized)) / max(len(row_underlyings), 1)
             for underlying in row_underlyings:
                 bucket = _bucket(underlying)
                 bucket["Rows"] += 1
                 bucket["Market Value"] += value_share
                 bucket["Option Market Value"] += value_share
+                bucket["Option Cost Basis"] += cost_share
                 bucket["Unrealized P&L"] += pnl_share
 
             for leg in legs:
@@ -332,6 +336,7 @@ def underlying_exposure_report(
         bucket["Rows"] += 1
         bucket["Market Value"] += float(market_value)
         bucket["Option Market Value"] += float(market_value)
+        bucket["Option Cost Basis"] += float(market_value) - float(unrealized)
         bucket["Unrealized P&L"] += float(unrealized)
         bucket["Option Contract Shares"] += contract_shares
         bucket["Gross Option Contract Shares"] += abs(contract_shares)

@@ -15,7 +15,10 @@ from oqp.accounts.ledger import (
     load_latest_account_positions,
     write_account_snapshot,
 )
-from oqp.accounts.manual_external import load_manual_external_positions_as_account_positions
+from oqp.accounts.manual_external import (
+    load_manual_external_positions,
+    load_manual_external_positions_as_account_positions,
+)
 from oqp.accounts.models import (
     AccountEnvironment,
     AccountSnapshot,
@@ -83,9 +86,18 @@ def materialize_unified_live_account_snapshot(
         db_path,
         environment=AccountEnvironment.LIVE.value,
     )
+    manual_fx_reference = load_manual_external_positions(
+        db_path,
+        environment=AccountEnvironment.LIVE.value,
+        active_only=False,
+    )
 
     target_currency = _latest_currency(latest_broker_nav) or "USD"
-    manual_target = _manual_rows_for_currency(manual_positions, target_currency)
+    manual_target = _manual_rows_for_currency(
+        manual_positions,
+        target_currency,
+        fx_reference=manual_fx_reference,
+    )
     excluded_manual_rows = max(len(manual_positions) - len(manual_target), 0)
     broker_nav_value = _latest_float(latest_broker_nav, "net_liquidation") or 0.0
     broker_cash_value = _latest_float(latest_broker_nav, "cash") or 0.0
@@ -106,7 +118,9 @@ def materialize_unified_live_account_snapshot(
     for frame in (broker_positions, manual_target):
         if not frame.empty:
             position_records.extend(frame.to_dict("records"))
-    positions = tuple(_position_snapshot(row) for row in position_records)
+    positions = _consolidate_positions(
+        tuple(_position_snapshot(row) for row in position_records)
+    )
     snapshot = AccountSnapshot(
         snapshot_id=snapshot_id,
         as_of=as_of,
@@ -152,14 +166,19 @@ def materialize_unified_live_account_snapshot(
     )
 
 
-def _manual_rows_for_currency(frame: pd.DataFrame, target_currency: str) -> pd.DataFrame:
+def _manual_rows_for_currency(
+    frame: pd.DataFrame,
+    target_currency: str,
+    *,
+    fx_reference: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     if frame.empty:
         return frame
     target = str(target_currency or "USD").upper()
     rows: list[dict[str, Any]] = []
     for row in frame.to_dict("records"):
         source = str(row.get("currency") or "USD").upper()
-        rate = _manual_conversion_rate(frame, source, target)
+        rate = _manual_conversion_rate(frame, source, target, fx_reference=fx_reference)
         if rate is None:
             continue
         converted = dict(row)
@@ -179,12 +198,21 @@ def _manual_rows_for_currency(frame: pd.DataFrame, target_currency: str) -> pd.D
     return pd.DataFrame(rows, columns=frame.columns) if rows else pd.DataFrame(columns=frame.columns)
 
 
-def _manual_conversion_rate(frame: pd.DataFrame, source_currency: str, target_currency: str) -> float | None:
+def _manual_conversion_rate(
+    frame: pd.DataFrame,
+    source_currency: str,
+    target_currency: str,
+    *,
+    fx_reference: pd.DataFrame | None = None,
+) -> float | None:
     source = str(source_currency or "USD").upper()
     target = str(target_currency or "USD").upper()
     if source == target:
         return 1.0
-    for metadata_text in frame.get("metadata_json", pd.Series(dtype=object)).dropna():
+    metadata_values = [frame.get("metadata_json", pd.Series(dtype=object))]
+    if fx_reference is not None and not fx_reference.empty:
+        metadata_values.append(fx_reference.get("metadata_json", pd.Series(dtype=object)))
+    for metadata_text in pd.concat(metadata_values, ignore_index=True).dropna():
         metadata = _json_dict(metadata_text)
         native = str(metadata.get("native_currency") or "").upper()
         base = str(metadata.get("base_currency") or "").upper()
@@ -227,6 +255,86 @@ def _position_snapshot(row: dict[str, Any]) -> PositionSnapshot:
         multiplier=_float(row.get("multiplier"), 1.0) or 1.0,
         metadata=metadata,
     )
+
+
+def _consolidate_positions(
+    positions: tuple[PositionSnapshot, ...],
+) -> tuple[PositionSnapshot, ...]:
+    """Merge rows that collide with the account ledger's position identity.
+
+    A unified snapshot deliberately removes the source broker from its account
+    identity.  The same symbol can therefore be present in both IBKR and the
+    manual/external layer.  The ledger key is ``(snapshot, broker, symbol,
+    asset_class)``, so preserve both sources in metadata while storing one
+    economically equivalent aggregate row.
+    """
+
+    grouped: dict[tuple[str, str], list[PositionSnapshot]] = {}
+    order: list[tuple[str, str]] = []
+    for position in positions:
+        key = (position.symbol, position.asset_class)
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(position)
+
+    consolidated: list[PositionSnapshot] = []
+    for key in order:
+        rows = grouped[key]
+        if len(rows) == 1:
+            consolidated.append(rows[0])
+            continue
+
+        quantity = sum(float(row.quantity) for row in rows)
+        market_value = _sum_optional(row.market_value for row in rows)
+        unrealized_pnl = _sum_optional(row.unrealized_pnl for row in rows)
+        average_cost = _weighted_optional(
+            ((row.average_cost, abs(float(row.quantity))) for row in rows)
+        )
+        market_price = _weighted_optional(
+            ((row.market_price, abs(float(row.quantity))) for row in rows)
+        )
+        currencies = {row.currency for row in rows}
+        multipliers = {float(row.multiplier) for row in rows}
+        metadata = dict(rows[0].metadata)
+        metadata.update(
+            {
+                "consolidated_sources": [dict(row.metadata) for row in rows],
+                "consolidated_row_count": len(rows),
+            }
+        )
+        consolidated.append(
+            PositionSnapshot(
+                symbol=rows[0].symbol,
+                asset_class=rows[0].asset_class,
+                quantity=quantity,
+                average_cost=average_cost,
+                market_price=market_price,
+                market_value=market_value,
+                unrealized_pnl=unrealized_pnl,
+                currency=rows[0].currency if len(currencies) == 1 else "USD",
+                multiplier=rows[0].multiplier if len(multipliers) == 1 else 1.0,
+                metadata=metadata,
+            )
+        )
+    return tuple(consolidated)
+
+
+def _sum_optional(values: Any) -> float | None:
+    parsed = [value for value in (_optional_float(item) for item in values) if value is not None]
+    return sum(parsed) if parsed else None
+
+
+def _weighted_optional(values: Any) -> float | None:
+    parsed = [
+        (number, weight)
+        for value, weight in values
+        if (number := _optional_float(value)) is not None and weight > 0
+    ]
+    total_weight = sum(weight for _, weight in parsed)
+    if total_weight <= 0:
+        return None
+    return sum(number * weight for number, weight in parsed) / total_weight
 
 
 def _latest_float(frame: pd.DataFrame, column: str) -> float | None:

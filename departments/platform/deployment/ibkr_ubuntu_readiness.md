@@ -8,13 +8,13 @@ For full server rebuild instructions, see
 Use the redacted readiness script before running the daily broker ETL:
 
 ```bash
-PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile live
+PYTHONPATH=src:. python scripts/ops/check_ibkr_server_readiness.py --profile live
 ```
 
 Once IB Gateway or TWS is logged in on the server, run the deeper adapter check:
 
 ```bash
-PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile live --adapter-check
+PYTHONPATH=src:. python scripts/ops/check_ibkr_server_readiness.py --profile live --adapter-check
 ```
 
 The script checks:
@@ -84,9 +84,9 @@ in this repository.
 Run these after IB Gateway/TWS is already logged in:
 
 ```bash
-PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile live --adapter-check
-PYTHONPATH=src:. python scripts/update_live_portfolio_snapshot.py
-PYTHONPATH=src:. python scripts/update_portfolio_nav.py
+PYTHONPATH=src:. python scripts/ops/check_ibkr_server_readiness.py --profile live --adapter-check
+PYTHONPATH=src:. python scripts/ops/update_live_portfolio_snapshot.py
+PYTHONPATH=src:. python scripts/ops/update_portfolio_nav.py
 ```
 
 The first command checks the pipe. The ingestion script writes positions and

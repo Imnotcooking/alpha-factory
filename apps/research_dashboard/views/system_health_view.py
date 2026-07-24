@@ -37,6 +37,7 @@ ALPHA_RUNTIME_ARTIFACT_ROOT = _UI_CONFIG.ALPHA_RUNTIME_ARTIFACT_ROOT
 get_plotly_template = _UI_CONFIG.get_plotly_template
 
 try:
+    from oqp.data.catalog import load_data_catalog
     from oqp.data.views import build_market_data_views
     from oqp.data.runtime_paths import discover_futures_cn_tick_files, futures_cn_tick_roots
     from oqp.data.asset_taxonomy import LANE_METADATA, load_asset_taxonomy
@@ -57,12 +58,15 @@ except Exception:
     def build_market_data_views(*args, **kwargs):
         raise RuntimeError("oqp.data.views is unavailable in this runtime")
 
+    def load_data_catalog(*args, **kwargs):
+        raise RuntimeError("oqp.data.catalog is unavailable in this runtime")
+
     def compare_risk_imputation_views(*args, **kwargs):
         raise RuntimeError("oqp.risk.realized_volatility is unavailable in this runtime")
 
 STATUS_RANK = {"OK": 2, "WARN": 1, "FAIL": 0}
 STATUS_COLORS = {"OK": "#16a34a", "WARN": "#f59e0b", "FAIL": "#dc2626"}
-SNAPSHOT_SCHEMA_VERSION = "research_health_canonical_paths_v5"
+SNAPSHOT_SCHEMA_VERSION = "research_health_canonical_paths_v6"
 
 
 COPY = {
@@ -448,6 +452,12 @@ class SystemHealthView:
         self.logs_dir = Path(LOGS_DIR)
         self.runtime_data_root = Path(ALPHA_RUNTIME_DATA_ROOT)
         self.runtime_artifact_root = Path(ALPHA_RUNTIME_ARTIFACT_ROOT)
+        self.data_catalog_path = (
+            self.repo_root
+            / "departments"
+            / "data_platform"
+            / "source_catalog.yaml"
+        )
         self.data_cache = futures_cn_tick_roots()[0]
         legacy_native_dir = os.environ.get("OQP_LEGACY_QUANT_CORE_DIR", "").strip()
         self.legacy_cpp_dir = Path(legacy_native_dir) if legacy_native_dir else None
@@ -1042,6 +1052,7 @@ class SystemHealthView:
         checks.extend(tick_checks)
 
         data_folder_df = view._runtime_data_folder_snapshot()
+        checks.append(view._data_catalog_health_check())
 
         market_df = view._market_coverage_snapshot(parquet_df, tick_df)
         api_readiness_df = view._api_provider_snapshot(market_df)
@@ -1266,25 +1277,35 @@ class SystemHealthView:
 
     def _runtime_data_folder_snapshot(self) -> pd.DataFrame:
         rows = []
-        folder_specs = [
-            ("CORE", "feature_store", self.runtime_data_root / "feature_store", True),
-            ("CORE", "regime", self.runtime_data_root / "regime", True),
-            ("CORE", "metadata", self.runtime_data_root / "metadata", False),
-            ("CORE", "universes", self.runtime_data_root / "universes", False),
-        ]
-        for asset_class in ["FUTURES_CN", "EQUITY_CN", "OPTIONS_CN", "EQUITY_US", "OPTIONS_US"]:
-            asset_root = self.runtime_data_root / asset_class.lower()
-            for timeframe in ["daily", "intraday", "tick", "api_cache"]:
-                path = asset_root / timeframe
-                if path.exists() or timeframe in {"daily", "tick", "api_cache"}:
-                    folder_specs.append((asset_class, timeframe, path, asset_class == "FUTURES_CN" and timeframe == "daily"))
+        try:
+            catalog = load_data_catalog(self.data_catalog_path)
+            folder_specs = [
+                (
+                    entry.asset_class,
+                    entry.timeframe,
+                    entry.resolve(self.runtime_data_root),
+                    entry.required,
+                    entry.freshness_max_age_days,
+                )
+                for entry in catalog.datasets
+            ]
+        except (OSError, RuntimeError, TypeError, ValueError):
+            folder_specs = self._fallback_runtime_data_folder_specs()
 
         seen: set[Path] = set()
-        for asset_class, timeframe, path, required in folder_specs:
+        for asset_class, timeframe, path, required, freshness_max_age_days in folder_specs:
             if path in seen:
                 continue
             seen.add(path)
-            rows.append(self._summarize_data_folder(asset_class, timeframe, path, required=required))
+            rows.append(
+                self._summarize_data_folder(
+                    asset_class,
+                    timeframe,
+                    path,
+                    required=required,
+                    freshness_max_age_days=freshness_max_age_days,
+                )
+            )
 
         out = pd.DataFrame(rows)
         if not out.empty:
@@ -1294,7 +1315,59 @@ class SystemHealthView:
             out = out.drop(columns=["status_rank"])
         return out
 
-    def _summarize_data_folder(self, asset_class: str, timeframe: str, path: Path, *, required: bool) -> dict:
+    def _data_catalog_health_check(self) -> HealthCheck:
+        try:
+            catalog = load_data_catalog(self.data_catalog_path)
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            return HealthCheck(
+                "Data Platform",
+                "Source catalog",
+                "WARN",
+                f"Catalog unavailable or invalid; using built-in folder fallback: {exc}",
+                self._rel(self.data_catalog_path),
+                self._mtime_label(self.data_catalog_path),
+            )
+        return HealthCheck(
+            "Data Platform",
+            "Source catalog",
+            "OK",
+            f"Validated {len(catalog.datasets):,} canonical runtime data lanes.",
+            self._rel(self.data_catalog_path),
+            self._mtime_label(self.data_catalog_path),
+        )
+
+    def _fallback_runtime_data_folder_specs(self) -> list[tuple[str, str, Path, bool, int]]:
+        folder_specs = [
+            ("CORE", "feature_store", self.runtime_data_root / "feature_store", True, 30),
+            ("CORE", "regime", self.runtime_data_root / "regime", True, 30),
+            ("CORE", "metadata", self.runtime_data_root / "metadata", False, 30),
+            ("CORE", "universes", self.runtime_data_root / "universes", False, 30),
+        ]
+        for asset_class in ["FUTURES_CN", "EQUITY_CN", "OPTIONS_CN", "EQUITY_US", "OPTIONS_US"]:
+            asset_root = self.runtime_data_root / asset_class.lower()
+            for timeframe in ["daily", "intraday", "tick", "api_cache"]:
+                path = asset_root / timeframe
+                if path.exists() or timeframe in {"daily", "tick", "api_cache"}:
+                    folder_specs.append(
+                        (
+                            asset_class,
+                            timeframe,
+                            path,
+                            asset_class == "FUTURES_CN" and timeframe == "daily",
+                            14 if timeframe == "tick" else 30,
+                        )
+                    )
+        return folder_specs
+
+    def _summarize_data_folder(
+        self,
+        asset_class: str,
+        timeframe: str,
+        path: Path,
+        *,
+        required: bool,
+        freshness_max_age_days: int | None = None,
+    ) -> dict:
         if not path.exists():
             return {
                 "asset_class": asset_class,
@@ -1351,7 +1424,11 @@ class SystemHealthView:
             else self._empty_freshness_summary()
         )
 
-        stale_days = 14 if timeframe == "tick" else 30
+        stale_days = (
+            freshness_max_age_days
+            if freshness_max_age_days is not None
+            else 14 if timeframe == "tick" else 30
+        )
         stale = self._is_data_stale(summary.get("date_max"), max_days=stale_days)
         status = "WARN" if stale else "OK"
         detail = (

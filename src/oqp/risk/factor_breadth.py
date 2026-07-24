@@ -29,6 +29,7 @@ __all__ = [
     "map_chinese_futures_sector",
     "prepare_pca_matrix",
     "run_covariance_pca",
+    "select_assets_for_breadth",
     "summarize_breadth_regime_periods",
     "translate_sector_label",
 ]
@@ -137,6 +138,12 @@ def _selected_market_columns(columns: list[str]) -> list[str]:
         _first_present(columns, ["volume", "vol", "turnover_volume"]),
         _first_present(columns, ["sector", "industry", "sw_l1_name"]),
         _first_present(columns, ["name", "security_name", "instrument_name"]),
+        _first_present(
+            columns,
+            ["market_cap", "total_market_cap", "total_mv", "float_market_cap", "float_mv"],
+        ),
+        _first_present(columns, ["open_interest", "oi"]),
+        _first_present(columns, ["turnover", "amount", "dollar_volume", "notional"]),
     ]
     return list(dict.fromkeys([col for col in [*required, *optional] if col]))
 
@@ -174,6 +181,18 @@ def _normalize_daily_market_columns(raw: pd.DataFrame) -> pd.DataFrame:
     name_col = _first_present(columns, ["name", "security_name", "instrument_name"])
     if name_col:
         out["name"] = raw[name_col].astype(str).str.strip()
+    market_cap_col = _first_present(
+        columns,
+        ["market_cap", "total_market_cap", "total_mv", "float_market_cap", "float_mv"],
+    )
+    if market_cap_col:
+        out["market_cap"] = pd.to_numeric(raw[market_cap_col], errors="coerce")
+    open_interest_col = _first_present(columns, ["open_interest", "oi"])
+    if open_interest_col:
+        out["open_interest"] = pd.to_numeric(raw[open_interest_col], errors="coerce")
+    turnover_col = _first_present(columns, ["turnover", "amount", "dollar_volume", "notional"])
+    if turnover_col:
+        out["turnover"] = pd.to_numeric(raw[turnover_col], errors="coerce")
     return out
 
 

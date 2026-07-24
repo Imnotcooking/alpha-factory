@@ -15,8 +15,14 @@ services:
       GATEWAY_OR_TWS: gateway
       READ_ONLY_API: "yes"
       TWS_ACCEPT_INCOMING: accept
+      TWS_SETTINGS_PATH: /home/ibgateway/tws_settings
       EXISTING_SESSION_DETECTED_ACTION: ${IBKR_EXISTING_SESSION_ACTION:-primary}
+      AUTO_RESTART_TIME: ${IBKR_AUTO_RESTART_TIME:-11:45 PM}
+      TWOFA_TIMEOUT_ACTION: ${IBKR_TWOFA_TIMEOUT_ACTION:-restart}
+      RELOGIN_AFTER_TWOFA_TIMEOUT: ${IBKR_RELOGIN_AFTER_TWOFA_TIMEOUT:-yes}
       VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:?set IBKR_VNC_PASSWORD}
+    volumes:
+      - ${IBKR_TWS_SETTINGS_ROOT:-/home/ubuntu/.oqp_ibkr}/live_tws_settings:/home/ibgateway/tws_settings
 
   ib-gateway-paper:
     image: ${IB_GATEWAY_IMAGE:-ghcr.io/gnzsnz/ib-gateway:latest}
@@ -32,5 +38,11 @@ services:
       GATEWAY_OR_TWS: gateway
       READ_ONLY_API: ${IBKR_PAPER_READ_ONLY_API:-yes}
       TWS_ACCEPT_INCOMING: accept
+      TWS_SETTINGS_PATH: /home/ibgateway/tws_settings
       EXISTING_SESSION_DETECTED_ACTION: ${IBKR_EXISTING_SESSION_ACTION:-primary}
+      AUTO_RESTART_TIME: ${IBKR_AUTO_RESTART_TIME:-11:45 PM}
+      TWOFA_TIMEOUT_ACTION: ${IBKR_TWOFA_TIMEOUT_ACTION:-restart}
+      RELOGIN_AFTER_TWOFA_TIMEOUT: ${IBKR_RELOGIN_AFTER_TWOFA_TIMEOUT:-yes}
       VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:?set IBKR_VNC_PASSWORD}
+    volumes:
+      - ${IBKR_TWS_SETTINGS_ROOT:-/home/ubuntu/.oqp_ibkr}/paper_tws_settings:/home/ibgateway/tws_settings

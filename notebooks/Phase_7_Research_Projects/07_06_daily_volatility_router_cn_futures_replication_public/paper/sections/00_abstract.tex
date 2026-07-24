@@ -1,0 +1,19 @@
+We conduct a methodology-locked cross-market replication of the volatility-based
+momentum--reversal switching rule proposed for equities by \citet{butt2023}. The setting
+is a broad cross-section of Chinese commodity and financial futures. The mapping uses
+causal main-contract selection, same-contract returns, an 11-month momentum signal that
+skips the most recent month, a one-month reversal signal, and a five-year rolling
+volatility distribution. The strategy holds momentum unless lagged market volatility is
+in its highest quartile, in which case it holds reversal. After the state-history
+requirement, 66 monthly observations are evaluable. Under a lagged open-interest-notional
+market proxy, the switch has a higher endpoint than momentum, but its mean monthly
+increment is economically small and statistically indistinguishable from zero. Reversal
+beats momentum in only 4 of 14 high-volatility months, and one event determines the sign
+of the average advantage. Under an equal-product market proxy, high-volatility momentum
+outperforms reversal and the switch underperforms momentum. The volatility proxies are
+correlated, yet their quartile assignments agree in only 42.4\% of holding months.
+High-volatility months exhibit higher cross-product correlation, dispersion, and
+directional coherence, showing that volatility captures shock intensity. It does not,
+however, uniquely identify shock direction, source, breadth, or stage. The evidence
+therefore rejects a transportable volatility-only router in this sample without rejecting
+momentum, reversal, or state-dependent allocation more generally.

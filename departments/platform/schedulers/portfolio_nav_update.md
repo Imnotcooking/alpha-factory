@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`scripts/run_portfolio_snapshot_job.sh` is the non-UI job for daily
+`scripts/ops/run_portfolio_snapshot_job.sh` is the non-UI job for daily
 real-portfolio tracking. It checks the read-only IBKR connection, refreshes the
 latest `live_positions` snapshot, fetches market history, values the portfolio
 with the shared valuation engine, and writes one row into `historical_nav`.
@@ -15,13 +15,13 @@ and logged in.
 From the repository root:
 
 ```bash
-./scripts/run_portfolio_snapshot_job.sh
+./scripts/ops/run_portfolio_snapshot_job.sh
 ```
 
 Useful options:
 
 ```bash
-./scripts/run_portfolio_snapshot_job.sh --dry-run
+./scripts/ops/run_portfolio_snapshot_job.sh --dry-run
 ```
 
 Use `--dry-run` to run the readiness check and broker ingestion, then calculate NAV
@@ -29,13 +29,13 @@ without writing `historical_nav`.
 
 ## Data Flow
 
-1. `scripts/update_live_portfolio_snapshot.py` writes latest `live_positions`
+1. `scripts/ops/update_live_portfolio_snapshot.py` writes latest `live_positions`
    into `runtime/db/portfolio/portfolio_ledger.db`.
 2. It writes IBKR cash/NAV/margin metrics into
    `runtime/state/portfolio/ibkr_metrics.json`.
-3. `scripts/update_portfolio_nav.py` loads non-secret manual inputs from
-   `runtime/state/portfolio/manual_inputs.json`, falling back to the old Middle
-   Office defaults only during migration.
+3. `scripts/ops/update_portfolio_nav.py` loads non-secret manual inputs only from
+   `runtime/state/portfolio/manual_inputs.json`. No retired Middle Office
+   fallback is used.
 4. It fetches Yahoo close history for positions, FX pairs, and macro tickers.
 5. It calls `oqp.portfolio.value_portfolio_snapshot(...)`.
 6. It upserts the daily `historical_nav` row.
@@ -60,7 +60,7 @@ Cron remains a simple fallback:
 Run the combined broker-ingestion and NAV update job:
 
 ```cron
-30 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_portfolio_snapshot_job.sh >> runtime/logs/portfolio_snapshot_job.log 2>&1
+30 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/ops/run_portfolio_snapshot_job.sh >> runtime/logs/portfolio_snapshot_job.log 2>&1
 ```
 
 For live IBKR data, the server still needs TWS or IB Gateway running and logged
@@ -69,14 +69,14 @@ orders.
 
 The ordering matters:
 
-1. `scripts/check_ibkr_server_readiness.py` confirms the read-only live profile
+1. `scripts/ops/check_ibkr_server_readiness.py` confirms the read-only live profile
    can connect.
-2. `scripts/update_live_portfolio_snapshot.py` talks to brokers and CSV exports.
+2. `scripts/ops/update_live_portfolio_snapshot.py` talks to brokers and CSV exports.
 3. It writes `live_positions` and runtime `ibkr_metrics.json` for account
    cash/NAV/margin metrics.
-4. `scripts/update_portfolio_nav.py` values the latest snapshot and writes
+4. `scripts/ops/update_portfolio_nav.py` values the latest snapshot and writes
    `historical_nav`.
-5. `scripts/check_portfolio_snapshot_health.py` verifies that the SQLite ledger
+5. `scripts/ops/check_portfolio_snapshot_health.py` verifies that the SQLite ledger
    has a fresh positive NAV row and writes `runtime/logs/portfolio_snapshot_health.json`.
 6. The Ops/Money dashboards read SQLite and JSON outputs; they should not be the
    only place where NAV history gets updated on the server.
@@ -86,7 +86,7 @@ The ordering matters:
 Run the health check directly with:
 
 ```bash
-PYTHONPATH=src:. python scripts/check_portfolio_snapshot_health.py
+PYTHONPATH=src:. python scripts/ops/check_portfolio_snapshot_health.py
 ```
 
 The combined job runs this automatically after real NAV writes. The unified live

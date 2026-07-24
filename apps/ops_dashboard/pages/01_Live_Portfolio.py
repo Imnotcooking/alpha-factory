@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -35,8 +36,6 @@ from oqp.accounts import (  # noqa: E402
     UNIFIED_LIVE_PROFILE,
     account_nav_drawdowns,
     account_performance_summary,
-    account_position_history_by_asset,
-    account_position_history_by_symbol,
     account_trade_events_display,
     account_trade_event_summary,
     default_account_ledger_path,
@@ -48,6 +47,7 @@ from oqp.accounts import (  # noqa: E402
     load_manual_external_positions_as_account_positions,
     materialize_unified_live_account_snapshot,
     sync_manual_external_positions_from_json,
+    write_manual_external_positions_file,
     blended_live_nav_history,
 )
 from oqp.market import (  # noqa: E402
@@ -56,7 +56,8 @@ from oqp.market import (  # noqa: E402
     load_cached_market_history,
     load_cached_price_history,
     load_price_history,
-    refresh_yahoo_market_cache,
+    market_cache_status,
+    refresh_fmp_market_cache,
 )
 from oqp.market.volatility import bollinger_squeeze_metrics  # noqa: E402
 from oqp.options import (  # noqa: E402
@@ -72,23 +73,26 @@ from oqp.options import (  # noqa: E402
 )
 from oqp.ops import collect_ops_status  # noqa: E402
 from oqp.portfolio import (  # noqa: E402
+    DEFAULT_HOLDING_PLAN_PATH,
+    HOLDING_STYLES,
     PORTFOLIO_TICKER_ALIASES,
+    add_holding_plan_columns,
     asset_sleeve_mix,
-    concentration_curve_frame,
     concentration_diagnostics_frame,
     currency_exposure_frame,
+    default_portfolio_ledger_path,
     enriched_live_holdings,
+    load_historical_nav,
+    load_holding_styles,
     position_risk_frame,
+    save_holding_styles,
     sector_exposure_frame,
 )
 from oqp.portfolio.live_reporting import CASH_EQUIVALENT_SYMBOLS  # noqa: E402
 from oqp.risk import (  # noqa: E402
-    LiveFactorLabConfig,
+    MarketRiskConfig,
     combine_price_histories,
-    compute_factor_proxy_lab,
-    compute_pca_crowding_lab,
-    exposure_symbols,
-    factor_proxy_symbols,
+    compute_market_risk_decomposition,
 )
 from oqp.config import load_settings  # noqa: E402
 from oqp.ui import (  # noqa: E402
@@ -282,7 +286,7 @@ def format_holdings_display(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def holdings_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    """Prepare current holdings for a read-only AgGrid table."""
+    """Prepare current holdings for an interactive AgGrid table."""
 
     if frame.empty:
         return pd.DataFrame()
@@ -304,6 +308,8 @@ def holdings_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "BB Width",
         "BB 6M %ile",
         "BB Z",
+        "TP 1x ATR",
+        "SL 1x ATR",
     ]
     for column in numeric_columns:
         if column in out:
@@ -313,16 +319,16 @@ def holdings_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
     columns = [
         "Symbol",
-        "Native Currency",
-        "Currency",
-        "Broker",
-        "Asset Class",
         "Quantity",
-        "Market Price",
         "Market Value",
+        "Holding Style",
         "Average Cost",
         "Unrealized P&L",
-        "Realized P&L",
+        "Market Price",
+        "TP 1x ATR",
+        "SL 1x ATR",
+        "Broker",
+        "Asset Class",
         "Underlying",
         "HV 5D",
         "HV 20D",
@@ -332,8 +338,25 @@ def holdings_aggrid_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "BB Z",
         "Squeeze",
         "As Of",
+        "Native Currency",
+        "Currency",
+        "Plan Key",
     ]
     return out[[column for column in columns if column in out.columns]]
+
+
+def holdings_aggrid_key(frame: pd.DataFrame) -> str:
+    """Return a component key that changes whenever displayed grid data changes.
+
+    streamlit-aggrid updates rowData synchronously on an existing component. With
+    a frequently refreshed live holdings frame, that update can land while AG Grid
+    is drawing rows and raise AG Grid error #252. A data-aware key remounts the
+    read-only grid for a new snapshot instead of mutating the rendering instance.
+    """
+
+    row_hashes = pd.util.hash_pandas_object(frame, index=True).values.tobytes()
+    digest = hashlib.sha256(row_hashes).hexdigest()[:16]
+    return f"live_holdings_aggrid_{digest}"
 
 
 def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
@@ -350,6 +373,17 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
     money_formatter = JsCode(
         """
         function(params) {
+            if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
+            return Number(params.value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+        """
+    )
+    atr_price_formatter = JsCode(
+        """
+        function(params) {
+            const symbol = String((params.data && params.data.Symbol) || "").toUpperCase();
+            const asset = String((params.data && params.data["Asset Class"]) || "").toLowerCase();
+            if (asset.includes("cash") || symbol === "CASH" || symbol.endsWith(" CASH")) return "N/A";
             if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
             return Number(params.value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
         }
@@ -378,6 +412,9 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
     percent_formatter = JsCode(
         """
         function(params) {
+            const symbol = String((params.data && params.data.Symbol) || "").toUpperCase();
+            const asset = String((params.data && params.data["Asset Class"]) || "").toLowerCase();
+            if (asset.includes("cash") || symbol === "CASH" || symbol.endsWith(" CASH")) return "N/A";
             if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
             return (Number(params.value) * 100).toFixed(1) + "%";
         }
@@ -386,8 +423,22 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
     number_formatter = JsCode(
         """
         function(params) {
+            const symbol = String((params.data && params.data.Symbol) || "").toUpperCase();
+            const asset = String((params.data && params.data["Asset Class"]) || "").toLowerCase();
+            if (asset.includes("cash") || symbol === "CASH" || symbol.endsWith(" CASH")) return "N/A";
             if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
             return Number(params.value).toFixed(1);
+        }
+        """
+    )
+    diagnostic_text_formatter = JsCode(
+        """
+        function(params) {
+            const symbol = String((params.data && params.data.Symbol) || "").toUpperCase();
+            const asset = String((params.data && params.data["Asset Class"]) || "").toLowerCase();
+            if (asset.includes("cash") || symbol === "CASH" || symbol.endsWith(" CASH")) return "N/A";
+            if (params.value === null || params.value === undefined || params.value === "") return "missing";
+            return String(params.value);
         }
         """
     )
@@ -410,7 +461,6 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
         }
         """
     )
-
     builder = GridOptionsBuilder.from_dataframe(grid_frame)
     builder.configure_default_column(
         sortable=True,
@@ -422,17 +472,38 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
     builder.configure_grid_options(
         rowHeight=38,
         headerHeight=44,
-        suppressCellFocus=True,
+        suppressCellFocus=False,
         enableCellTextSelection=True,
-        animateRows=True,
+        animateRows=False,
         tooltipShowDelay=250,
         suppressRowClickSelection=True,
         alwaysShowHorizontalScroll=True,
+        # The Streamlit component's nested scrolling viewport can miscalculate
+        # the virtual row window and leave most holdings as a blank grid area.
+        # Holdings is a small table, so rendering every row is both safe and
+        # more reliable here. The snapshot-aware component key above prevents
+        # live-data updates from mutating a grid that is still rendering.
         suppressRowVirtualisation=True,
         suppressColumnVirtualisation=True,
         ensureDomOrder=True,
+        singleClickEdit=True,
+        stopEditingWhenCellsLoseFocus=True,
     )
     builder.configure_column("Symbol", pinned="left", headerName="Symbol", width=124, minWidth=112, cellStyle=symbol_style, tooltipField="Symbol")
+    if "Holding Style" in grid_frame:
+        builder.configure_column(
+            "Holding Style",
+            headerName="Style",
+            headerTooltip="Click a Style cell and choose Trading or Investing; the selection is saved immediately.",
+            editable=True,
+            cellEditor="agSelectCellEditor",
+            cellEditorPopup=True,
+            cellEditorParams={"values": ["Investing", "Trading"]},
+            width=126,
+            minWidth=118,
+        )
+    if "Plan Key" in grid_frame:
+        builder.configure_column("Plan Key", hide=True)
     if "Native Currency" in grid_frame:
         builder.configure_column("Native Currency", headerName="Native CCY", width=116, minWidth=108, tooltipField="Native Currency")
     if "Currency" in grid_frame:
@@ -457,9 +528,24 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
                 width=130,
                 minWidth=124,
             )
-    for column in ["Unrealized P&L", "Realized P&L"]:
+    for column in ["TP 1x ATR", "SL 1x ATR"]:
         if column in grid_frame:
-            label = "U-P&L" if column == "Unrealized P&L" else "R-P&L"
+            builder.configure_column(
+                column,
+                headerName="TP +1 ATR" if column.startswith("TP") else "SL -1 ATR",
+                headerTooltip=(
+                    "Reference take-profit: current market price plus one 14-session ATR for longs; reversed for shorts."
+                    if column.startswith("TP")
+                    else "Reference stop-loss: current market price minus one 14-session ATR for longs; reversed for shorts."
+                ),
+                type=["numericColumn"],
+                valueFormatter=atr_price_formatter,
+                width=126,
+                minWidth=118,
+            )
+    for column in ["Unrealized P&L"]:
+        if column in grid_frame:
+            label = "U-P&L"
             builder.configure_column(
                 column,
                 headerName=label,
@@ -471,7 +557,13 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
                 minWidth=128,
             )
     if "Underlying" in grid_frame:
-        builder.configure_column("Underlying", headerName="Underlying", width=124, minWidth=108)
+        builder.configure_column(
+            "Underlying",
+            headerName="Underlying",
+            valueFormatter=diagnostic_text_formatter,
+            width=124,
+            minWidth=108,
+        )
     for column in ["HV 5D", "HV 20D"]:
         if column in grid_frame:
             builder.configure_column(column, type=["numericColumn"], valueFormatter=percent_formatter, width=112, minWidth=102)
@@ -483,7 +575,7 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
     if "BB Z" in grid_frame:
         builder.configure_column("BB Z", type=["numericColumn"], valueFormatter=number_formatter, width=95, minWidth=88)
     if "Squeeze" in grid_frame:
-        builder.configure_column("Squeeze", width=106, minWidth=96)
+        builder.configure_column("Squeeze", valueFormatter=diagnostic_text_formatter, width=106, minWidth=96)
     if "As Of" in grid_frame:
         builder.configure_column("As Of", headerName="As Of", width=150, minWidth=132)
     custom_css = {
@@ -512,6 +604,10 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
         ".ag-header-cell": {
             "background-color": "#0f1826 !important",
             "border-right": "1px solid rgba(65, 84, 112, 0.28) !important",
+            # AG Grid positions headers and cells with the same pixel widths.
+            # Streamlit's inherited content-box rule otherwise adds our padding
+            # to body cells only, shifting every row progressively to the right.
+            "box-sizing": "border-box !important",
             "padding-left": "10px !important",
             "padding-right": "10px !important",
         },
@@ -538,6 +634,7 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
         ".ag-cell": {
             "color": "#dbeafe !important",
             "border-color": "rgba(65, 84, 112, 0.16) !important",
+            "box-sizing": "border-box !important",
             "font-size": "0.84rem !important",
             "line-height": "38px !important",
             "padding-left": "10px !important",
@@ -558,22 +655,48 @@ def render_holdings_aggrid(frame: pd.DataFrame) -> bool:
         },
     }
 
-    AgGrid(
+    response = AgGrid(
         grid_frame,
         gridOptions=builder.build(),
         height=min(640, max(360, 100 + len(grid_frame) * 38)),
         theme="dark",
-        update_mode=GridUpdateMode.NO_UPDATE,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
+        update_on=["cellValueChanged"],
         data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
         allow_unsafe_jscode=True,
         custom_css=custom_css,
         show_search=True,
         show_download_button=False,
-        key=f"live_holdings_aggrid_{hash(tuple(grid_frame['Symbol'].astype(str).tolist()))}",
+        key=holdings_aggrid_key(grid_frame),
+        server_sync_strategy="client_wins",
     )
+    returned_data = getattr(response, "data", None)
+    if returned_data is None and isinstance(response, dict):
+        returned_data = response.get("data")
+    returned_rows = (
+        returned_data.to_dict("records")
+        if isinstance(returned_data, pd.DataFrame)
+        else returned_data if isinstance(returned_data, list) else []
+    )
+    current_styles = load_holding_styles(DEFAULT_HOLDING_PLAN_PATH)
+    updated_styles = dict(current_styles)
+    for row in returned_rows:
+        plan_key = str(row.get("Plan Key") or "")
+        style = str(row.get("Holding Style") or "")
+        if not plan_key or style not in HOLDING_STYLES:
+            continue
+        if style:
+            updated_styles[plan_key] = style
+        else:
+            updated_styles.pop(plan_key, None)
+    if updated_styles != current_styles:
+        save_holding_styles(updated_styles, DEFAULT_HOLDING_PLAN_PATH)
+        st.toast("Holding style saved.")
+        st.rerun()
     st.caption(
         f"Sort, filter, search, and resize columns inside the grid. Money columns are shown in {REPORTING_CURRENCY}; "
-        "Native CCY keeps the original instrument currency. Option IV, Greeks, DTE, and spread diagnostics live in Options Hub."
+        "Native CCY keeps the original instrument currency. Click Style to choose Trading or Investing; the choice is saved locally. "
+        "TP/SL are reference levels based on current market price ± one 14-session ATR."
     )
     return True
 
@@ -747,6 +870,7 @@ def option_adjusted_underlying_frame(underlying_exposure: pd.DataFrame, *, nav: 
         "Weight",
         "Direct Market Value",
         "Option Market Value",
+        "Option Cost Basis",
         "Option Contract Shares",
         "Gross Option Contract Shares",
         "Net Option Delta",
@@ -763,6 +887,7 @@ def option_adjusted_underlying_frame(underlying_exposure: pd.DataFrame, *, nav: 
         "Market Value",
         "Direct Market Value",
         "Option Market Value",
+        "Option Cost Basis",
         "Delta Dollars",
         "Unrealized P&L",
     ):
@@ -815,6 +940,7 @@ def format_option_adjusted_underlying_table(frame: pd.DataFrame) -> pd.DataFrame
             "Economic Exposure": currency_header("Economic Exposure"),
             "Direct Market Value": currency_header("Direct Market Value"),
             "Option Market Value": currency_header("Option Market Value"),
+            "Option Cost Basis": currency_header("Option Cost Basis"),
             "Delta Dollars": currency_header("Delta Dollars"),
             "Unrealized P&L": currency_header("Unrealized P&L"),
         }
@@ -857,7 +983,7 @@ def format_concentration_curve_table(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def risk_lab_cache_symbols(symbols: list[str]) -> tuple[str, ...]:
-    expanded: list[str] = []
+    expanded: list[str] = ["QQQ", "SPY"]
     for symbol in symbols:
         text = str(symbol or "").upper().strip()
         if not text:
@@ -871,7 +997,6 @@ def risk_lab_cache_symbols(symbols: list[str]) -> tuple[str, ...]:
             alias = PORTFOLIO_TICKER_ALIASES.get(text)
             if alias:
                 expanded.append(str(alias).upper().strip())
-    expanded.extend(factor_proxy_symbols())
     return tuple(dict.fromkeys(expanded))
 
 
@@ -886,9 +1011,85 @@ def live_price_history_symbols(positions: pd.DataFrame) -> tuple[str, ...]:
     exposure = underlying_exposure_report(positions)
     if not exposure.empty and "Underlying" in exposure:
         symbols.extend(exposure["Underlying"].dropna().astype(str).str.upper().str.strip().tolist())
-        symbols.extend(exposure_symbols(exposure.rename(columns={"Underlying": "Symbol"})))
 
     return risk_lab_cache_symbols([symbol for symbol in dict.fromkeys(symbols) if symbol])
+
+
+def holding_atr_symbol_map(positions: pd.DataFrame) -> tuple[tuple[str, str], ...]:
+    """Map held equity symbols to the symbols requested from FMP."""
+
+    if positions.empty:
+        return ()
+    symbol_column = "symbol" if "symbol" in positions else "Symbol"
+    asset_column = "asset_class" if "asset_class" in positions else "Asset Class"
+    if symbol_column not in positions or asset_column not in positions:
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for row in positions[[symbol_column, asset_column]].to_dict("records"):
+        asset_class = str(row.get(asset_column) or "").lower()
+        if not any(token in asset_class for token in ("equity", "stock", "etf")):
+            continue
+        holding_symbol = str(row.get(symbol_column) or "").upper().strip()
+        if not holding_symbol:
+            continue
+        provider_symbol = str(PORTFOLIO_TICKER_ALIASES.get(holding_symbol, holding_symbol)).upper().strip()
+        pairs.append((holding_symbol, provider_symbol))
+    return tuple(dict.fromkeys(pairs))
+
+
+@st.cache_data(ttl=21_600, show_spinner=False)
+def load_holding_atr_history(
+    symbol_map: tuple[tuple[str, str], ...],
+    fmp_api_key: str | None,
+) -> pd.DataFrame:
+    """Return FMP-first daily OHLC history used only for holding ATR levels."""
+
+    columns = ["symbol", "date", "open", "high", "low", "close"]
+    if not symbol_map:
+        return pd.DataFrame(columns=columns)
+
+    provider_symbols = tuple(dict.fromkeys(provider for _, provider in symbol_map))
+    if fmp_api_key:
+        status = market_cache_status(provider_symbols, source="fmp", max_age_hours=18.0)
+        refresh_symbols = tuple(
+            status.loc[status["State"].isin(["missing", "stale"]), "Symbol"].astype(str)
+        )
+        if refresh_symbols:
+            # FMP is the primary provider. Individual vendor failures are
+            # contained by refresh_fmp_market_cache and handled by cache fallback.
+            refresh_fmp_market_cache(refresh_symbols, api_key=fmp_api_key, period="6mo")
+
+    rows: list[pd.DataFrame] = []
+    for holding_symbol, provider_symbol in symbol_map:
+        history = load_cached_market_history(
+            provider_symbol,
+            source="fmp",
+            lookback_days=180,
+        )
+        if history.empty:
+            # Keep existing Yahoo cache as a last-resort fallback; no Yahoo
+            # network request is made from this holdings path.
+            history = load_cached_market_history(
+                provider_symbol,
+                source="yahoo",
+                lookback_days=180,
+            )
+        if history.empty:
+            continue
+        normalized = history.reset_index().rename(
+            columns={
+                "Date": "date",
+                "Open": "open",
+                "High": "high",
+                "Low": "low",
+                "Close": "close",
+            }
+        )
+        normalized["symbol"] = holding_symbol
+        rows.append(normalized.reindex(columns=columns))
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(rows, ignore_index=True).sort_values(["symbol", "date"]).reset_index(drop=True)
 
 
 def volatility_with_aliases(volatility: pd.DataFrame) -> pd.DataFrame:
@@ -1214,9 +1415,10 @@ def render_horizontal_exposure_bar(
         fig,
         height=height,
         xaxis_title="Exposure Value",
-        margin=dict(t=12, b=42, l=120, r=32),
+        margin=dict(t=12, b=68, l=120, r=32),
         hovermode=None,
     )
+    fig.update_xaxes(title_standoff=14, automargin=True)
     fig.update_layout(showlegend=False)
     st.plotly_chart(fig, use_container_width=True, theme=None, key=key)
 
@@ -1438,9 +1640,10 @@ def winners_losers_tables(frame: pd.DataFrame, *, limit: int = 5) -> tuple[pd.Da
     return format_risk_table(winners), format_risk_table(losers)
 
 
-@st.cache_data(ttl=60)
 def load_live_portfolio_data() -> dict[str, Any]:
+    settings = load_settings()
     account_ledger = default_account_ledger_path()
+    portfolio_nav = load_historical_nav(default_portfolio_ledger_path())
     manual_sync_rows = sync_manual_external_positions_from_json(account_ledger)
     unified_write = materialize_unified_live_account_snapshot(account_ledger)
     latest_nav = load_latest_account_nav(
@@ -1491,15 +1694,27 @@ def load_live_portfolio_data() -> dict[str, Any]:
     events = load_account_trade_events(account_ledger, environment="live", limit=100)
     static_price_history = load_price_history()
     history_symbols = live_price_history_symbols(positions)
-    cached_price_history = load_cached_price_history(
+    cached_yahoo_history = load_cached_price_history(
         history_symbols,
+        source="yahoo",
         lookback_days=900,
     )
-    price_history = combine_price_histories(static_price_history, cached_price_history)
+    cached_fmp_history = load_cached_price_history(
+        history_symbols,
+        source="fmp",
+        lookback_days=900,
+    )
+    atr_price_history = load_holding_atr_history(
+        holding_atr_symbol_map(positions),
+        settings.fmp_api_key,
+    )
+    # FMP is the primary cache provider. Passing it last makes it win same-day
+    # duplicates while Yahoo remains available as a gap-filling fallback.
+    price_history = combine_price_histories(static_price_history, cached_yahoo_history, cached_fmp_history)
     hv_source_history = pd.concat(
-        [frame for frame in (static_price_history, cached_price_history) if not frame.empty],
+        [frame for frame in (static_price_history, cached_yahoo_history, cached_fmp_history) if not frame.empty],
         ignore_index=True,
-    ) if not static_price_history.empty or not cached_price_history.empty else pd.DataFrame(columns=["symbol", "date", "close"])
+    ) if not static_price_history.empty or not cached_yahoo_history.empty or not cached_fmp_history.empty else pd.DataFrame(columns=["symbol", "date", "close"])
     hv = volatility_with_aliases(historical_volatility_frame(hv_source_history, windows=(5, 20)))
     cci_rows = []
     for symbol in history_symbols:
@@ -1514,7 +1729,6 @@ def load_live_portfolio_data() -> dict[str, Any]:
     cci = volatility_with_aliases(pd.DataFrame(cci_rows))
     if not cci.empty:
         hv = hv.merge(cci, on="symbol", how="outer") if not hv.empty else cci
-    settings = load_settings()
     ops_snapshot = collect_ops_status(settings=settings)
     server_sync = read_json(REPO_ROOT / "runtime" / "state" / "server_sync" / "status.json")
     return {
@@ -1527,6 +1741,7 @@ def load_live_portfolio_data() -> dict[str, Any]:
         "unified_nav_raw": unified_nav_raw,
         "broker_nav_raw": broker_nav_raw,
         "nav_history": nav_history,
+        "portfolio_nav": portfolio_nav,
         "broker_positions": broker_positions,
         "manual_positions": manual_positions,
         "positions": positions,
@@ -1534,20 +1749,12 @@ def load_live_portfolio_data() -> dict[str, Any]:
         "position_history": position_history,
         "events": events,
         "price_history": price_history,
+        "atr_price_history": atr_price_history,
         "hv": hv,
         "settings": settings,
         "ops_snapshot": ops_snapshot,
         "server_sync": server_sync,
     }
-
-
-@st.cache_data(ttl=300)
-def load_risk_lab_cached_price_history(symbols: tuple[str, ...]) -> pd.DataFrame:
-    return load_cached_price_history(symbols, lookback_days=900)
-
-
-def refresh_risk_lab_market_cache(symbols: tuple[str, ...]) -> pd.DataFrame:
-    return refresh_yahoo_market_cache(symbols, period="2y")
 
 
 def latest_nav_value(latest_nav: pd.DataFrame, column: str) -> float | None:
@@ -2242,6 +2449,7 @@ def option_underlying_book_audit(frame: pd.DataFrame) -> pd.DataFrame:
         "Symbol",
         "Market Value",
         "Option Market Value",
+        "Option Cost Basis",
         "Unrealized P&L",
         "Gross Option Contract Shares",
         "Net Option Delta",
@@ -2265,23 +2473,25 @@ def format_option_underlying_audit_display(frame: pd.DataFrame) -> pd.DataFrame:
             "Underlying": out.get("Symbol"),
             "Mkt Value": out.get("Market Value"),
             "Opt Value": out.get("Option Market Value"),
+            "Our Cost": out.get("Option Cost Basis"),
             "P&L": out.get("Unrealized P&L"),
             "Gross Shares": out.get("Gross Option Contract Shares"),
-            "Net Delta": out.get("Net Option Delta"),
+            "Delta Shares": out.get("Net Option Delta"),
             "Delta $": out.get("Delta Dollars"),
         }
     )
-    for column in ("Mkt Value", "Opt Value", "Delta $"):
+    for column in ("Mkt Value", "Opt Value", "Our Cost", "Delta $"):
         display[column] = display[column].map(money)
     display["P&L"] = display["P&L"].map(signed_money)
     display["Gross Shares"] = display["Gross Shares"].map(quantity)
-    display["Net Delta"] = display["Net Delta"].map(lambda value: decimal(value, 2))
+    display["Delta Shares"] = display["Delta Shares"].map(lambda value: decimal(value, 2))
     display = display.rename(
         columns={
             "Mkt Value": currency_header("Mkt Value"),
             "Opt Value": currency_header("Opt Value"),
+            "Our Cost": currency_header("Our Cost"),
             "P&L": currency_header("P&L"),
-            "Delta $": currency_header("Delta"),
+            "Delta $": currency_header("Delta Exposure"),
         }
     )
     return display
@@ -2567,6 +2777,11 @@ spreads = recognize_option_spreads(positions, hv)
 option_legs = option_leg_report(positions, hv)
 underlying_exposure = underlying_exposure_report(positions, hv)
 option_adjusted_underlying = clean_underlying_rollup(option_adjusted_underlying_frame(underlying_exposure, nav=nav))
+market_risk = compute_market_risk_decomposition(
+    option_adjusted_underlying,
+    data["price_history"],
+    config=MarketRiskConfig(benchmark="QQQ"),
+)
 option_positions = live_option_positions(positions)
 option_book = option_book_summary(positions, hv)
 option_diagnostics = option_position_diagnostics(positions, hv)
@@ -2574,7 +2789,6 @@ sleeve_mix = asset_sleeve_mix(holdings, cash=allocation_cash)
 risk_positions = position_risk_frame(holdings, nav=nav, cash=allocation_cash)
 sector_mix = sector_exposure_frame(holdings, cash=allocation_cash)
 concentration_metrics = concentration_diagnostics_frame(risk_positions)
-concentration_curve = concentration_curve_frame(risk_positions)
 currency_mix = currency_exposure_frame(
     holdings,
     cash=allocation_cash,
@@ -2596,7 +2810,15 @@ top[5].metric(
     percent(performance.get("gross_exposure_pct")),
     help="Gross exposure divided by NAV. This is an exposure/leverage read, not profit divided by NAV.",
 )
-top[6].metric(T("max_dd"), percent(performance.get("max_drawdown_pct")))
+portfolio_beta = _float(market_risk.get("portfolio_beta")) if market_risk.get("status") == "live" else None
+top[6].metric(
+    "PORTFOLIO BETA",
+    "missing" if portfolio_beta is None else f"{portfolio_beta:.2f}",
+    help=(
+        "Current-weight portfolio beta relative to QQQ. Missing asset history is reported as uncovered "
+        "rather than assigned beta zero; see Exposure for coverage and decomposition."
+    ),
+)
 snapshot_time = (
     human_timestamp(latest_nav.iloc[0].get("as_of"))
     if account_scope == US_ACCOUNT_SCOPE and not latest_nav.empty
@@ -2668,21 +2890,26 @@ with overview_tab:
                 nav_history_for_view.set_index("date")[["daily_pnl"]],
                 yaxis_title=currency_header("Daily P&L"),
                 height=360,
+                positive_color="#22C55E",
+                negative_color="#EF4444",
             )
 
-    st.subheader("System Reads")
-    status_dataframe(live_system_read_rows(data, latest_nav_for_view))
     if account_scope == CN_ACCOUNT_SCOPE:
         st.subheader("QMT Live Monitor")
         render_qmt_connector_panel(data["settings"], data["ops_snapshot"], compact=True)
 
 with holdings_tab:
+    planned_holdings = add_holding_plan_columns(
+        filtered_holdings,
+        data["atr_price_history"],
+        styles=load_holding_styles(DEFAULT_HOLDING_PLAN_PATH),
+    )
     st.subheader("Current Holdings")
-    if filtered_holdings.empty:
+    if planned_holdings.empty:
         st.info("No live holdings rows match the current filters.")
-    elif not render_holdings_aggrid(filtered_holdings):
+    elif not render_holdings_aggrid(planned_holdings):
         st.warning("`streamlit-aggrid` is not installed, so current holdings are using the static dark-table fallback.")
-        render_dark_table(format_holdings_display(filtered_holdings), max_height_px=520)
+        render_dark_table(format_holdings_display(planned_holdings), max_height_px=520)
     if hv.empty:
         st.info("HV columns are waiting for a price-history cache such as runtime/market/price_history.parquet.")
 
@@ -2751,31 +2978,11 @@ with spreads_tab:
     option_stats[4].metric(f"Net Delta ({REPORTING_CURRENCY})", signed_money(option_book_row.get("Delta Dollars")))
     option_stats[5].metric(f"Theta / Day ({REPORTING_CURRENCY})", signed_money(option_book_row.get("Theta / Day")))
 
-    audit_tab, position_lab_tab, model_tab = st.tabs(ops_tabs(OPS_LANG, "option_tabs"))
+    audit_tab, position_lab_tab = st.tabs(ops_tabs(OPS_LANG, "option_tabs")[:2])
 
     with audit_tab:
-        st.subheader("Book Audit")
-        st.caption(
-            "Inventory and data-integrity check for the live option book. "
-            "This tab answers what we hold and whether the marks/Greeks are trustworthy; "
-            "single-position payoff and risk decisions live in the Position Lab."
-        )
         package_register = option_package_register(spreads, option_diagnostics)
-        quality = option_data_quality_table(option_diagnostics, option_positions, option_legs)
         option_underlying_audit = option_underlying_book_audit(option_adjusted_underlying)
-        gross_contract_shares = (
-            pd.to_numeric(option_underlying_audit.get("Gross Option Contract Shares", pd.Series(dtype=float)), errors="coerce")
-            .fillna(0.0)
-            .sum(min_count=1)
-        )
-        gross_contract_shares = None if pd.isna(gross_contract_shares) else float(gross_contract_shares)
-        audit_cards = st.columns(6)
-        audit_cards[0].metric("Option Rows", str(len(option_positions)))
-        audit_cards[1].metric("Packages", str(len(package_register)))
-        audit_cards[2].metric(f"Marked Value ({REPORTING_CURRENCY})", money(option_market_value))
-        audit_cards[3].metric(f"Unrealized P&L ({REPORTING_CURRENCY})", signed_money(option_unrealized))
-        audit_cards[4].metric("Gross Contract Shares", quantity(gross_contract_shares))
-        audit_cards[5].metric("Model Gaps", quantity(option_book_row.get("Model Gaps")))
 
         st.subheader("Package Register")
         st.caption("One row per recognized option package. This is the inventory list before payoff/risk analysis.")
@@ -2784,37 +2991,27 @@ with spreads_tab:
         else:
             render_dark_table(format_option_package_register(package_register), max_height_px=360)
 
-        st.subheader("Data Quality")
-        st.caption("Checks whether option rows are parsed, marked, and model-ready before we trust the Greeks.")
-        render_dark_table(format_option_data_quality_display(quality), max_height_px=380)
-
         st.subheader("Underlying Rollup")
-        st.caption("Only option-linked underlyings are shown here; cash/equity-only rows stay in the Exposure tab.")
+        st.caption(
+            "Only option-linked underlyings are shown here; cash/equity-only rows stay in Exposure. "
+            "Our Cost is option market value minus unrealized P&L. Delta Shares is share-equivalent delta after "
+            "contract multipliers and netting; Delta Exposure is Delta Shares × underlying spot."
+        )
         if option_underlying_audit.empty:
             st.info("No option-linked underlying exposure rows are available.")
         else:
             render_dark_table(format_option_underlying_audit_display(option_underlying_audit), max_height_px=420)
 
-        raw_controls = st.columns(2)
-        with raw_controls[0]:
-            show_raw_legs = st.toggle("Show raw option leg audit", value=False, key="live_show_raw_option_leg_audit")
-        with raw_controls[1]:
-            show_raw_book = st.toggle(
-                "Show raw book Greeks and volatility summary",
-                value=False,
-                key="live_show_raw_option_book_summary",
+        st.subheader("Position Model Audit")
+        if option_diagnostics.empty:
+            st.info("No option diagnostics are available.")
+        else:
+            render_dark_table(
+                format_option_diagnostics_display(option_diagnostics),
+                max_height_px=520,
+                min_width_px=2200,
+                nowrap=True,
             )
-
-        if show_raw_legs:
-            if option_legs.empty:
-                st.info("No option legs are available.")
-            else:
-                render_dark_table(format_option_leg_audit_display(option_legs), max_height_px=420)
-        if show_raw_book:
-            if option_book.empty:
-                st.info("No option book summary is available.")
-            else:
-                render_dark_table(format_option_book_summary_display(option_book), max_height_px=180)
 
     with position_lab_tab:
         st.subheader("Position Lab")
@@ -2883,17 +3080,10 @@ with spreads_tab:
                 risk_summary = option_risk_summary(selected_row)
                 render_dark_table(format_option_risk_display(risk_summary), max_height_px=360)
 
-    with model_tab:
-        st.subheader("Position Model Audit")
-        if option_diagnostics.empty:
-            st.info("No option diagnostics are available.")
-        else:
-            render_dark_table(format_option_diagnostics_display(option_diagnostics), max_height_px=520)
-
 with exposure_tab:
     st.caption(
-        "Risk lab view: marked allocation today, option-adjusted underlying exposure now, "
-        "and factor/PCA/VaR/MVO modules as the data history gets deeper."
+        "Risk lab view: marked allocation, option-adjusted underlying exposure, concentration, "
+        "and currency mix."
     )
     if account_scope == CN_ACCOUNT_SCOPE:
         st.subheader("QMT/CN Exposure Slice")
@@ -2902,6 +3092,7 @@ with exposure_tab:
             empty_message="No QMT exposure rows are available yet.",
             max_height_px=260,
         )
+
     non_cash_sectors = sector_mix.loc[sector_mix["Sector"].astype(str) != "Cash"] if not sector_mix.empty else pd.DataFrame()
     largest_sector_row = (
         non_cash_sectors.sort_values("Weight", ascending=False).head(1)
@@ -2922,58 +3113,85 @@ with exposure_tab:
         ).sum(min_count=1)
         gross_contract_shares = None if pd.isna(gross_contract_shares) else float(gross_contract_shares)
 
-    exposure_stats = st.columns(7)
+    st.subheader("Portfolio Risk & Exposure")
+    st.caption("QQQ beta/risk decomposition alongside the key current-exposure diagnostics.")
+    exposure_stats = st.columns(10)
     exposure_stats[0].metric(
+        "Portfolio Beta",
+        "missing" if market_risk.get("status") != "live" else decimal(market_risk.get("portfolio_beta"), 2),
+    )
+    exposure_stats[1].metric("Total Vol", percent(market_risk.get("total_volatility")))
+    exposure_stats[2].metric(
+        "Systematic Risk",
+        percent(market_risk.get("systematic_risk_share")),
+        help="Share of modeled portfolio variance explained by QQQ.",
+    )
+    exposure_stats[3].metric(
+        "Idiosyncratic Risk",
+        percent(market_risk.get("idiosyncratic_risk_share")),
+        help="Share of modeled portfolio variance left in the regression residual.",
+    )
+    exposure_stats[4].metric(
+        "History Coverage",
+        percent(market_risk.get("covered_weight")),
+        help="Share of current non-cash economic exposure with at least 60 overlapping daily returns.",
+    )
+    exposure_stats[5].metric(
         "Largest Sector",
         "missing" if largest_sector_row.empty else str(largest_sector_row.iloc[0]["Sector"]),
+        help="Weight: " + ("missing" if largest_sector_row.empty else percent(largest_sector_row.iloc[0].get("Weight"))),
     )
-    exposure_stats[1].metric(
-        "Sector Weight",
-        "missing" if largest_sector_row.empty else percent(largest_sector_row.iloc[0].get("Weight")),
-    )
-    exposure_stats[2].metric(
+    exposure_stats[6].metric(
         "Cash-Like Weight",
         "missing" if cash_sector.empty else percent(cash_sector.iloc[0].get("Weight")),
         help="Cash plus cash-equivalent holdings such as XEON, expressed as a share of marked exposure.",
     )
-    exposure_stats[3].metric(
+    exposure_stats[7].metric(
         "Largest Underlying",
         "missing" if largest_underlying_row.empty else str(largest_underlying_row.iloc[0]["Symbol"]),
+        help="Weight: " + ("missing" if largest_underlying_row.empty else percent(largest_underlying_row.iloc[0].get("Weight"))),
     )
-    exposure_stats[4].metric(
-        "Underlying Weight",
-        "missing" if largest_underlying_row.empty else percent(largest_underlying_row.iloc[0].get("Weight")),
-    )
-    exposure_stats[5].metric(
+    exposure_stats[8].metric(
         "Top 5 Marked Weight",
         percent(concentration_value(concentration_metrics, "Top 5 weight")),
     )
-    exposure_stats[6].metric("Gross Option Shares", quantity(gross_contract_shares))
+    exposure_stats[9].metric("Gross Option Shares", quantity(gross_contract_shares))
 
-    risk_lab_exposure = option_adjusted_underlying.copy()
-    risk_symbols = exposure_symbols(risk_lab_exposure)
-    risk_cache_symbols = tuple(
-        dict.fromkeys([*risk_lab_cache_symbols(risk_symbols), *live_price_history_symbols(positions)])
-    )
-    refresh_col, refresh_note_col = st.columns([0.22, 0.78])
-    with refresh_col:
-        refresh_risk_history = st.button("Refresh Risk History", key="live_refresh_risk_history")
-    with refresh_note_col:
-        st.caption(
-            "PCA and factor proxies read local cached daily closes. The refresh button fills missing history "
-            "for current underlyings plus SPY/IWM/IWD/IWF/MTUM/QUAL. FMP can be added as another cache provider."
-        )
-    if refresh_risk_history:
-        with st.spinner("Refreshing risk history cache..."):
-            refresh_result = refresh_risk_lab_market_cache(risk_cache_symbols)
-        load_risk_lab_cached_price_history.clear()
-        st.session_state["live_risk_history_refresh_status"] = refresh_result
-        st.success("Risk history refresh completed.")
-    cached_risk_history = load_risk_lab_cached_price_history(risk_cache_symbols)
-    risk_price_history = combine_price_histories(data["price_history"], cached_risk_history)
-    risk_lab_config = LiveFactorLabConfig(lookback_days=504, min_observations=60)
-    factor_lab = compute_factor_proxy_lab(risk_lab_exposure, risk_price_history, config=risk_lab_config)
-    pca_lab = compute_pca_crowding_lab(risk_lab_exposure, risk_price_history, config=risk_lab_config)
+    risk_split = pd.DataFrame(
+        {
+            "Risk": ["Systematic", "Idiosyncratic"],
+            "Variance Share": [
+                market_risk.get("systematic_risk_share"),
+                market_risk.get("idiosyncratic_risk_share"),
+            ],
+        }
+    ).dropna(subset=["Variance Share"])
+    position_beta = market_risk.get("positions", pd.DataFrame()).copy()
+    if not risk_split.empty or not position_beta.empty:
+        risk_chart_col, risk_table_col = st.columns([0.72, 1.28])
+        with risk_chart_col:
+            if not risk_split.empty:
+                render_dark_pie_chart(
+                    risk_split,
+                    names="Risk",
+                    values="Variance Share",
+                    empty_message="No market-risk decomposition is available.",
+                    height=310,
+                )
+        with risk_table_col:
+            if not position_beta.empty:
+                for column in ("Weight", "Annualized Volatility"):
+                    if column in position_beta:
+                        position_beta[column] = position_beta[column].map(percent)
+                for column in ("Beta", "Beta Contribution", "Correlation"):
+                    if column in position_beta:
+                        position_beta[column] = position_beta[column].map(lambda value: decimal(value, 3))
+                for column in ("History Start", "History End"):
+                    if column in position_beta:
+                        position_beta[column] = position_beta[column].map(human_timestamp)
+                if "Observations" in position_beta:
+                    position_beta["Observations"] = position_beta["Observations"].map(quantity)
+                render_dark_table(position_beta, max_height_px=360, min_width_px=1250, nowrap=True)
 
     risk_modules = pd.DataFrame(
         [
@@ -2990,18 +3208,6 @@ with exposure_tab:
                 "Main Caveat": "Delta dollars need live Greeks/spot to become fully economic.",
             },
             {
-                "Layer": "Factor / Fama-French",
-                "Status": "live" if factor_lab["status"] == "live" else "waiting for price cache",
-                "Purpose": "Estimate market, size, value, quality, and momentum proxy tilts.",
-                "Main Caveat": "ETF proxies are not official Fama-French factors.",
-            },
-            {
-                "Layer": "PCA",
-                "Status": "live" if pca_lab["status"] == "live" else "waiting for price cache",
-                "Purpose": "Detect hidden common drivers and crowded exposure clusters.",
-                "Main Caveat": "Needs broader price history for every holding.",
-            },
-            {
                 "Layer": "VaR / CVaR",
                 "Status": "planned",
                 "Purpose": "Estimate tail loss under historical or simulated shocks.",
@@ -3011,53 +3217,12 @@ with exposure_tab:
                 "Layer": "MVO / allocation lab",
                 "Status": "planned",
                 "Purpose": "Suggest risk-aware target weights under your constraints.",
-                "Main Caveat": "Should consume policy limits from the Risk Control Room.",
+                "Main Caveat": "Should consume centralized portfolio policy limits.",
             },
         ]
     )
 
-    factor_col, pca_col = st.columns(2)
-    with factor_col:
-        st.subheader("Factor Proxy / Fama-French Style")
-        st.caption(
-            "This is a practical proxy layer: SPY for market, IWM-SPY for size, IWD-IWF for value, "
-            "MTUM-SPY for momentum, and QUAL-SPY for quality. We can replace these with official "
-            "Fama-French factors later."
-        )
-        if factor_lab["status"] != "live":
-            missing_proxies = ", ".join(factor_lab.get("missing_proxies", [])[:10]) or "none"
-            missing_assets = ", ".join(factor_lab.get("missing_assets", [])[:10]) or "none"
-            st.info(
-                "Factor regression is waiting for more overlapping daily history. "
-                f"Missing proxies: {missing_proxies}. Missing portfolio assets: {missing_assets}."
-            )
-        render_factor_beta_chart(factor_lab["betas"], key="live_factor_proxy_betas")
-        beta_left, beta_right = st.columns([0.95, 1.05])
-        with beta_left:
-            render_dark_table(format_factor_betas(factor_lab["betas"]), max_height_px=240)
-        with beta_right:
-            render_dark_table(format_factor_lab_summary(factor_lab["summary"]), max_height_px=240)
-
-    with pca_col:
-        st.subheader("PCA Crowding")
-        st.caption(
-            "Correlation PCA looks for hidden common drivers across your current underlyings. "
-            "A high PC1 means the book is moving like one crowded trade."
-        )
-        if pca_lab["status"] != "live":
-            missing_assets = ", ".join(pca_lab.get("missing_assets", [])[:12]) or "none"
-            st.info(
-                "PCA is waiting for more overlapping daily history across the book. "
-                f"Missing assets: {missing_assets}."
-            )
-        render_pca_spectrum_chart(pca_lab["spectrum"], key="live_pca_spectrum")
-        pca_left, pca_right = st.columns([0.9, 1.1])
-        with pca_left:
-            render_dark_table(format_pca_summary(pca_lab["summary"]), max_height_px=240)
-        with pca_right:
-            render_dark_table(format_pca_drivers(pca_lab["top_drivers"]), max_height_px=240)
-
-    sector_left, sector_right = st.columns([1.05, 1.25])
+    sector_left, sector_right = st.columns([1.05, 1.0])
     with sector_left:
         st.subheader("Marked Sector Exposure")
         st.caption("Uses current market value. Option rows inherit the sector of their underlying ticker.")
@@ -3072,17 +3237,16 @@ with exposure_tab:
                 height=340,
             )
     with sector_right:
-        st.subheader("Sector Weights")
-        if sector_mix.empty:
-            st.info("No sector exposure rows are available.")
-        else:
-            render_horizontal_exposure_bar(
-                sector_mix,
-                label_column="Sector",
-                height=340,
-                key="live_sector_exposure_bar",
-            )
-            render_dark_table(format_exposure_table(sector_mix), max_height_px=260)
+        st.subheader("Concentration Diagnostics")
+        st.caption("Marked-position concentration, including cash and cash equivalents.")
+        render_dark_table(
+            format_concentration_table(concentration_metrics),
+            empty_message="No concentration diagnostics are available.",
+            max_height_px=360,
+        )
+    if not sector_mix.empty:
+        st.subheader("Sector Detail")
+        render_dark_table(format_exposure_table(sector_mix), max_height_px=300)
 
     st.subheader("Option-Adjusted Underlying Exposure")
     st.caption(
@@ -3117,82 +3281,32 @@ with exposure_tab:
             )
         render_dark_table(format_option_adjusted_underlying_table(option_adjusted_underlying), max_height_px=360)
 
-    concentration_left, concentration_right = st.columns([1.15, 0.85])
-    with concentration_left:
-        st.subheader("Marked Position Concentration")
-        st.caption("Uses current marked market value by position row, including cash.")
-        render_concentration_pareto(concentration_curve, key="live_marked_concentration_pareto")
-    with concentration_right:
-        st.subheader("Concentration Diagnostics")
-        render_dark_table(
-            format_concentration_table(concentration_metrics),
-            empty_message="No concentration diagnostics are available.",
-            max_height_px=360,
-        )
-
-    allocation_left, allocation_right = st.columns(2)
-    with allocation_left:
-        st.subheader("Sleeve & Currency")
-        sleeve_inner, currency_inner = st.columns(2)
-        with sleeve_inner:
-            if sleeve_mix.empty:
-                st.info("No sleeve exposure is available.")
-            else:
-                render_dark_pie_chart(
-                    sleeve_mix,
-                    names="Sleeve",
-                    values="Exposure Value",
-                    empty_message="No sleeve exposure is available.",
-                    height=280,
-                )
-        with currency_inner:
-            if currency_mix.empty:
-                st.info("No currency exposure is available.")
-            else:
-                render_dark_pie_chart(
-                    currency_mix,
-                    names="Currency",
-                    values="Exposure Value",
-                    empty_message="No currency exposure is available.",
-                    height=280,
-                )
-        if not currency_mix.empty:
-            render_dark_table(format_exposure_table(currency_mix), max_height_px=210)
-    with allocation_right:
-        st.subheader("Underlying Concentration")
-        if option_adjusted_underlying.empty:
-            st.info("No underlying concentration is available.")
+    st.subheader("Sleeve & Currency")
+    sleeve_inner, currency_inner = st.columns(2)
+    with sleeve_inner:
+        if sleeve_mix.empty:
+            st.info("No sleeve exposure is available.")
         else:
-            underlying_curve_input = option_adjusted_underlying.rename(
-                columns={"Economic Exposure": "Exposure Value"}
+            render_dark_pie_chart(
+                sleeve_mix,
+                names="Sleeve",
+                values="Exposure Value",
+                empty_message="No sleeve exposure is available.",
+                height=280,
             )
-            underlying_curve = concentration_curve_frame(underlying_curve_input)
-            underlying_metrics = concentration_diagnostics_frame(underlying_curve_input)
-            render_concentration_pareto(underlying_curve, key="live_underlying_concentration_pareto")
-            render_dark_table(
-                format_concentration_table(underlying_metrics),
-                empty_message="No underlying concentration diagnostics are available.",
-                max_height_px=240,
+    with currency_inner:
+        if currency_mix.empty:
+            st.info("No currency exposure is available.")
+        else:
+            render_dark_pie_chart(
+                currency_mix,
+                names="Currency",
+                values="Exposure Value",
+                empty_message="No currency exposure is available.",
+                height=280,
             )
-
-    st.subheader("Recorded Exposure History")
-    history_left, history_right = st.columns(2)
-    with history_left:
-        st.caption("By symbol")
-        symbol_history = account_position_history_by_symbol(position_history)
-        if symbol_history.empty:
-            st.info("No historical position exposure has been recorded yet.")
-        else:
-            pivot = symbol_history.pivot_table(index="date", columns="symbol", values="market_value", aggfunc="sum").fillna(0.0)
-            render_dark_line_chart(pivot, yaxis_title="Market Value")
-    with history_right:
-        st.caption("By asset class")
-        asset_history = account_position_history_by_asset(position_history)
-        if asset_history.empty:
-            st.info("No historical asset exposure has been recorded yet.")
-        else:
-            asset_pivot = asset_history.pivot_table(index="date", columns="asset_class", values="market_value", aggfunc="sum").fillna(0.0)
-            render_dark_line_chart(asset_pivot, yaxis_title="Market Value")
+    if not currency_mix.empty:
+        render_dark_table(format_exposure_table(currency_mix), max_height_px=210)
 
 with reconciliation_tab:
     st.subheader("Account Ledger")
@@ -3232,23 +3346,6 @@ with reconciliation_tab:
     )
     render_dark_table(risk_modules, max_height_px=300)
 
-    st.subheader("Risk History Cache")
-    risk_refresh_status = st.session_state.get("live_risk_history_refresh_status")
-    if isinstance(risk_refresh_status, pd.DataFrame) and not risk_refresh_status.empty:
-        st.caption(
-            "Latest manual risk-history refresh coverage. Exposure reads this cache for PCA, "
-            "factor proxy, and future VaR/MVO work."
-        )
-        render_dark_table(risk_refresh_status, max_height_px=260)
-    else:
-        status_dataframe(
-            [
-                {"Item": "Cache symbols", "Value": str(len(risk_cache_symbols))},
-                {"Item": "Cached price rows", "Value": str(len(cached_risk_history))},
-                {"Item": "Coverage table", "Value": "Run Refresh Risk History on the Exposure tab to populate the latest per-symbol status."},
-            ]
-        )
-
     st.subheader("Ops Checks")
     ops_rows = pd.DataFrame(data["ops_snapshot"].item_rows)
     if ops_rows.empty:
@@ -3273,3 +3370,49 @@ with reconciliation_tab:
         with right:
             summary = account_trade_event_summary(events)
             render_dark_table(summary, empty_message="No live event summary is available.")
+
+if account_scope == US_ACCOUNT_SCOPE:
+    st.divider()
+    with st.expander("Edit Manual External Holdings JSON", expanded=False):
+        st.caption(
+            f"Source of truth: {display_path(data['manual_external_json'])}. "
+            "Saving validates every row, creates a .bak copy, synchronizes the account ledger, "
+            "and immediately recalculates the page."
+        )
+        st.warning(
+            "Changes affect the live monitoring view. Keep position_id values unique and review "
+            "quantity, multiplier, currency, prices, and FX rates before saving."
+        )
+        save_notice = st.session_state.pop("manual_holdings_save_notice", None)
+        if save_notice:
+            st.success(str(save_notice))
+        json_path = Path(data["manual_external_json"])
+        current_json = json_path.read_text(encoding="utf-8") if json_path.exists() else '{\n  "positions": []\n}\n'
+        with st.form("manual_external_holdings_editor"):
+            edited_json = st.text_area(
+                "Manual holdings JSON",
+                value=current_json,
+                height=560,
+                key="manual_external_holdings_json_text",
+                help="Edit the JSON directly. Nothing is written until Save is pressed and validation passes.",
+            )
+            save_column, note_column = st.columns([1, 3])
+            save_requested = save_column.form_submit_button(
+                "Save JSON & Refresh",
+                type="primary",
+                use_container_width=True,
+            )
+            note_column.caption("The previous valid file is retained as manual_external_holdings.json.bak.")
+        if save_requested:
+            try:
+                parsed_payload = json.loads(edited_json)
+                saved_rows, backup_path = write_manual_external_positions_file(parsed_payload, json_path)
+            except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+                st.error(f"Manual holdings were not saved: {exc}")
+            else:
+                load_live_portfolio_data.clear()
+                backup_note = f" Backup: {display_path(backup_path)}." if backup_path else ""
+                st.session_state["manual_holdings_save_notice"] = (
+                    f"Saved and synchronized {saved_rows} manual holding row(s).{backup_note}"
+                )
+                st.rerun()

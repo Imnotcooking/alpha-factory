@@ -1,0 +1,213 @@
+schema_version: 1
+registry_id: oqp_optimization_methods_v1
+as_of: 2026-07-23
+
+methods:
+  grid:
+    label: Grid search
+    family: Exhaustive
+    engine: Optuna GridSampler
+    status: implemented
+    good_for: Small, discrete spaces with at most a few parameters and cheap evaluations.
+    warning: Combination counts grow exponentially.
+  random:
+    label: Random search
+    family: Baseline stochastic
+    engine: Optuna RandomSampler
+    status: implemented
+    good_for: Mandatory coverage baseline for black-box parameter searches.
+    warning: It does not learn from completed trials.
+  qmc:
+    label: Quasi-random search
+    family: Baseline stochastic
+    engine: Optuna QMCSampler
+    status: implemented
+    good_for: Even coverage of bounded numerical spaces.
+    warning: It does not adapt to observed performance.
+  tpe:
+    label: TPE Bayesian search
+    family: Sequential surrogate
+    engine: Optuna TPESampler
+    status: implemented
+    good_for: Expensive mixed or conditional black-box spaces.
+    warning: It can exploit noisy peaks, so it must beat an equal-budget random baseline.
+  gp:
+    label: Gaussian-process search
+    family: Sequential surrogate
+    engine: Optuna GPSampler
+    status: implemented
+    good_for: Expensive, low-dimensional numerical spaces.
+    warning: Scaling deteriorates as dimensions and observations increase.
+  cmaes:
+    label: CMA-ES
+    family: Population
+    engine: Optuna CmaEsSampler
+    status: implemented
+    good_for: Rugged continuous parameter spaces.
+    warning: It needs enough trials to form and evolve a useful population.
+  nsga2:
+    label: NSGA-II
+    family: Population
+    engine: Optuna NSGAIISampler
+    status: implemented
+    good_for: Explicit multi-objective searches where the Pareto frontier matters.
+    warning: It needs a meaningful population and must not hide hard constraints as objectives.
+  differential_evolution:
+    label: Differential evolution
+    family: Global continuous
+    engine: SciPy differential_evolution
+    status: implemented
+    good_for: Bounded numerical black boxes with a single callable objective.
+    warning: It sits outside the governed Optuna study loop and does not support categorical logic.
+  dual_annealing:
+    label: Dual annealing
+    family: Global continuous
+    engine: SciPy dual_annealing
+    status: implemented
+    good_for: Rugged bounded numerical objectives requiring broad global exploration.
+    warning: It sits outside the governed Optuna study loop and supports one objective.
+  adam:
+    label: Adam
+    family: Gradient training
+    engine: PyTorch Adam
+    status: implemented
+    good_for: Differentiable model-weight training.
+    warning: It trains model weights; it does not search discontinuous strategy rules.
+  adamw:
+    label: AdamW
+    family: Gradient training
+    engine: PyTorch AdamW
+    status: implemented
+    good_for: Differentiable model-weight training with decoupled weight decay.
+    warning: Its learning rate and regularisation still require validation.
+  sgd:
+    label: SGD
+    family: Gradient training
+    engine: PyTorch SGD
+    status: implemented
+    good_for: Transparent gradient-training baselines.
+    warning: It can converge slowly and is sensitive to learning-rate schedules.
+  rmsprop:
+    label: RMSprop
+    family: Gradient training
+    engine: PyTorch RMSprop
+    status: implemented
+    good_for: Differentiable objectives with uneven gradient scales.
+    warning: It is not a black-box strategy optimiser.
+  lbfgs:
+    label: L-BFGS
+    family: Gradient training
+    engine: PyTorch LBFGS
+    status: implemented
+    good_for: Smaller smooth differentiable models that can afford repeated closure evaluations.
+    warning: Its memory and closure costs make it unsuitable for many large stochastic models.
+  convex_qp:
+    label: Convex quadratic allocation
+    family: Convex allocation
+    engine: CVXPY
+    status: implemented
+    good_for: Direct portfolio weights under convex risk, turnover, cost and exposure constraints.
+    warning: Mathematical optimality does not repair poor alpha or covariance estimates.
+
+purposes:
+  factor_parameter:
+    label: Factor parameters
+    layer: factor
+    job_type: Black-box parameter search
+    status: governed
+    objective_profile_id: phase9_factor_predictive_v1
+    primary_method: tpe
+    benchmark_method: random
+    alternative_methods: [grid, gp, nsga2]
+    purpose: Tune predictive formula parameters while preserving IC, Rank IC, ICIR, coverage and stability.
+    rationale: Factor evaluations are usually expensive, mixed and noisy; TPE is efficient, while random search reveals whether adaptivity adds value.
+  sleeve_parameter:
+    label: Sleeve construction
+    layer: sleeve
+    job_type: Black-box parameter search
+    status: governed
+    objective_profile_id: phase9_sleeve_economics_v1
+    primary_method: grid
+    benchmark_method: random
+    alternative_methods: [tpe, nsga2]
+    purpose: Tune translation rules such as tails, rebalance interval and winsorisation after factor evidence is frozen.
+    rationale: Sleeve spaces should remain small and interpretable, so exhaustive comparison is preferred until the combination count becomes too large.
+  router_parameter:
+    label: Router rules
+    layer: router
+    job_type: Black-box parameter search
+    status: governed
+    objective_profile_id: phase9_router_incremental_v1
+    primary_method: tpe
+    benchmark_method: random
+    alternative_methods: [grid, gp, nsga2]
+    purpose: Tune causal switching rules against the relative advantage between frozen sleeves.
+    rationale: Router backtests are costly and threshold spaces can be conditional; TPE is efficient, but simple one-threshold hypotheses should still be checked by grid.
+  allocator_parameter:
+    label: Allocator controls
+    layer: allocator
+    job_type: Multi-objective parameter search
+    status: governed
+    objective_profile_id: phase9_allocator_risk_v1
+    primary_method: nsga2
+    benchmark_method: random
+    alternative_methods: [tpe, grid]
+    purpose: Tune allocator controls such as risk targets and caps while upstream alpha remains frozen.
+    rationale: Return, drawdown, concentration and tail risk naturally form a Pareto problem; NSGA-II exposes the trade-offs instead of hiding them in one score.
+  overlay_parameter:
+    label: Risk-overlay rules
+    layer: overlay
+    job_type: Transparent threshold search
+    status: blocked
+    objective_profile_id: null
+    primary_method: grid
+    benchmark_method: random
+    alternative_methods: [tpe]
+    purpose: Tune activation thresholds and exposure scaling for a frozen strategy.
+    rationale: Overlay logic should stay low-dimensional and auditable; optimisation remains blocked until an overlay-specific economic objective and failure gates are approved.
+    blocking_reason: No active risk-overlay objective profile exists.
+  model_hyperparameter:
+    label: ML hyperparameters
+    layer: model
+    job_type: Black-box hyperparameter search
+    status: specialized
+    objective_profile_id: null
+    primary_method: tpe
+    benchmark_method: random
+    alternative_methods: [gp, qmc, nsga2]
+    purpose: Tune architecture and training hyperparameters around a frozen chronological ML evaluation protocol.
+    rationale: Model evaluations are expensive and often conditional, making TPE a practical default; this remains separate from gradient weight training.
+  model_weight_training:
+    label: ML model weights
+    layer: model
+    job_type: Differentiable weight training
+    status: specialized
+    objective_profile_id: null
+    primary_method: adamw
+    benchmark_method: sgd
+    alternative_methods: [adam, rmsprop, lbfgs]
+    purpose: Fit differentiable model weights inside one frozen ML trial.
+    rationale: Gradients can update millions of weights efficiently; this is training inside a trial, not a substitute for hyperparameter validation.
+  portfolio_allocation:
+    label: Direct portfolio weights
+    layer: allocator
+    job_type: Convex optimisation
+    status: specialized
+    objective_profile_id: null
+    primary_method: convex_qp
+    benchmark_method: null
+    alternative_methods: []
+    purpose: Solve portfolio weights directly from frozen alpha, covariance, costs and exposure constraints.
+    rationale: A convex programme gives a globally optimal solution to the declared allocation problem; the inputs still require independent validation.
+  universe_selection:
+    label: Universe selection
+    layer: universe
+    job_type: Multi-objective combinatorial search
+    status: experimental
+    objective_profile_id: null
+    primary_method: nsga2
+    benchmark_method: random
+    alternative_methods: [qmc, tpe]
+    purpose: Explore coverage, liquidity and performance trade-offs when selecting a smaller tradable universe.
+    rationale: Universe reduction is naturally multi-objective, but the search representation and untouched validation protocol are not yet frozen.
+    blocking_reason: A governed subset representation and universe-specific objective profile are not yet implemented.

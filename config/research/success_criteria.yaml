@@ -1,0 +1,203 @@
+schema_version: 1
+registry_id: oqp_research_success_criteria_v1
+as_of: 2026-07-22
+
+profiles:
+  factor_cross_sectional_predictive_v1:
+    research_object: factor
+    decision_sample: development_validation
+    status: active
+    economic_question: Does the factor rank next-period returns better than its frozen baseline across assets?
+    primary:
+      metric: validation_mean_rank_ic
+      direction: maximize
+      comparator_metric: frozen_baseline_validation_mean_rank_ic
+      minimum_improvement: 0.0
+      absolute_floor: 0.0
+    gates:
+      - name: persistent_rank_ic
+        metric: validation_rank_icir
+        operator: ">"
+        threshold: 0.0
+        description: Average rank IC must not be produced with negative period-to-period persistence.
+      - name: positive_period_majority
+        metric: validation_positive_rank_ic_share
+        operator: ">="
+        threshold: 0.50
+        description: At least half of valid periods must have correctly oriented rank IC.
+      - name: minimum_period_coverage
+        metric: validation_valid_ic_periods
+        operator: ">="
+        threshold: 24
+        description: Require enough periods to inspect stability rather than one pooled correlation.
+    required_artifacts:
+      - chronological_fold_metrics
+      - parameter_surface_diagnostics_if_tuned
+      - final_holdout_reserved
+      - economic_mechanism_note
+
+  factor_time_series_predictive_v1:
+    research_object: factor
+    decision_sample: development_validation
+    status: active
+    economic_question: Does the factor predict its own market's next-period return better than its frozen baseline through time?
+    primary:
+      metric: validation_mean_pearson_ic
+      direction: maximize
+      comparator_metric: frozen_baseline_validation_mean_pearson_ic
+      minimum_improvement: 0.0
+      absolute_floor: 0.0
+    gates:
+      - name: persistent_time_series_ic
+        metric: validation_pearson_icir
+        operator: ">"
+        threshold: 0.0
+        description: The period or asset IC distribution must have positive persistence.
+      - name: positive_asset_majority
+        metric: validation_positive_asset_ic_share
+        operator: ">="
+        threshold: 0.50
+        description: The result cannot be carried by a minority of contracts.
+      - name: minimum_observations
+        metric: validation_valid_observations
+        operator: ">="
+        threshold: 252
+        description: Daily-factor evidence requires at least one trading year of valid observations.
+    required_artifacts:
+      - chronological_fold_metrics
+      - per_asset_ic_distribution
+      - parameter_surface_diagnostics_if_tuned
+      - final_holdout_reserved
+      - economic_mechanism_note
+
+  strategy_daily_internal_net_value_v1:
+    research_object: strategy
+    decision_sample: development_validation
+    status: active
+    economic_question: Does the executable strategy improve net risk-adjusted performance over the frozen benchmark after realistic costs?
+    primary:
+      metric: validation_net_sharpe
+      direction: maximize
+      comparator_metric: frozen_benchmark_validation_net_sharpe
+      minimum_improvement: 0.0
+      absolute_floor: 0.0
+    gates:
+      - name: positive_net_economics
+        metric: validation_annualized_net_return
+        operator: ">"
+        threshold: 0.0
+        description: The strategy must make money after the frozen transaction-cost profile.
+      - name: cost_break_even
+        metric: validation_break_even_cost_multiple
+        operator: ">="
+        threshold: 1.0
+        description: Estimated costs cannot already exceed the gross edge.
+      - name: minimum_daily_history
+        metric: validation_trading_days
+        operator: ">="
+        threshold: 252
+        description: This profile is for daily strategies with at least one validation year.
+    required_artifacts:
+      - frozen_transaction_cost_profile
+      - chronological_fold_metrics
+      - gross_and_net_return_series
+      - turnover_and_capacity_report
+      - final_holdout_reserved
+
+  sleeve_daily_standalone_net_value_v1:
+    research_object: sleeve
+    decision_sample: development_validation
+    status: active
+    economic_question: Does the frozen sleeve have positive standalone net economics before any router selectively exposes it?
+    primary:
+      metric: validation_net_sharpe
+      direction: maximize
+      comparator_metric: cash_validation_net_sharpe
+      minimum_improvement: 0.0
+      absolute_floor: 0.0
+    gates:
+      - name: positive_standalone_net_return
+        metric: validation_annualized_net_return
+        operator: ">"
+        threshold: 0.0
+        description: The sleeve must make money after its frozen transaction-cost profile.
+      - name: standalone_cost_break_even
+        metric: validation_break_even_cost_multiple
+        operator: ">="
+        threshold: 1.0
+        description: Gross edge must at least cover estimated fees and slippage without router timing.
+      - name: minimum_standalone_history
+        metric: validation_trading_days
+        operator: ">="
+        threshold: 252
+        description: Require at least one daily trading year before a sleeve can enter router research.
+    required_artifacts:
+      - gross_and_net_return_series
+      - turnover_fee_and_slippage_report
+      - product_and_year_contribution
+      - exposure_and_concentration_report
+      - validation_frozen_extreme_event_study
+      - final_holdout_confirmation
+
+  router_incremental_net_value_v1:
+    research_object: router
+    decision_sample: development_validation
+    status: active
+    economic_question: Does routing add net return beyond the best standalone sleeve and frozen static blend?
+    primary:
+      metric: validation_net_mean_return
+      direction: maximize
+      comparator_metric: best_alternative_validation_net_mean_return
+      minimum_improvement: 0.0
+      absolute_floor: 0.0
+    gates:
+      - name: incremental_hac_evidence
+        metric: validation_increment_hac_t
+        operator: ">="
+        threshold: 1.645
+        description: Predeclared one-sided 10% evidence that the router's monthly increment is positive.
+      - name: positive_net_sharpe
+        metric: validation_net_sharpe
+        operator: ">"
+        threshold: 0.0
+        description: Incremental mean return cannot conceal negative total risk-adjusted performance.
+      - name: minimum_routing_periods
+        metric: validation_valid_routing_periods
+        operator: ">="
+        threshold: 24
+        description: Require at least 24 routing decisions in the validation sample.
+    required_artifacts:
+      - standalone_sleeve_metrics
+      - static_blend_metrics
+      - causal_route_decision_log
+      - frozen_transaction_cost_profile
+      - final_holdout_reserved
+
+  model_cross_sectional_prediction_v1:
+    research_object: model
+    decision_sample: development_validation
+    status: active
+    economic_question: Does the model improve cross-sectional return ranking over a frozen simple-model baseline?
+    primary:
+      metric: validation_mean_rank_ic
+      direction: maximize
+      comparator_metric: frozen_baseline_validation_mean_rank_ic
+      minimum_improvement: 0.0
+      absolute_floor: 0.0
+    gates:
+      - name: persistent_model_ic
+        metric: validation_rank_icir
+        operator: ">"
+        threshold: 0.0
+        description: Validation predictive strength must be persistent across folds.
+      - name: minimum_walk_forward_folds
+        metric: validation_fold_count
+        operator: ">="
+        threshold: 3
+        description: One train-validation split is insufficient for model selection.
+    required_artifacts:
+      - feature_lineage
+      - chronological_fold_metrics
+      - simple_model_baseline
+      - hyperparameter_study_record
+      - final_holdout_reserved

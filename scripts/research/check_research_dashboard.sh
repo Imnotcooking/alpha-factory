@@ -21,14 +21,14 @@ echo "repo: $REPO_ROOT"
 echo "python: $PYTHON_BIN"
 
 "$PYTHON_BIN" -m pytest \
-  tests/test_research_dashboard_preflight.py \
-  tests/test_research_dashboard_real_data_smoke.py \
-  tests/test_research_dashboard_pages_apptest.py \
-  tests/test_research_reproducibility.py \
-  tests/test_research_ml_governance.py \
-  tests/test_research_latent.py \
-  tests/test_risk_factor_breadth.py \
-  tests/test_tick_pulse_features.py \
-  tests/test_tick_pulse_asset_ranker.py \
-  tests/test_tick_pulse_ml_migration.py \
+  tests/research/dashboard/test_research_dashboard_preflight.py \
+  tests/research/dashboard/test_research_dashboard_real_data_smoke.py \
+  tests/research/dashboard/test_research_dashboard_pages_apptest.py \
+  tests/research/test_research_reproducibility.py \
+  tests/research/test_research_ml_governance.py \
+  tests/research/test_research_latent.py \
+  tests/risk/test_risk_factor_breadth.py \
+  tests/research/test_tick_pulse_features.py \
+  tests/research/test_tick_pulse_asset_ranker.py \
+  tests/research/test_tick_pulse_ml_migration.py \
   -q

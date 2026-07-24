@@ -1,17 +1,25 @@
-# Middle Office Department
+# Middle Office Department Map
 
-## Purpose
+Last reviewed: 2026-07-17
 
-Middle Office is now the account truth and reconciliation layer inside the
-active Alpha Factory architecture. It answers:
+Middle Office is the broker-neutral account truth, valuation-control, and
+reconciliation layer in Alpha Factory. It observes account state, normalizes evidence,
+reports breaks, and records their resolution. It never places trades.
 
-- What do the brokers say we own?
-- What does the unified portfolio ledger say we own?
-- Are cash, PnL, exposures, and risk views internally consistent?
-- What breaks, exceptions, or manual inputs need attention?
+## Ownership Boundary
 
-This department is read-only with respect to broker accounts. It can ingest,
-reconcile, report, and raise control warnings, but it should not place trades.
+| Responsibility | Canonical home | Commit posture |
+| --- | --- | --- |
+| Broker adapters and connection profiles | `src/oqp/brokers/` | Commit source and tests; never credentials. |
+| Canonical account models, ledger, and reconciliation logic | `src/oqp/accounts/` | Commit source and tests. |
+| Legacy portfolio ingestion and valuation during migration | `src/oqp/portfolio/` | Commit source and tests; do not add new account contracts here. |
+| Account policies, controls, and operating runbooks | `departments/middle_office/` | Commit docs and lightweight specifications. |
+| Operational presentation | `apps/ops_dashboard/` | Display package-owned results; do not implement controls in Streamlit. |
+| Private account state and evidence | `runtime/` | Never commit databases, exports, account JSON, or screenshots. |
+
+Middle Office may read from broker adapters and account state. Order creation,
+approval, routing, and submission remain under Trading. Market and instrument
+data ownership remains under Data Platform.
 
 ## Start Here
 
@@ -24,78 +32,69 @@ oqp dashboard ops
 python -m pytest -q tests -k "account or portfolio or ops"
 ```
 
-## Active Homes
+## Department Files
 
-The old standalone Middle Office application has been retired. Its useful logic
-has been extracted into package-owned services and the Ops dashboard:
+- `account_snapshot_contract.md`: normalized account object and ledger contract.
+- `account_sources.yaml`: validated inventory of account sources, writers, and
+  freshness expectations.
+- `source_of_truth.md`: precedence between brokers, manual holdings, unified
+  reporting, and migration ledgers.
+- `reconciliation_policy.md`: comparison keys, tolerances, break severity, and
+  resolution lifecycle.
+- `valuation_policy.md`: pricing, FX, multiplier, NAV, and PnL controls.
+- `manual_adjustments.md`: governance for externally maintained holdings and
+  approved manual values.
+- `runbooks/daily_close.md`: account snapshot and control sequence.
+- `runbooks/break_resolution.md`: evidence-preserving break investigation.
+- `retirement_audit.md`: historical record of the retired standalone app.
 
-| Responsibility | Active home |
+## Current Implementation Map
+
+| Capability | Implementation |
 | --- | --- |
-| Live broker/account ingestion | `src/oqp/portfolio/ingestion_job.py` |
-| Portfolio ledger schema and reads/writes | `src/oqp/portfolio/ledger.py` |
-| Account snapshot ledger | `src/oqp/accounts/` |
-| NAV valuation job | `src/oqp/portfolio/nav_job.py` |
-| Live portfolio reporting | `src/oqp/portfolio/live_reporting.py` |
-| Stock valuation and watchlists | `src/oqp/investing/` |
-| Options analytics | `src/oqp/options/` |
-| Operational dashboards | `apps/ops_dashboard/` |
-| Server entrypoints | `scripts/update_live_portfolio_snapshot.py`, `scripts/update_portfolio_nav.py` |
+| Canonical account objects | `src/oqp/accounts/models.py` |
+| Unified account ledger | `src/oqp/accounts/ledger.py` |
+| Account source catalog | `src/oqp/accounts/source_catalog.py` |
+| Read-only snapshot reconciliation | `src/oqp/accounts/reconciliation.py` |
+| Manual external positions | `src/oqp/accounts/manual_external.py` |
+| Unified live materialization | `src/oqp/accounts/unified_snapshot.py` |
+| Broker snapshot conversion | `src/oqp/accounts/converters.py` |
+| Broker profiles and adapters | `src/oqp/brokers/` |
+| Account health checks | `src/oqp/ops/portfolio_health.py`, `src/oqp/ops/paper_health.py` |
+| Operational visibility | `apps/ops_dashboard/` |
 
-New code should consume these modules directly. Do not add fallbacks to the old
-`Middle_Office/` root or the deleted legacy archive.
-
-## Runtime Data Boundary
-
-Runtime state lives outside source-controlled code:
+## Runtime Boundary
 
 | Data | Runtime path |
 | --- | --- |
+| Canonical account ledger | `runtime/db/accounts/account_ledger.db` |
+| Legacy portfolio ledger | `runtime/db/portfolio/portfolio_ledger.db` |
+| Paper trading ledger | `runtime/db/paper_trading/paper_trading.db` |
 | Broker CSV imports | `runtime/imports/broker_exports/` |
-| Portfolio ledger | `runtime/db/portfolio/portfolio_ledger.db` |
-| Account ledger | `runtime/db/accounts/account_ledger.db` |
-| Portfolio state JSON | `runtime/state/portfolio/` |
-| Investing watchlist | `runtime/state/investing/stock_watchlist.json` |
+| Portfolio and manual state | `runtime/state/portfolio/` |
 | Snapshot backups | `runtime/exports/portfolio_snapshots/` |
+| Health and operational logs | `runtime/logs/` |
 
-These paths are private runtime state and should remain ignored by Git.
+These paths are private runtime state. A path listed in the source catalog is a
+contract, not evidence that a source is configured, available, or fresh.
+`freshness_max_age_hours: 0` denotes an event-driven or migration source with no
+automatic age SLA; it does not mean the source is always fresh.
 
-## Data Contracts To Preserve
+## Change Procedure
 
-### `live_positions`
-
-Current SQLite table produced by `scripts/update_live_portfolio_snapshot.py`:
-
-| Column | Meaning |
-| --- | --- |
-| `date` | Snapshot date |
-| `broker` | Source broker |
-| `ticker` | Broker or normalized symbol |
-| `asset_type` | Equity, option, cash, future, or other instrument type |
-| `shares` | Position quantity |
-| `avg_cost` | Average entry cost |
-| `current_price` | Latest broker or market price |
-| `unrealized_pnl` | Broker or computed unrealized PnL |
-| `currency` | Trading currency |
-| `delta` | Per-unit or approximate position delta |
-| `gamma` | Per-unit or approximate position gamma |
-
-### `historical_nav`
-
-Current SQLite table intended for portfolio equity curve tracking:
-
-| Column | Meaning |
-| --- | --- |
-| `date` | NAV date |
-| `total_net_worth` | Total portfolio NAV in reporting currency |
-| `total_cash` | Total cash/reserves |
-| `portfolio_beta` | Estimated beta to benchmark |
-| `daily_pnl` | Daily profit/loss |
+1. Register or amend the source in `account_sources.yaml`.
+2. Normalize inbound state into `AccountSnapshot` and related canonical objects.
+3. Keep comparison logic in `src/oqp/accounts/`, not in a dashboard page.
+4. Define tolerances and ownership before enabling automated break alerts.
+5. Add focused tests for matching, missing data, and tolerance behavior.
+6. Preserve raw evidence and redact account identifiers in public output.
 
 ## Guardrails
 
-- API keys come from `.env` or process environment only.
-- Manual inputs come from `runtime/state/portfolio/manual_inputs.json`.
-- Watchlists come from `runtime/state/investing/stock_watchlist.json`.
-- Broker exports come from `runtime/imports/broker_exports/`.
-- Public commits must never include `.env`, Streamlit secrets, broker exports,
-  SQLite databases, runtime JSON, CSV/parquet data, or account screenshots.
+- Live broker profiles remain read-only and `ALLOW_LIVE_TRADING=false` remains
+  the default.
+- Reconciliation never repairs source data by overwriting it.
+- Manual state is not broker evidence and must remain visibly attributable.
+- A fresh file is not necessarily a freshly priced position.
+- API keys and account identifiers come from private runtime configuration only.
+- Do not restore fallbacks to the retired `Middle_Office/` root.

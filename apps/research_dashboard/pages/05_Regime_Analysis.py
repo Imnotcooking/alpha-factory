@@ -49,12 +49,12 @@ ROOT_DIR = os.path.dirname(UI_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from oqp.research.latent import (
+from oqp.research.ml.latent.diagnostics.codebook import (
     codebook_health_summary,
     compute_gmm_overlap,
     merge_gmm_probabilities,
 )
-from oqp.research.latent import load_saved_latents
+from apps.research_dashboard.services.latent_artifacts import load_saved_latents
 
 
 from oqp.ui.translations import research_page_legacy_catalog

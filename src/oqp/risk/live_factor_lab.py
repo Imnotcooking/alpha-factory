@@ -34,6 +34,234 @@ class LiveFactorLabConfig:
     explained_threshold: float = 0.80
 
 
+@dataclass(frozen=True)
+class MarketRiskConfig:
+    """Settings for single-benchmark portfolio risk decomposition."""
+
+    benchmark: str = "QQQ"
+    lookback_days: int = 504
+    min_observations: int = 60
+    annualization: int = 252
+    min_covered_weight: float = 0.80
+
+
+def compute_market_risk_decomposition(
+    exposure: pd.DataFrame,
+    price_history: pd.DataFrame,
+    *,
+    symbol_col: str = "Symbol",
+    weight_col: str = "Weight",
+    value_col: str = "Economic Exposure",
+    config: MarketRiskConfig | None = None,
+) -> dict[str, Any]:
+    """Estimate portfolio beta and split realized risk into market and residual risk.
+
+    Position betas are estimated independently against the benchmark. Portfolio
+    beta is their current-weighted sum. The volatility split comes from an OLS
+    regression of a static-weight portfolio return series on benchmark returns.
+    Missing history remains explicitly uncovered instead of being assigned beta 0.
+    """
+
+    cfg = config or MarketRiskConfig()
+    benchmark = canonical_risk_symbol(cfg.benchmark)
+    weights = _market_risk_weights(
+        exposure,
+        symbol_col=symbol_col,
+        weight_col=weight_col,
+        value_col=value_col,
+    )
+    empty_positions = pd.DataFrame(
+        columns=[
+            "Symbol", "Weight", "Beta", "Beta Contribution", "Correlation",
+            "Annualized Volatility", "Observations", "History Start", "History End", "Status",
+        ]
+    )
+    if weights.empty or not benchmark:
+        return _empty_market_risk_result(cfg, empty_positions, weights)
+
+    history_cfg = LiveFactorLabConfig(
+        lookback_days=cfg.lookback_days,
+        min_observations=2,
+    )
+    requested = [*weights["symbol"].tolist(), benchmark]
+    returns = _return_matrix(price_history, requested, history_cfg)
+    if benchmark not in returns:
+        return _empty_market_risk_result(cfg, empty_positions, weights, missing_benchmark=True)
+
+    benchmark_returns = pd.to_numeric(returns[benchmark], errors="coerce")
+    benchmark_variance = float(benchmark_returns.var(ddof=1))
+    rows: list[dict[str, Any]] = []
+    covered_symbols: list[str] = []
+    weight_lookup = weights.set_index("symbol")["weight"].to_dict()
+    for row in weights.itertuples(index=False):
+        symbol = str(row.symbol)
+        weight = float(row.weight)
+        if symbol not in returns or benchmark_variance <= 0:
+            rows.append(_missing_market_risk_row(symbol, weight))
+            continue
+        aligned = pd.concat(
+            [pd.to_numeric(returns[symbol], errors="coerce").rename("asset"), benchmark_returns.rename("benchmark")],
+            axis=1,
+        ).dropna()
+        if len(aligned) < cfg.min_observations:
+            rows.append(_missing_market_risk_row(symbol, weight, observations=len(aligned)))
+            continue
+        beta = float(aligned["asset"].cov(aligned["benchmark"]) / aligned["benchmark"].var(ddof=1))
+        correlation = float(aligned["asset"].corr(aligned["benchmark"]))
+        annualized_volatility = float(aligned["asset"].std(ddof=1) * np.sqrt(cfg.annualization))
+        covered_symbols.append(symbol)
+        rows.append(
+            {
+                "Symbol": symbol,
+                "Weight": weight,
+                "Beta": beta,
+                "Beta Contribution": weight * beta,
+                "Correlation": correlation,
+                "Annualized Volatility": annualized_volatility,
+                "Observations": len(aligned),
+                "History Start": aligned.index.min(),
+                "History End": aligned.index.max(),
+                "Status": "covered",
+            }
+        )
+
+    positions = pd.DataFrame(rows, columns=empty_positions.columns)
+    covered_weight = float(weights.loc[weights["symbol"].isin(covered_symbols), "weight"].abs().sum())
+    total_weight = float(weights["weight"].abs().sum())
+    coverage_ratio = covered_weight / total_weight if total_weight > 0 else 0.0
+    portfolio_beta = float(pd.to_numeric(positions["Beta Contribution"], errors="coerce").sum(min_count=1))
+    if coverage_ratio < cfg.min_covered_weight:
+        portfolio_beta = np.nan
+
+    regression = _portfolio_market_regression(
+        returns,
+        covered_symbols,
+        weight_lookup,
+        benchmark,
+        cfg,
+    )
+    calculation_status = "live" if pd.notna(portfolio_beta) and regression["status"] == "live" else "insufficient_history"
+    result = {
+        "benchmark": benchmark,
+        "portfolio_beta": portfolio_beta,
+        "covered_weight": coverage_ratio,
+        "positions": positions.sort_values("Beta Contribution", ascending=False, na_position="last").reset_index(drop=True),
+        **regression,
+        "status": calculation_status,
+    }
+    return result
+
+
+def _market_risk_weights(
+    exposure: pd.DataFrame,
+    *,
+    symbol_col: str,
+    weight_col: str,
+    value_col: str,
+) -> pd.DataFrame:
+    if exposure.empty or symbol_col not in exposure:
+        return pd.DataFrame(columns=["symbol", "weight"])
+    source = exposure.copy()
+    source["symbol"] = source[symbol_col].map(canonical_risk_symbol)
+    source = source.loc[source["symbol"].ne("") & ~source["symbol"].isin({"CASH", "USD CASH"})]
+    if weight_col in source:
+        source["weight"] = pd.to_numeric(source[weight_col], errors="coerce")
+    else:
+        values = pd.to_numeric(source.get(value_col), errors="coerce")
+        denominator = float(values.abs().sum())
+        source["weight"] = values / denominator if denominator > 0 else np.nan
+    grouped = source.groupby("symbol", as_index=False)["weight"].sum(min_count=1).dropna(subset=["weight"])
+    return grouped.loc[grouped["weight"].ne(0)].reset_index(drop=True)
+
+
+def _portfolio_market_regression(
+    returns: pd.DataFrame,
+    symbols: list[str],
+    weights: dict[str, float],
+    benchmark: str,
+    cfg: MarketRiskConfig,
+) -> dict[str, Any]:
+    columns = [symbol for symbol in symbols if symbol in returns]
+    if not columns or benchmark not in returns:
+        return _empty_market_regression()
+    regression_columns = list(dict.fromkeys([*columns, benchmark]))
+    aligned = returns[regression_columns].dropna()
+    if len(aligned) < cfg.min_observations:
+        return _empty_market_regression(observations=len(aligned))
+    portfolio = sum(aligned[symbol] * float(weights.get(symbol, 0.0)) for symbol in columns)
+    market = aligned[benchmark]
+    x = np.column_stack([np.ones(len(aligned)), market.to_numpy(dtype=float)])
+    y = portfolio.to_numpy(dtype=float)
+    coefficients, *_ = np.linalg.lstsq(x, y, rcond=None)
+    residual = y - (x @ coefficients)
+    total_variance = float(np.var(y, ddof=1))
+    systematic_variance = float(coefficients[1] ** 2 * np.var(market, ddof=1))
+    idiosyncratic_variance = float(np.var(residual, ddof=1))
+    explained_total = systematic_variance + idiosyncratic_variance
+    return {
+        "status": "live",
+        "observations": len(aligned),
+        "history_start": aligned.index.min(),
+        "history_end": aligned.index.max(),
+        "total_volatility": np.sqrt(max(total_variance, 0.0) * cfg.annualization),
+        "systematic_volatility": np.sqrt(max(systematic_variance, 0.0) * cfg.annualization),
+        "idiosyncratic_volatility": np.sqrt(max(idiosyncratic_variance, 0.0) * cfg.annualization),
+        "systematic_risk_share": systematic_variance / explained_total if explained_total > 0 else np.nan,
+        "idiosyncratic_risk_share": idiosyncratic_variance / explained_total if explained_total > 0 else np.nan,
+        "regression_beta": float(coefficients[1]),
+        "alpha_annualized": float(coefficients[0] * cfg.annualization),
+    }
+
+
+def _missing_market_risk_row(symbol: str, weight: float, *, observations: int = 0) -> dict[str, Any]:
+    return {
+        "Symbol": symbol,
+        "Weight": weight,
+        "Beta": np.nan,
+        "Beta Contribution": np.nan,
+        "Correlation": np.nan,
+        "Annualized Volatility": np.nan,
+        "Observations": observations,
+        "History Start": pd.NaT,
+        "History End": pd.NaT,
+        "Status": "insufficient history",
+    }
+
+
+def _empty_market_regression(*, observations: int = 0) -> dict[str, Any]:
+    return {
+        "status": "insufficient_history",
+        "observations": observations,
+        "history_start": pd.NaT,
+        "history_end": pd.NaT,
+        "total_volatility": np.nan,
+        "systematic_volatility": np.nan,
+        "idiosyncratic_volatility": np.nan,
+        "systematic_risk_share": np.nan,
+        "idiosyncratic_risk_share": np.nan,
+        "regression_beta": np.nan,
+        "alpha_annualized": np.nan,
+    }
+
+
+def _empty_market_risk_result(
+    cfg: MarketRiskConfig,
+    positions: pd.DataFrame,
+    weights: pd.DataFrame,
+    *,
+    missing_benchmark: bool = False,
+) -> dict[str, Any]:
+    result = {
+        "benchmark": canonical_risk_symbol(cfg.benchmark),
+        "portfolio_beta": np.nan,
+        "covered_weight": 0.0,
+        "positions": positions,
+        **_empty_market_regression(),
+    }
+    result["status"] = "missing_benchmark" if missing_benchmark else "insufficient_history"
+    return result
+
+
 def factor_proxy_symbols() -> list[str]:
     """Return all symbols required for the default factor-proxy set."""
 

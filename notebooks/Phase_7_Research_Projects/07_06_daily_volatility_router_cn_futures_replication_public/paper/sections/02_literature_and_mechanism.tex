@@ -1,0 +1,40 @@
+\section{Literature and Economic Mechanism}
+
+\subsection{Momentum, crashes, and volatility}
+
+Cross-sectional momentum buys past winners and sells past losers
+\citep{jegadeesh1993}. Its long-run average profitability coexists with severe episodic
+losses. \citet{daniel2016} show that momentum crashes are predictable in panic states
+and are associated with market rebounds and time-varying exposure. Volatility management
+can reduce such losses, although scaling changes leverage and requires a target-risk
+choice \citep{barroso2015}.
+
+\citet{butt2023} replace continuous scaling with discrete strategy selection. Their
+switch is motivated by two conditional relations: high market volatility predicts weaker
+momentum and stronger short-term reversal. The source paper interprets reversal partly as
+compensation for supplying liquidity when demand for immediacy is high. This view is
+consistent with evidence that short-horizon return reversals become stronger when market
+liquidity is scarce \citep{nagel2012,jegadeesh1990,lehmann1990}.
+
+The source mechanism is therefore richer than the statement ``high volatility causes
+reversal.'' Volatility proxies for a joint state containing distress, prior losses,
+funding pressure, liquidity demand, changing winner--loser betas, and a possible market
+rebound. The router works only if that joint state is sufficiently stable across time and
+markets.
+
+\subsection{Why futures are a useful external test}
+
+Futures markets contain well-documented momentum-related phenomena, including time-series
+momentum \citep{moskowitz2012} and momentum combined with term-structure information in
+commodity allocation \citep{fuertes2010}. These results do not imply that an equity
+cross-sectional state variable transfers mechanically. Futures prices respond directly
+to inventories, storage economics, production constraints, hedging demand, interest
+rates, currencies, and policy. A shock can represent slow information incorporation and
+trend continuation rather than temporary liquidity pressure.
+
+This difference suggests a transportability hypothesis. In equities, a market-level
+volatility scalar may summarize a relatively coherent distress state. In a broad futures
+cross-section, the same scalar may aggregate economically distinct shocks. The proper
+test is therefore not only whether the primary router has a higher sample return, but
+whether the conditional sleeve ranking is monotonic, representative across high-volatility
+months, and stable to a reasonable definition of the futures ``market.''

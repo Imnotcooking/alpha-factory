@@ -49,6 +49,16 @@ TIME_SERIES_DAILY_NEXT_OPEN = {
     "supported_markets": ["FUTURES_CN"],
 }
 
+TIME_SERIES_DAILY_NEXT_OPEN_TO_NEXT_OPEN = {
+    "evaluation_geometry": "time_series",
+    "execution_mode": "risk_desk",
+    "alpha_signal_col": "factor_score",
+    "execution_weight_col": "factor_score",
+    "execution_lag": "next_open",
+    "return_assumption": "close_signal_next_open_to_next_open",
+    "supported_markets": ["FUTURES_CN"],
+}
+
 TIME_SERIES_INTRADAY_FACTOR_SCORE_NEXT_BAR = {
     "evaluation_geometry": "time_series",
     "execution_mode": "risk_desk",
@@ -63,6 +73,16 @@ TIME_SERIES_INTRADAY_SIGNAL_NEXT_BAR = {
     "evaluation_geometry": "time_series",
     "execution_mode": "risk_desk",
     "alpha_signal_col": "signal",
+    "execution_weight_col": "signal",
+    "execution_lag": "next_bar",
+    "return_assumption": "bar_signal_next_bar",
+    "supported_markets": ["FUTURES_CN"],
+}
+
+PAIRWISE_INTRADAY_SIGNAL_NEXT_BAR = {
+    "evaluation_geometry": "pairwise",
+    "execution_mode": "risk_desk",
+    "alpha_signal_col": "factor_score",
     "execution_weight_col": "signal",
     "execution_lag": "next_bar",
     "return_assumption": "bar_signal_next_bar",

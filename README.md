@@ -272,7 +272,8 @@ synthetic fixtures, tests, documentation, and sanitized retired examples. Live
 alpha implementations, broker/account state, cached market data, execution
 logs, candidate artifacts, model checkpoints, and credentials stay local.
 
-See `ARCHITECTURE.md`, `departments/research/public_private_boundary.md`, and
+See `ARCHITECTURE.md`,
+`departments/research/docs/governance/public_private_boundary.md`, and
 `departments/platform/deployment/repo_commit_readiness.md` before publishing.
 
 ## Project Status

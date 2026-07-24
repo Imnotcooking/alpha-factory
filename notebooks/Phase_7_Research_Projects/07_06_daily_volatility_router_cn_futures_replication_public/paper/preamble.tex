@@ -1,0 +1,65 @@
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage[margin=1in,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{setspace}
+\setstretch{1.08}
+
+\usepackage{amsmath,mathtools,bm}
+\usepackage{booktabs,tabularx,threeparttable,array}
+\usepackage{graphicx,caption,float}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{natbib}
+\usepackage{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+\definecolor{ink}{HTML}{17212B}
+\definecolor{accent}{HTML}{8A3D32}
+\definecolor{accentlight}{HTML}{F7EFED}
+\definecolor{rulegray}{HTML}{D6DCE1}
+\definecolor{evidenceblue}{HTML}{1F5A75}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=accent,
+  citecolor=accent,
+  urlcolor=accent,
+  pdftitle={When Volatility Is Not a Sufficient State},
+  pdfauthor={Yitian Chen}
+}
+
+\titleformat{\section}
+  {\Large\bfseries\color{ink}}
+  {\thesection}{0.65em}{}
+  [\vspace{0.2em}\color{accent}\titlerule]
+\titleformat{\subsection}
+  {\large\bfseries\color{ink}}
+  {\thesubsection}{0.55em}{}
+
+\setlist[itemize]{leftmargin=1.35em,itemsep=0.25em,topsep=0.35em}
+\setlist[enumerate]{leftmargin=1.6em,itemsep=0.25em,topsep=0.35em}
+\captionsetup{font=small,labelfont=bf,labelsep=period}
+\setlength{\parindent}{1.25em}
+\setlength{\parskip}{0.12em}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.12}
+\graphicspath{{figures/}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{ink}Volatility-state transportability}
+\fancyhead[R]{\small\color{ink}Exploratory replication}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.35pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{rulegray}\leaders\hrule height \headrulewidth\hfill}}
+
+\newenvironment{evidencebox}
+  {\begin{center}\begin{minipage}{0.94\linewidth}\color{evidenceblue}\small
+   \hrule\vspace{0.5em}}
+  {\vspace{0.5em}\hrule\end{minipage}\end{center}}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}

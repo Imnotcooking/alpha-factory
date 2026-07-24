@@ -12,6 +12,10 @@ fi
 IMAGE="${IB_GATEWAY_IMAGE:-ghcr.io/gnzsnz/ib-gateway:latest}"
 EXISTING_SESSION_ACTION="${IBKR_EXISTING_SESSION_ACTION:-primary}"
 PAPER_READ_ONLY_API="${IBKR_PAPER_READ_ONLY_API:-yes}"
+AUTO_RESTART_TIME="${IBKR_AUTO_RESTART_TIME:-11:45 PM}"
+TWOFA_TIMEOUT_ACTION="${IBKR_TWOFA_TIMEOUT_ACTION:-restart}"
+RELOGIN_AFTER_TWOFA_TIMEOUT="${IBKR_RELOGIN_AFTER_TWOFA_TIMEOUT:-yes}"
+TWS_SETTINGS_ROOT="${IBKR_TWS_SETTINGS_ROOT:-$HOME/.oqp_ibkr}"
 DOCKER=(docker)
 
 required_for_start=(
@@ -83,6 +87,8 @@ select_docker() {
 
 run_live() {
   local vnc_env=()
+  local settings_path="$TWS_SETTINGS_ROOT/live_tws_settings"
+  mkdir -p "$settings_path"
   if [[ -n "${IBKR_VNC_PASSWORD:-}" ]]; then
     vnc_env=(-e VNC_SERVER_PASSWORD="$IBKR_VNC_PASSWORD")
   fi
@@ -98,13 +104,20 @@ run_live() {
     -e GATEWAY_OR_TWS=gateway \
     -e READ_ONLY_API=yes \
     -e TWS_ACCEPT_INCOMING=accept \
+    -e TWS_SETTINGS_PATH=/home/ibgateway/tws_settings \
     -e EXISTING_SESSION_DETECTED_ACTION="$EXISTING_SESSION_ACTION" \
+    -e AUTO_RESTART_TIME="$AUTO_RESTART_TIME" \
+    -e TWOFA_TIMEOUT_ACTION="$TWOFA_TIMEOUT_ACTION" \
+    -e RELOGIN_AFTER_TWOFA_TIMEOUT="$RELOGIN_AFTER_TWOFA_TIMEOUT" \
+    -v "$settings_path:/home/ibgateway/tws_settings" \
     "${vnc_env[@]}" \
     "$IMAGE"
 }
 
 run_paper() {
   local vnc_env=()
+  local settings_path="$TWS_SETTINGS_ROOT/paper_tws_settings"
+  mkdir -p "$settings_path"
   if [[ -n "${IBKR_VNC_PASSWORD:-}" ]]; then
     vnc_env=(-e VNC_SERVER_PASSWORD="$IBKR_VNC_PASSWORD")
   fi
@@ -120,7 +133,12 @@ run_paper() {
     -e GATEWAY_OR_TWS=gateway \
     -e READ_ONLY_API="$PAPER_READ_ONLY_API" \
     -e TWS_ACCEPT_INCOMING=accept \
+    -e TWS_SETTINGS_PATH=/home/ibgateway/tws_settings \
     -e EXISTING_SESSION_DETECTED_ACTION="$EXISTING_SESSION_ACTION" \
+    -e AUTO_RESTART_TIME="$AUTO_RESTART_TIME" \
+    -e TWOFA_TIMEOUT_ACTION="$TWOFA_TIMEOUT_ACTION" \
+    -e RELOGIN_AFTER_TWOFA_TIMEOUT="$RELOGIN_AFTER_TWOFA_TIMEOUT" \
+    -v "$settings_path:/home/ibgateway/tws_settings" \
     "${vnc_env[@]}" \
     "$IMAGE"
 }

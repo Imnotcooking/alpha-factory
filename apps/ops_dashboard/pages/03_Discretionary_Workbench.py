@@ -78,7 +78,7 @@ from oqp.investing import (  # noqa: E402
     safe_num,
     write_opportunity_snapshot,
 )
-from oqp.intelligence.signal_engine import (  # noqa: E402
+from oqp.investing.directional_lens import (  # noqa: E402
     DirectionalLensResult,
     add_strategy_direction_columns,
     build_directional_lens,
@@ -88,6 +88,7 @@ from oqp.market import (  # noqa: E402
     DEFAULT_MARKET_CACHE_MAX_AGE_HOURS,
     DEFAULT_MARKET_CACHE_PATH,
     DEFAULT_MARKET_EVENTS_PATH,
+    MARKET_MONITOR_RETURN_HORIZONS,
     DEFAULT_VOL_FORECAST_DB_PATH,
     DEFAULT_VOL_FORECAST_HORIZONS,
     commodity_channel_index,
@@ -96,8 +97,15 @@ from oqp.market import (  # noqa: E402
     load_cached_market_history,
     load_market_events,
     market_cache_status,
+    market_monitor_breadth,
+    market_monitor_cache_status,
+    market_monitor_correlation,
+    market_monitor_movers,
+    market_monitor_regime,
     market_monitor_refresh_symbols,
     market_monitor_snapshot,
+    market_monitor_universe,
+    refresh_market_monitor_cache,
     refresh_yahoo_market_cache,
     select_forecast_vol,
     seed_market_events_template,
@@ -1947,6 +1955,8 @@ def format_market_monitor_display(frame: pd.DataFrame) -> pd.DataFrame:
             display[column] = display[column].map(lambda value: format_percent_cell(value, 1))
     if "As Of" in display:
         display["As Of"] = display["As Of"].astype(str).replace({"NaT": "", "nan": ""})
+    if "Age Hours" in display:
+        display["Age Hours"] = pd.to_numeric(display["Age Hours"], errors="coerce")
     columns = [
         "Region",
         "Asset Class",
@@ -1961,11 +1971,200 @@ def format_market_monitor_display(frame: pd.DataFrame) -> pd.DataFrame:
         "From 52W High",
         "HV 20D",
         "Status",
+        "Cache State",
+        "Age Hours",
         "As Of",
         "Source",
         "Notes",
     ]
     return display[[column for column in columns if column in display.columns]]
+
+
+def market_monitor_column_help() -> dict[str, str]:
+    """Return concise definitions shared by grid tooltips and the help panel."""
+
+    return {
+        "Instrument": "Human-readable name of the market, index, ETF, rate, commodity, FX pair, or cryptocurrency.",
+        "Symbol": "Canonical dashboard ticker. The provider may use a different vendor-specific ticker behind the scenes.",
+        "Region": "Primary geographic market or cross-asset region represented by the instrument.",
+        "Asset Class": "Broad risk bucket: equity, rates, credit, FX, commodity, crypto, or volatility.",
+        "Category": "More specific instrument type, such as Index ETF, Yield, Credit ETF, Metal, or Spot.",
+        "Last": "Latest cached daily closing price or index/rate level from the selected provider.",
+        "1D %": "Close-to-close price return over the latest 1 trading session. This is return, not volatility.",
+        "5D %": "Close-to-close price return over the latest 5 trading sessions. This is return, not volatility.",
+        "20D %": "Close-to-close price return over the latest 20 trading sessions, roughly one trading month.",
+        "60D %": "Close-to-close price return over the latest 60 trading sessions, roughly one trading quarter.",
+        "From 52W High": "Latest close divided by the highest close in the last 252 observations, minus one. Negative means below the high.",
+        "HV 20D": "Annualized historical volatility: standard deviation of the latest 20 daily log returns, scaled by sqrt(252).",
+        "As Of": "Date of the latest cached market observation used for the row calculations.",
+        "Source": "Provider supplying the displayed history. FMP is preferred; Yahoo is used only as fallback.",
+        "Cache State": "Fresh means fetched within the cache-age threshold; stale means usable but overdue for refresh; missing means no usable history.",
+        "Age Hours": "Elapsed hours since this provider history was fetched into the local SQLite market cache.",
+        "Status": "Row calculation status: ok, missing, or planned for a future provider integration.",
+        "Notes": "Provider fallback reason, missing-data diagnostic, or implementation note for this instrument.",
+    }
+
+
+def render_market_monitor_aggrid(frame: pd.DataFrame) -> str | None:
+    """Render the cross-asset snapshot as a filterable, selectable AG Grid."""
+
+    if AgGrid is None or GridOptionsBuilder is None or GridUpdateMode is None or DataReturnMode is None or JsCode is None:
+        render_dark_table(format_market_monitor_display(frame), max_height_px=560)
+        return None
+    if frame.empty:
+        st.info("No market monitor instruments are configured.")
+        return None
+
+    grid_frame = frame.copy()
+    numeric_columns = ["Last", "1D %", "5D %", "20D %", "60D %", "From 52W High", "HV 20D", "Age Hours"]
+    for column in numeric_columns:
+        if column in grid_frame:
+            grid_frame[column] = pd.to_numeric(grid_frame[column], errors="coerce")
+    if "As Of" in grid_frame:
+        grid_frame["As Of"] = grid_frame["As Of"].astype(str).replace({"NaT": "", "nan": ""})
+
+    number_formatter = JsCode(
+        """
+        function(params) {
+            if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
+            return Number(params.value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
+        """
+    )
+    percent_formatter = JsCode(
+        """
+        function(params) {
+            if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
+            const value = Number(params.value);
+            const sign = value > 0 ? "+" : "";
+            return sign + (value * 100).toFixed(1) + "%";
+        }
+        """
+    )
+    age_formatter = JsCode(
+        """
+        function(params) {
+            if (params.value === null || params.value === undefined || isNaN(params.value)) return "missing";
+            return Number(params.value).toFixed(1) + "h";
+        }
+        """
+    )
+    return_style = JsCode(
+        """
+        function(params) {
+            const value = Number(params.value);
+            if (isNaN(value)) return {color: "#64748b"};
+            return {color: value >= 0 ? "#5eead4" : "#fb7185", fontWeight: "800"};
+        }
+        """
+    )
+    status_style = JsCode(
+        """
+        function(params) {
+            const value = String(params.value || "").toLowerCase();
+            if (value === "fresh" || value === "ok") return {color: "#5eead4", fontWeight: "800"};
+            if (value === "stale" || value === "fallback") return {color: "#fbbf24", fontWeight: "800"};
+            return {color: "#fb7185", fontWeight: "800"};
+        }
+        """
+    )
+
+    builder = GridOptionsBuilder.from_dataframe(grid_frame)
+    builder.configure_default_column(
+        sortable=True,
+        filter=True,
+        resizable=True,
+        minWidth=110,
+    )
+    builder.configure_selection(selection_mode="single", use_checkbox=False, suppressRowClickSelection=False)
+    builder.configure_grid_options(
+        rowHeight=38,
+        headerHeight=44,
+        animateRows=False,
+        suppressCellFocus=True,
+        enableCellTextSelection=True,
+        alwaysShowHorizontalScroll=True,
+        enableBrowserTooltips=False,
+        tooltipShowDelay=100,
+        tooltipHideDelay=10000,
+    )
+    builder.configure_column("Instrument", pinned="left", width=230, minWidth=210, tooltipField="Instrument")
+    builder.configure_column("Symbol", pinned="left", width=125, minWidth=115)
+    for column, width in (("Region", 130), ("Asset Class", 135), ("Category", 145), ("Source", 120)):
+        if column in grid_frame:
+            builder.configure_column(column, width=width, minWidth=width - 10)
+    if "Last" in grid_frame:
+        builder.configure_column(
+            "Last",
+            type=["numericColumn"],
+            valueFormatter=number_formatter,
+            width=125,
+            minWidth=115,
+        )
+    for column in ("1D %", "5D %", "20D %", "60D %", "From 52W High", "HV 20D"):
+        if column in grid_frame:
+            builder.configure_column(
+                column,
+                type=["numericColumn"],
+                valueFormatter=percent_formatter,
+                cellStyle=return_style,
+                width=column == "From 52W High" and 160 or 125,
+                minWidth=column == "From 52W High" and 150 or 115,
+            )
+    for column in ("Status", "Cache State"):
+        if column in grid_frame:
+            builder.configure_column(column, cellStyle=status_style, width=125, minWidth=115)
+    if "Age Hours" in grid_frame:
+        builder.configure_column(
+            "Age Hours",
+            valueFormatter=age_formatter,
+            type=["numericColumn"],
+            width=125,
+            minWidth=115,
+        )
+    if "As Of" in grid_frame:
+        builder.configure_column("As Of", width=135, minWidth=125)
+    if "Notes" in grid_frame:
+        builder.configure_column("Notes", width=320, minWidth=260, tooltipField="Notes")
+
+    header_tooltips = market_monitor_column_help()
+    for column, explanation in header_tooltips.items():
+        if column in grid_frame:
+            builder.configure_column(
+                column,
+                headerName=f"{column} ⓘ",
+                headerTooltip=explanation,
+            )
+
+    custom_css = {
+        ".ag-root-wrapper": {"background-color": "#07101a !important", "border": "1px solid rgba(72, 92, 122, 0.30) !important", "border-radius": "10px !important"},
+        ".ag-header": {"background-color": "#0f1826 !important", "border-bottom": "1px solid rgba(93, 113, 143, 0.30) !important"},
+        ".ag-header-cell-label": {"color": "#8fa2bd !important", "font-weight": "800 !important", "letter-spacing": "0.04em !important"},
+        ".ag-row": {"background-color": "#08101a !important", "border-bottom": "1px solid rgba(65, 84, 112, 0.16) !important"},
+        ".ag-row-odd": {"background-color": "#0c1521 !important"},
+        ".ag-row-hover": {"background-color": "#152336 !important"},
+        ".ag-row-selected": {"background-color": "#1b3554 !important"},
+        ".ag-cell": {"color": "#dbeafe !important", "border-color": "rgba(65, 84, 112, 0.16) !important", "font-size": "0.84rem !important"},
+    }
+    fingerprint = int(pd.util.hash_pandas_object(grid_frame.astype(str), index=True).sum())
+    response = AgGrid(
+        grid_frame,
+        gridOptions=builder.build(),
+        height=min(650, max(390, 108 + len(grid_frame) * 38)),
+        theme="dark",
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        update_on=["selectionChanged"],
+        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+        allow_unsafe_jscode=True,
+        custom_css=custom_css,
+        show_search=True,
+        show_download_button=True,
+        key=f"market_monitor_aggrid_{fingerprint}",
+    )
+    selected_rows = aggrid_rows(getattr(response, "selected_rows", None))
+    if selected_rows:
+        return str(selected_rows[0].get("Symbol") or "").strip() or None
+    return None
 
 
 def format_market_events_display(frame: pd.DataFrame) -> pd.DataFrame:
@@ -1981,17 +2180,183 @@ def format_market_events_display(frame: pd.DataFrame) -> pd.DataFrame:
     return display[[column for column in columns if column in display.columns]]
 
 
+def _render_market_return_bar(
+    frame: pd.DataFrame,
+    horizon: str,
+    *,
+    title: str,
+    height: int = 360,
+) -> None:
+    """Render a compact positive/negative return ranking."""
+
+    if frame.empty or horizon not in frame:
+        st.info("No usable return data for this view.")
+        return
+    plot_frame = frame.copy()
+    plot_frame["_return"] = pd.to_numeric(plot_frame[horizon], errors="coerce")
+    plot_frame = plot_frame.dropna(subset=["_return"]).sort_values("_return")
+    if plot_frame.empty:
+        st.info("No usable return data for this view.")
+        return
+    label_column = "Instrument" if "Instrument" in plot_frame else "Symbol"
+    fig = go.Figure(
+        go.Bar(
+            x=plot_frame["_return"] * 100,
+            y=plot_frame[label_column],
+            orientation="h",
+            marker_color=["#ff5a66" if value < 0 else "#54d6c2" for value in plot_frame["_return"]],
+            hovertemplate=f"%{{y}}<br>{horizon}: %{{x:.2f}}%<extra></extra>",
+        )
+    )
+    fig.update_layout(title=title, height=height, xaxis_title="Return %", yaxis_title="")
+    style_dark_plotly(fig, hovermode="closest")
+    st.plotly_chart(fig, use_container_width=True, theme=None)
+
+
+def render_market_decision_cockpit(frame: pd.DataFrame) -> None:
+    """Render Phase 4 decision views without replacing the detailed monitor grid."""
+
+    if frame.empty:
+        return
+    regime = market_monitor_regime(frame)
+    st.markdown("#### Decision Cockpit")
+    regime_cols = st.columns(6)
+    regime_cols[0].metric("Regime", regime["Label"])
+    regime_cols[1].metric("Confidence", format_percent_cell(regime["Confidence"], 0))
+    regime_cols[2].metric("20D Risk Breadth", format_percent_cell(regime["Risk Breadth"], 0))
+    regime_cols[3].metric("SPY 20D", format_percent_cell(regime["SPY 20D"], 1))
+    regime_cols[4].metric("HYG 20D", format_percent_cell(regime["HYG 20D"], 1))
+    vix_level = regime["VIX Level"]
+    regime_cols[5].metric("VIX Level", f"{vix_level:.1f}" if pd.notna(vix_level) else "missing")
+    st.caption("Regime combines 20-day risk-asset breadth, SPY trend, high-yield credit, and the inverse VIX trend.")
+
+    cross_asset_tab, regional_tab, macro_tab, correlation_tab = st.tabs(
+        ["Cross-Asset", "Regional Equity", "Macro Lanes", "Correlation"]
+    )
+    with cross_asset_tab:
+        horizon = st.selectbox(
+            "Decision horizon",
+            MARKET_MONITOR_RETURN_HORIZONS,
+            index=2,
+            key="market_decision_horizon",
+            help="Close-to-close total price change over the selected number of trading sessions.",
+        )
+        breadth = market_monitor_breadth(frame, horizon=horizon)
+        left, right = st.columns([1.35, 1])
+        with left:
+            chart_frame = breadth.rename(columns={"Asset Class": "Instrument", "Median Return": horizon})
+            _render_market_return_bar(chart_frame, horizon, title=f"Asset-Class Leadership — {horizon}", height=330)
+        with right:
+            breadth_display = breadth[["Asset Class", "Breadth", "Best Symbol", "Worst Symbol"]].copy()
+            breadth_display["Breadth"] = breadth_display["Breadth"].map(lambda value: format_percent_cell(value, 0))
+            render_dark_table(breadth_display, max_height_px=330)
+        winners, losers = market_monitor_movers(frame, horizon=horizon, count=5)
+        winner_col, loser_col = st.columns(2)
+        for container, title, movers in ((winner_col, "Leaders", winners), (loser_col, "Laggards", losers)):
+            with container:
+                st.markdown(f"**{title}**")
+                display = movers.copy()
+                if "Return" in display:
+                    display["Return"] = display["Return"].map(lambda value: format_percent_cell(value, 1))
+                render_dark_table(display, max_height_px=260)
+
+    with regional_tab:
+        horizon = st.selectbox(
+            "Regional horizon",
+            MARKET_MONITOR_RETURN_HORIZONS,
+            index=2,
+            key="market_region_horizon",
+        )
+        equities = frame.loc[frame["Asset Class"].astype(str).str.lower().eq("equity")].copy()
+        equities["_return"] = pd.to_numeric(equities[horizon], errors="coerce")
+        region = equities.groupby("Region", as_index=False)["_return"].median().rename(
+            columns={"Region": "Instrument", "_return": horizon}
+        )
+        region_col, instrument_col = st.columns(2)
+        with region_col:
+            _render_market_return_bar(region, horizon, title=f"Regional Equity Median — {horizon}", height=390)
+        with instrument_col:
+            _render_market_return_bar(equities, horizon, title=f"Equity Instruments — {horizon}", height=390)
+
+    with macro_tab:
+        macro_horizon = st.selectbox(
+            "Macro horizon",
+            MARKET_MONITOR_RETURN_HORIZONS,
+            index=2,
+            key="market_macro_horizon",
+        )
+        lanes = {
+            "Rates & Credit": ("SHY", "IEF", "TLT", "^TNX", "LQD", "HYG"),
+            "FX": ("UUP", "EURUSD", "USDJPY", "USDCNH"),
+            "Commodities": ("GCUSD", "HGUSD", "CLUSD"),
+            "Stress Proxies": ("^VIX", "HYG", "SPY", "BTCUSD"),
+        }
+        columns = st.columns(2)
+        for index, (lane, symbols) in enumerate(lanes.items()):
+            lane_frame = frame.loc[frame["Symbol"].astype(str).isin(symbols)]
+            with columns[index % 2]:
+                _render_market_return_bar(lane_frame, macro_horizon, title=lane, height=300)
+        components = regime["Components"].copy()
+        if not components.empty:
+            components["Signal"] = components["Signal"].map({1: "supportive", 0: "neutral", -1: "defensive"})
+            render_dark_table(components, max_height_px=240)
+
+    with correlation_tab:
+        available = frame["Symbol"].dropna().astype(str).tolist()
+        preferred = [symbol for symbol in ("SPY", "QQQ", "IWM", "HYG", "TLT", "UUP", "GCUSD", "CLUSD", "BTCUSD", "^VIX") if symbol in available]
+        selected = st.multiselect(
+            "Correlation basket",
+            available,
+            default=preferred,
+            key="market_correlation_symbols",
+            help="Pearson correlation of aligned daily close-to-close returns from the local cache.",
+        )
+        lookback = st.selectbox("Lookback sessions", [20, 60, 120], index=1, key="market_correlation_lookback")
+        histories: dict[str, pd.DataFrame] = {}
+        for symbol in selected:
+            row = frame.loc[frame["Symbol"].astype(str).eq(symbol)].iloc[0]
+            histories[symbol] = load_cached_market_history(
+                symbol, source=str(row.get("Source") or "fmp"), lookback_days=max(90, lookback * 3)
+            )
+        correlation = market_monitor_correlation(
+            histories,
+            lookback=lookback,
+            min_observations=max(10, min(20, lookback - 2)),
+        )
+        if correlation.empty:
+            st.info("Select at least two instruments with enough overlapping cached history.")
+        else:
+            fig = go.Figure(
+                go.Heatmap(
+                    z=correlation.values,
+                    x=correlation.columns,
+                    y=correlation.index,
+                    zmin=-1,
+                    zmax=1,
+                    zmid=0,
+                    colorscale=[[0, "#ff5a66"], [0.5, "#17243a"], [1, "#54d6c2"]],
+                    text=np.round(correlation.values, 2),
+                    texttemplate="%{text}",
+                    hovertemplate="%{y} vs %{x}: %{z:.2f}<extra></extra>",
+                )
+            )
+            fig.update_layout(height=560, title=f"Daily Return Correlation — {lookback} Sessions")
+            style_dark_plotly(fig, hovermode="closest")
+            st.plotly_chart(fig, use_container_width=True, theme=None)
+
+
 def render_market_monitor_tab(settings: Any) -> None:
     st.subheader("Market Monitor")
     st.caption(
-        "Global cross-asset picture for discretionary context. Reads local cache first; "
-        "refresh uses the same market cache as the watchlist."
+        "Global cross-asset picture for discretionary context. Refresh uses FMP first and "
+        "falls back to Yahoo only when the FMP subscription has no usable history."
     )
-    refreshable_symbols = market_monitor_refresh_symbols()
-    cache_status = market_cache_status(refreshable_symbols)
-    stale_symbols = cache_status.loc[
+    universe = market_monitor_universe()
+    refreshable_symbols = market_monitor_refresh_symbols(universe)
+    cache_status = market_monitor_cache_status(universe)
+    stale_keys = cache_status.loc[
         cache_status["State"].isin(["missing", "stale"]),
-        "Symbol",
+        "Key",
     ].astype(str).tolist()
     counts = cache_status["State"].value_counts().to_dict() if not cache_status.empty else {}
 
@@ -1999,7 +2364,7 @@ def render_market_monitor_tab(settings: Any) -> None:
     refresh_stale = controls[0].button(
         "Refresh Stale Markets",
         use_container_width=True,
-        disabled=not stale_symbols,
+        disabled=not stale_keys,
     )
     refresh_all = controls[1].button(
         "Refresh All Markets",
@@ -2007,30 +2372,57 @@ def render_market_monitor_tab(settings: Any) -> None:
         disabled=not refreshable_symbols,
     )
     controls[2].caption(
-        f"Yahoo-backed rows: fresh={counts.get('fresh', 0)} "
+        f"FMP-first rows: fresh={counts.get('fresh', 0)} "
         f"stale={counts.get('stale', 0)} missing={counts.get('missing', 0)}. "
-        "China 10Y is staged for Wind/QMT because a stable local provider is preferable."
+        f"FMP key={present(settings.fmp_api_key)}. Yahoo is the per-instrument fallback."
     )
 
-    symbols_to_refresh = stale_symbols if refresh_stale else (list(refreshable_symbols) if refresh_all else [])
-    if symbols_to_refresh:
-        estimated = max(12, min(120, len(symbols_to_refresh) * 5))
+    keys_to_refresh = stale_keys if refresh_stale else (
+        [item.key for item in universe if item.cache_symbol in refreshable_symbols]
+        if refresh_all
+        else []
+    )
+    if keys_to_refresh:
+        estimated = max(12, min(180, len(keys_to_refresh) * 6))
         progress, status = progress_bar(
-            f"Refreshing {len(symbols_to_refresh)} market monitor symbol(s)",
+            f"Refreshing {len(keys_to_refresh)} market monitor instrument(s)",
             estimate_seconds=estimated,
         )
-        progress_step(progress, status, 15, "Fetching market history into SQLite cache...")
-        refresh_result = refresh_yahoo_market_cache(tuple(symbols_to_refresh), period="2y")
+        progress_step(progress, status, 15, "Fetching FMP histories with Yahoo fallback...")
+        refresh_result = refresh_market_monitor_cache(
+            universe,
+            fmp_api_key=settings.fmp_api_key,
+            period="2y",
+            keys=keys_to_refresh,
+        )
         progress_step(progress, status, 92, "Recomputing market monitor snapshot...")
         cached_market_monitor_snapshot.clear()
-        ok_count = int(refresh_result["Status"].eq("ok").sum()) if "Status" in refresh_result else 0
-        progress_step(progress, status, 100, f"Refresh complete: {ok_count}/{len(symbols_to_refresh)} updated.")
+        ok_count = int(refresh_result["Status"].isin(["ok", "fallback"]).sum()) if "Status" in refresh_result else 0
+        fallback_count = int(refresh_result["Status"].eq("fallback").sum()) if "Status" in refresh_result else 0
+        progress_step(progress, status, 100, f"Refresh complete: {ok_count}/{len(keys_to_refresh)} updated.")
         finish_progress(progress, status)
-        st.success(f"Market monitor refresh complete: {ok_count}/{len(symbols_to_refresh)} updated.")
+        st.success(
+            f"Market monitor refresh complete: {ok_count}/{len(keys_to_refresh)} updated; "
+            f"{fallback_count} used Yahoo fallback."
+        )
         render_dark_table(refresh_result, max_height_px=260)
+        cache_status = market_monitor_cache_status(universe)
 
     frame = cached_market_monitor_snapshot()
     ok = frame.loc[frame.get("Status", pd.Series(dtype=str)).eq("ok")].copy() if not frame.empty else pd.DataFrame()
+    missing_count = int(frame.get("Status", pd.Series(dtype=str)).eq("missing").sum()) if not frame.empty else len(universe)
+    stale_count = int(frame.get("Cache State", pd.Series(dtype=str)).eq("stale").sum()) if not frame.empty else 0
+    fallback_count = int(frame.get("Source", pd.Series(dtype=str)).eq("yahoo").sum()) if not frame.empty else 0
+    if missing_count:
+        st.error(
+            f"Market data incomplete: {missing_count} instrument(s) have no usable cached history. "
+            "Run Refresh Stale Markets and inspect provider details below."
+        )
+    elif stale_count:
+        st.warning(f"All instruments have data, but {stale_count} cache row(s) are stale.")
+    else:
+        st.success(f"Market data healthy: {len(ok)} live instruments; {fallback_count} on Yahoo fallback.")
+
     metric_cols = st.columns(6)
     if ok.empty:
         metric_cols[0].metric("Live Rows", "0")
@@ -2058,28 +2450,30 @@ def render_market_monitor_tab(settings: Any) -> None:
         metric_cols[4].metric("Highest HV20", format_percent_cell(hv.max(), 1))
         metric_cols[5].metric("Planned Rows", str(int(frame["Status"].eq("planned").sum())))
 
-    if not ok.empty:
-        plot_frame = ok.sort_values("1D %", ascending=True)
-        colors = ["#ff5a66" if float(value) < 0 else "#54d6c2" for value in pd.to_numeric(plot_frame["1D %"], errors="coerce").fillna(0)]
-        fig = go.Figure(
-            go.Bar(
-                x=pd.to_numeric(plot_frame["1D %"], errors="coerce") * 100,
-                y=plot_frame["Instrument"],
-                orientation="h",
-                marker_color=colors,
-                hovertemplate="%{y}<br>1D: %{x:.2f}%<extra></extra>",
-            )
-        )
-        fig.update_layout(height=440, xaxis_title="1D Change %", yaxis_title="")
-        style_dark_plotly(fig, hovermode="closest")
-        st.plotly_chart(fig, use_container_width=True, theme=None)
+    render_market_decision_cockpit(ok)
 
-    render_dark_table(format_market_monitor_display(frame), max_height_px=520)
+    selected_grid_symbol = render_market_monitor_aggrid(frame)
+    st.caption(
+        "Hover over a ⓘ grid column title for its definition. Performance columns (1D/5D/20D/60D) "
+        "are close-to-close returns; HV 20D is annualized historical volatility."
+    )
+    with st.expander("ⓘ Column definitions", expanded=False):
+        help_rows = [
+            {"Column": column, "Definition": explanation}
+            for column, explanation in market_monitor_column_help().items()
+        ]
+        render_dark_table(pd.DataFrame(help_rows), max_height_px=520)
+    if selected_grid_symbol:
+        st.session_state["market_monitor_selected_symbol"] = selected_grid_symbol
 
     if not ok.empty:
         chart_symbols = ok["Symbol"].dropna().astype(str).tolist()
-        selected = st.selectbox("Inspect cached history", chart_symbols, index=0)
-        history = load_cached_market_history(selected, lookback_days=420)
+        remembered = str(st.session_state.get("market_monitor_selected_symbol") or "")
+        default_index = chart_symbols.index(remembered) if remembered in chart_symbols else 0
+        selected = st.selectbox("Inspect cached history", chart_symbols, index=default_index)
+        selected_row = ok.loc[ok["Symbol"].astype(str).eq(selected)].iloc[0]
+        selected_source = str(selected_row.get("Source") or "fmp")
+        history = load_cached_market_history(selected, source=selected_source, lookback_days=420)
         if not history.empty and "Close" in history:
             close = pd.to_numeric(history["Close"], errors="coerce")
             fig = go.Figure(
@@ -2094,6 +2488,10 @@ def render_market_monitor_tab(settings: Any) -> None:
             fig.update_layout(height=360, yaxis_title="Close", xaxis_title="")
             style_dark_plotly(fig, hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True, theme=None)
+            st.caption(
+                f"Provider: {selected_source.upper()} | Cache: {selected_row.get('Cache State', 'missing')} | "
+                f"As of: {selected_row.get('As Of', '')}"
+            )
 
     st.subheader("Events Calendar")
     st.caption(

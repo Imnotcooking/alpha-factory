@@ -1,0 +1,54 @@
+\documentclass[11pt,a4paper]{article}
+
+\input{preamble}
+
+\title{When Volatility Is Not a Sufficient State:\\
+\large A Cross-Market Replication in Chinese Futures}
+\author{Yitian Chen\\
+\small Independent Research Project}
+\date{Exploratory replication draft -- July 2026}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\vspace{0.7em}
+\noindent\textbf{Keywords:} Chinese futures; cross-sectional momentum;
+short-term reversal; volatility states; cross-market replication; model transportability.
+
+\vspace{0.4em}
+\noindent\textbf{JEL classification:} C22, C58, G11, G12, G17.
+
+\vfill
+\begin{evidencebox}
+\textbf{Evidence status.} This manuscript reports a methodology-locked but exploratory
+cross-market replication. The evaluable period contains 66 monthly observations after
+the five-year state-history requirement. No threshold, market proxy, sleeve, sector, or
+universe was selected using the reported returns. The results do not establish a trading
+rule and have no untouched confirmatory period.
+\end{evidencebox}
+
+\clearpage
+\input{sections/01_introduction}
+\input{sections/02_literature_and_mechanism}
+\input{sections/03_cross_market_mapping}
+\input{sections/04_data_and_design}
+\input{sections/05_results}
+\input{sections/06_why_volatility_is_insufficient}
+\input{sections/07_robustness_and_failure}
+\input{sections/08_limitations_and_implications}
+\input{sections/09_conclusion}
+
+\bibliographystyle{apalike}
+\bibliography{references}
+
+\clearpage
+\appendix
+\input{sections/appendix_public_evidence}
+
+\end{document}

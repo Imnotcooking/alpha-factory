@@ -1,0 +1,52 @@
+\section{Limitations and Research Implications}
+
+\subsection{What the evidence does not establish}
+
+The sample begins in 2016 and yields 66 evaluable months because five years are consumed
+by state formation. Fourteen primary-proxy Q4 observations provide limited power for a
+tail-state claim. The study uses daily data and monthly sleeves; it says nothing direct
+about minute-level or order-book reversal. It also tests one published momentum window,
+one reversal window, one quantile boundary, and two market proxies. Failure to replicate
+this rule is not proof that every volatility-aware allocation is ineffective.
+
+Nor does the study show that Chinese futures lack momentum. The frozen momentum sleeve is
+positive in the sample. It does not rule out reversal at other horizons or during
+particular market events. Finally, the cross-sectional anatomy diagnostics are
+descriptive. They show that Q4 is more systemic, but they do not causally identify which
+economic shock produced each state.
+
+\subsection{What can be learned from a failed replication}
+
+The failure changes the object of research. The useful question is no longer ``which
+volatility percentile maximizes the backtest?'' It is ``which high-volatility states
+destroy trends, and which create trends?'' That question is both more economic and more
+falsifiable.
+
+A future state model should be low-dimensional and interpretable. It might combine shock
+intensity with pre-specified measures of market direction, breadth, and shock stage. Each
+additional dimension must first explain the future reversal-minus-momentum spread across
+time partitions and reasonable market proxies. Only a mechanism that passes those gates
+should be translated into a router and tested on an untouched period.
+
+This sequence matters for inference. Adding indicators until a router improves on the
+same 66 months would merely transfer overfitting from a scalar threshold to a state
+classifier. Mechanism diagnostics, portfolio selection, and final validation must remain
+separate stages.
+
+\subsection{General implication for model transportability}
+
+State variables are not portable solely because their mathematical definitions are
+portable. A volatility standard deviation has the same formula in equities and futures,
+but its economic content depends on the aggregation object and on which shocks dominate
+the market. Cross-market replication should therefore audit three layers:
+
+\begin{enumerate}
+  \item \textbf{Measurement invariance:} does the state have a unique or stable market
+  definition?
+  \item \textbf{Mechanism invariance:} does the state proxy the same economic forces?
+  \item \textbf{Decision invariance:} does crossing the state boundary select the same
+  return-generating behavior?
+\end{enumerate}
+
+The present replication fails all three strongly enough that endpoint outperformance in
+one proxy is not persuasive evidence of transportability.

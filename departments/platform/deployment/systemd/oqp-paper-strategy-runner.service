@@ -9,6 +9,6 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/oqp_new
 EnvironmentFile=-/home/ubuntu/.oqp_server_env
-ExecStart=/home/ubuntu/oqp_new/scripts/run_paper_strategy_runner_job.sh
+ExecStart=/home/ubuntu/oqp_new/scripts/trading/run_paper_strategy_runner_job.sh
 StandardOutput=append:/home/ubuntu/oqp_new/runtime/logs/paper_strategy_runner.log
 StandardError=append:/home/ubuntu/oqp_new/runtime/logs/paper_strategy_runner.log

@@ -65,6 +65,7 @@ from oqp.research.backtesting.native_backend import NativeBacktestBackend
 from oqp.research.backtesting.portfolio_optimizer import (
     CasinoCapEnforcer,
     HierarchicalRiskParity,
+    HeuristicPortfolioSizer,
     KellySizer,
     PortfolioOptimizer,
 )
@@ -136,6 +137,7 @@ __all__ = [
     "ExecutionDesk",
     "HSIBenchmark",
     "HierarchicalRiskParity",
+    "HeuristicPortfolioSizer",
     "KellySizer",
     "NativeBacktestBackend",
     "NanhuaBenchmark",

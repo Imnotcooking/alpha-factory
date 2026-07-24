@@ -35,6 +35,31 @@ class DataManager:
         except Exception:
             return set()
 
+    def _execution_status(self, row: pd.Series) -> str:
+        """Classify execution state without confusing research diagnostics with failures."""
+
+        execution_reality = str(
+            row.get("data_execution_reality", "") or ""
+        ).strip().lower()
+        if execution_reality == "preflight_blocked":
+            return "blocked"
+
+        resolved_path = self._resolve_returns_file_path(
+            row.get("returns_file_path")
+        )
+        if resolved_path and os.path.exists(resolved_path):
+            return "completed"
+
+        run_id = str(row.get("run_id", "") or "").strip()
+        legacy_path = (
+            os.path.join(LOGS_DIR, "returns", f"returns_{run_id}.csv")
+            if run_id
+            else ""
+        )
+        if legacy_path and os.path.exists(legacy_path):
+            return "completed"
+        return "artifact_missing"
+
     def get_all_runs(self) -> pd.DataFrame:
         """Fetches the master ledger of all backtest runs."""
         run_columns = self._get_table_columns("backtest_runs")
@@ -85,11 +110,22 @@ class DataManager:
                    {run_col("model_type")},
                    {run_col("model_family")},
                    {run_col("strategy_type")},
+                   {run_col("component_type")},
+                   {run_col("strategy_id")},
+                   {run_col("strategy_core_type")},
+                   {run_col("strategy_config_fingerprint")},
                    {run_col("timestamp")},
                    d.failure_code, d.suggested_action
             FROM backtest_runs r
             JOIN factors f ON r.factor_id = f.factor_id
-            LEFT JOIN diagnostics d ON r.run_id = d.run_id
+            LEFT JOIN (
+                SELECT
+                    run_id,
+                    GROUP_CONCAT(failure_code, '; ') AS failure_code,
+                    GROUP_CONCAT(suggested_action, ' | ') AS suggested_action
+                FROM diagnostics
+                GROUP BY run_id
+            ) d ON r.run_id = d.run_id
             ORDER BY {order_by}
         """
         df = self._fetch_query(query)
@@ -103,13 +139,64 @@ class DataManager:
             "active_tick_count", "traded_tickers", "returns_file_path",
             "evaluation_geometry", "execution_mode", "data_execution_reality", "stat_research_family",
             "research_family", "backtest_engine", "runner", "runner_name", "engine_type", "model_type",
-            "model_family", "strategy_type",
+            "model_family", "strategy_type", "component_type", "strategy_id",
+            "strategy_core_type", "strategy_config_fingerprint",
             "timestamp", "failure_code", "suggested_action"
         ]
         for col in expected_cols:
             if col not in df.columns:
                 df[col] = pd.NA
+        if not df.empty:
+            df["execution_status"] = df.apply(
+                self._execution_status,
+                axis=1,
+            )
+        else:
+            df["execution_status"] = pd.Series(dtype="object")
         return df
+
+    def get_completed_strategy_runs(self) -> pd.DataFrame:
+        """Return completed, non-smoke ``str_*`` strategy backtests only."""
+
+        runs = self.get_all_runs()
+        if runs.empty:
+            return runs
+        out = runs.copy()
+        declared_strategy_id = out["strategy_id"].fillna("").astype(str).str.strip()
+        legacy_strategy_id = out["factor_id"].fillna("").astype(str).str.strip()
+        out["strategy_id"] = declared_strategy_id.mask(
+            declared_strategy_id.eq(""),
+            legacy_strategy_id,
+        )
+        component_type = (
+            out["component_type"].fillna("").astype(str).str.strip().str.lower()
+        )
+        strategy_id = out["strategy_id"].astype(str)
+        eligible = component_type.eq("strategy") | strategy_id.str.startswith("str_")
+        excluded = strategy_id.str.lower().str.contains(
+            r"(?:^|_)(?:smoke|test|demo)(?:_|$)",
+            regex=True,
+        )
+        out = out.loc[eligible & ~excluded].copy()
+        if out.empty:
+            return out
+
+        resolved_paths = [
+            self._resolve_returns_file_path(value)
+            for value in out["returns_file_path"]
+        ]
+        out["resolved_returns_file_path"] = resolved_paths
+        out = out.loc[
+            out["resolved_returns_file_path"].map(
+                lambda value: bool(value) and os.path.exists(value)
+            )
+        ].copy()
+        out["timestamp"] = pd.to_datetime(out["timestamp"], errors="coerce")
+        return out.sort_values(
+            "timestamp",
+            ascending=False,
+            na_position="last",
+        ).reset_index(drop=True)
 
     def get_run_record(self, run_id: str) -> pd.Series:
         """Fetch a wide backtest run row for detail views."""
@@ -156,7 +243,31 @@ class DataManager:
             return pd.DataFrame()
             
         df = pd.read_csv(file_path)
-        df['date'] = pd.to_datetime(df['date'])
+        date_column = next(
+            (
+                column
+                for column in (
+                    "date",
+                    "datetime",
+                    "timestamp",
+                    "trading_day",
+                    "trade_date",
+                    "session_date",
+                )
+                if column in df.columns
+            ),
+            None,
+        )
+        if date_column is None:
+            return pd.DataFrame()
+        if date_column != "date":
+            df = df.rename(columns={date_column: "date"})
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = (
+            df.dropna(subset=["date"])
+            .sort_values("date", kind="stable")
+            .reset_index(drop=True)
+        )
         
         # Standardize columns so the UI never crashes
         if 'gross_return' not in df.columns: df['gross_return'] = df.get('net_return', 0.0)

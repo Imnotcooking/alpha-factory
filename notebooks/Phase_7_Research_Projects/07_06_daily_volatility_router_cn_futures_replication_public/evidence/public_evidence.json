@@ -1,0 +1,75 @@
+{
+  "version": "1.0-sanitized-rounded",
+  "evidence_status": "exploratory_cross_market_replication",
+  "claim_status": "not_a_trading_rule",
+  "sample": {
+    "data_start_month": "2016-01",
+    "data_end_month": "2026-06",
+    "products": 88,
+    "sectors": 13,
+    "evaluation_start_month": "2021-01",
+    "evaluation_end_month": "2026-06",
+    "evaluation_months": 66,
+    "mean_eligible_products": 65.9
+  },
+  "design": {
+    "momentum_formation_months": 11,
+    "momentum_skip_months": 1,
+    "reversal_formation_months": 1,
+    "tail_percent": 10,
+    "volatility_history_months": 60,
+    "switch_quartile": "Q4",
+    "switch_lag_months": 1,
+    "threshold_search_performed": false,
+    "universe_selection_performed": false
+  },
+  "gross_performance": [
+    {"strategy": "Momentum", "annual_return_pct": 13.25, "sharpe": 0.46, "maximum_drawdown_pct": -39.35},
+    {"strategy": "Reversal", "annual_return_pct": -2.89, "sharpe": -0.10, "maximum_drawdown_pct": -50.48},
+    {"strategy": "Static 50/50", "annual_return_pct": 5.18, "sharpe": 0.33, "maximum_drawdown_pct": -17.61},
+    {"strategy": "Primary router", "annual_return_pct": 13.69, "sharpe": 0.51, "maximum_drawdown_pct": -36.24},
+    {"strategy": "Equal-proxy router", "annual_return_pct": 7.77, "sharpe": 0.30, "maximum_drawdown_pct": -47.37}
+  ],
+  "conditional_returns_pct": {
+    "primary_proxy": [
+      {"state": "Q1", "months": 21, "momentum": 0.66, "reversal": -0.12},
+      {"state": "Q2", "months": 17, "momentum": -0.92, "reversal": 2.86},
+      {"state": "Q3", "months": 14, "momentum": 6.04, "reversal": -3.89},
+      {"state": "Q4", "months": 14, "momentum": -0.71, "reversal": -0.54}
+    ],
+    "equal_product_proxy": [
+      {"state": "Q1", "months": 12, "momentum": 5.20, "reversal": -1.97},
+      {"state": "Q2", "months": 15, "momentum": -1.07, "reversal": -1.05},
+      {"state": "Q3", "months": 19, "momentum": -1.14, "reversal": 0.29},
+      {"state": "Q4", "months": 20, "momentum": 2.40, "reversal": 0.90}
+    ]
+  },
+  "proxy_stability": {
+    "volatility_correlation": 0.83,
+    "quartile_state_agreement": 0.424,
+    "q4_jaccard_overlap": 0.545
+  },
+  "q4_influence": {
+    "q4_months": 14,
+    "reversal_win_months": 4,
+    "mean_reversal_minus_momentum_pct": 0.17,
+    "median_reversal_minus_momentum_pct": -2.68,
+    "largest_event_difference_pct": 34.28,
+    "mean_excluding_largest_event_pct": -2.45,
+    "router_increment_hac_t": 0.06
+  },
+  "cross_sectional_anatomy": [
+    {"state": "Q1", "mean_pairwise_correlation": 0.147, "dispersion_pct": 1.21, "directional_coherence": 0.300},
+    {"state": "Q2", "mean_pairwise_correlation": 0.191, "dispersion_pct": 1.33, "directional_coherence": 0.332},
+    {"state": "Q3", "mean_pairwise_correlation": 0.187, "dispersion_pct": 1.50, "directional_coherence": 0.326},
+    {"state": "Q4", "mean_pairwise_correlation": 0.254, "dispersion_pct": 1.71, "directional_coherence": 0.376}
+  ],
+  "robustness": {
+    "primary_q4_reversal_mean_positive": false,
+    "primary_q4_reversal_win_share_at_least_half": false,
+    "primary_router_increment_hac_t_at_least_one": false,
+    "equal_proxy_q4_reversal_exceeds_momentum": false,
+    "equal_proxy_router_exceeds_momentum": false,
+    "positive_increment_broad_across_time": false
+  }
+}

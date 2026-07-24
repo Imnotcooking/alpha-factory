@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import ast
-import os
 import sqlite3
 import sys
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +26,29 @@ from oqp.contracts import (  # noqa: E402
     write_candidate_from_research_db,
 )
 from oqp.research.factors import iter_factor_files  # noqa: E402
-from oqp.research import list_evidence_tickets, update_evidence_ticket_status  # noqa: E402
+from views.factor_library_view import (  # noqa: E402
+    FactorLibraryView,
+    load_factor_library_snapshot,
+)
+from views.sleeve_library_view import SleeveLibraryView  # noqa: E402
+from views.predictive_evidence_panel import (  # noqa: E402
+    load_predictive_evidence_snapshot,
+    render_predictive_evidence_panel,
+)
+from views.sleeve_evidence_panel import render_sleeve_evidence_panel  # noqa: E402
+from views.standalone_sleeve_test_panel import (  # noqa: E402
+    render_standalone_sleeve_test_panel,
+)
+from views.conditional_behaviour_panel import (  # noqa: E402
+    render_conditional_behaviour_panel,
+)
+from views.router_library_view import RouterLibraryView  # noqa: E402
+from views.strategy_composition_panel import (  # noqa: E402
+    render_strategy_composition_panel,
+)
+from views.optimization_workspace_panel import (  # noqa: E402
+    render_optimization_workspace_panel,
+)
 
 
 STAGE_ORDER = [
@@ -73,11 +95,15 @@ UNSPECIFIED_MARKET = "UNSPECIFIED"
 
 COPY = {
     "EN": {
-        "title": "Factor Review",
-        "subtitle": "A research review board for evidence, blockers, tickets, and candidate exports.",
+        "title": "Research Review",
+        "subtitle": "Review developed factors, validation evidence, promotion blockers, and completed backtest runs in one workspace.",
         "main_tab": "Review Board",
-        "drilldown_tab": "Factor Drilldown",
-        "tickets_tab": "Evidence Tickets",
+        "library_tab": "Factor Library",
+        "sleeve_tab": "Sleeve Library",
+        "router_tab": "Router Library",
+        "construction_tab": "Strategy Construction",
+        "optimization_tab": "Optimisation",
+        "comparison_tab": "Run Comparison",
         "stage": "Stage",
         "category": "Category",
         "market": "Market Vertical",
@@ -87,6 +113,8 @@ COPY = {
         "refresh": "Refresh evidence",
         "summary": "Review Summary",
         "funnel": "Lifecycle Funnel",
+        "component_mix": "Research Components",
+        "count": "Count",
         "table": "Review Board",
         "drilldown": "Factor Drilldown",
         "factors": "Factors",
@@ -99,14 +127,41 @@ COPY = {
         "runs": "Runs",
         "best_sharpe": "Best Sharpe",
         "best_ic": "Best Holdout IC",
+        "quality_guide": "How to read IC and Sharpe labels",
+        "quality_labels": {
+            "not_available": "Not available",
+            "negative": "Negative",
+            "weak": "Weak",
+            "marginal": "Marginal",
+            "modest": "Modest",
+            "good": "Good",
+            "strong": "Strong",
+            "high_audit": "High - audit",
+            "extreme_audit": "Extreme - audit",
+        },
+        "quality_help": {
+            "not_available": "No finite value is available for this metric.",
+            "negative": "The estimate is non-positive and does not show positive predictive or risk-adjusted evidence.",
+            "weak": "The estimate is positive but too small to treat as meaningful without stronger stability evidence.",
+            "marginal": "The estimate is near a usable range but remains fragile after costs and sampling error.",
+            "modest": "The IC is useful enough to investigate, but not strong enough to stand alone.",
+            "good": "A credible research range if it is genuinely out of sample, stable, and measured after costs where applicable.",
+            "strong": "Strong evidence, but verify stability across time, assets, and parameter choices.",
+            "high_audit": "Unusually high. Audit annualization, costs, trial selection, overlap, and parameter stability before trusting it.",
+            "extreme_audit": "Extreme value. Treat as an integrity warning and audit look-ahead bias, target leakage, curve fitting, omitted costs, and return construction.",
+        },
+        "quality_guide_text": """
+**Holdout IC** (assuming the factor sign has already been aligned): `<= 0` negative; `(0, 0.01)` weak; `[0.01, 0.03)` modest; `[0.03, 0.05)` good; `[0.05, 0.10)` strong; `>= 0.10` integrity audit.
+
+**Sharpe** (only meaningful on after-cost, untouched out-of-sample returns): `<= 0` negative; `(0, 0.5)` weak; `[0.5, 1.0)` marginal; `[1.0, 2.0)` good; `[2.0, 3.0)` strong; `[3.0, 5.0)` unusually high and requires audit; `>= 5.0` extreme integrity warning.
+
+These are **diagnostic heuristics, not promotion gates**. Compare IC only across the same definition, forecast horizon, universe, and sampling method. Check Sharpe annualization, serial correlation, overlapping returns, turnover, and execution costs. This page shows the **best value across recorded runs**, so trial count and the full run distribution matter more than the maximum alone. A very high value does not prove leakage, but it should trigger checks for look-ahead bias, target leakage, curve fitting, cherry-picking, and omitted costs.
+""",
         "raw_p": "Raw p",
         "adjusted_p": "Bonf. p",
+        "adjusted_p_help": "Bonferroni-adjusted p-value: min(raw p x number of trials, 1). It controls false positives from testing many variants. Values <= 0.05 survive the correction; N/A means usable p-value or trial-count evidence has not been recorded.",
         "fdr_q": "FDR q",
         "trial_count": "Trials m",
-        "evidence_tickets": "Evidence Tickets",
-        "ready_tickets": "Ready Tickets",
-        "reviewed_tickets": "Reviewed Tickets",
-        "latest_ticket_status": "Latest Ticket",
         "best_return": "Best Ann. Return",
         "max_dd": "Best Run Max DD",
         "trades": "Trades",
@@ -115,11 +170,48 @@ COPY = {
         "next": "Suggested Next Step",
         "evidence": "Evidence Checklist",
         "runs_title": "Run History",
+        "runs_empty": "No backtest runs yet.",
+        "runs_desc": "Recorded run evidence. Columns with no usable values for the selected factor are omitted.",
+        "run_provenance_title": "Data and Execution Provenance",
+        "run_provenance_desc": "Dataset, vendor, frequency, and execution assumptions captured when each run was created.",
+        "run_provenance_missing": "These {count} historical runs predate provenance capture. Re-run the factor with the current backtest CLI to record dataset, frequency, vendor, universe, and execution assumptions.",
+        "run_not_recorded": "Not recorded",
+        "run_record_complete": "Complete",
+        "run_record_partial": "Partial",
+        "run_record_legacy": "Legacy",
+        "assets_suffix": "assets",
+        "traded_suffix": "traded",
+        "run_columns": {
+            "run_id": "Run",
+            "round_number": "Round",
+            "timestamp": "Time",
+            "market": "Market",
+            "universe": "Universe",
+            "validation_ic": "Validation IC",
+            "holdout_ic": "Holdout IC",
+            "crisis_ic": "Crisis IC",
+            "annualized_return": "Ann. Return",
+            "sharpe_ratio": "Sharpe",
+            "max_drawdown": "Max Drawdown",
+            "turnover_rate": "Turnover",
+            "total_trades": "Trades",
+            "stat_adjusted_p_value": "Bonf. p",
+            "stat_significance": "Statistical Result",
+            "failure_code": "Diagnostic",
+            "record_status": "Record",
+            "dataset_id": "Dataset",
+            "universe_id": "Universe ID",
+            "data_frequency": "Frequency",
+            "data_vendor": "Vendor",
+            "execution_assumption": "Execution Assumption",
+        },
         "gate_title": "Promotion Gates",
         "artifact_title": "Artifacts",
         "exported_title": "Exported Candidate Snapshot Status",
         "exported_empty": "No research candidate snapshot has been exported for this factor/market row yet.",
         "exported_issues": "Candidate artifact issues",
+        "candidate_handoff": "Paper-Trading Handoff",
+        "candidate_handoff_desc": "Optional promotion control. Export a reviewed run only when it is ready to enter the shared candidate contract.",
         "recent_exports_title": "Recent Candidate Snapshots",
         "recent_exports_desc": "Latest research snapshots for the currently visible factors and market verticals. Only Paper Queue Eligible rows can feed paper-trading proposals.",
         "recent_exports_empty": "No exported candidate snapshots match the current board filters.",
@@ -141,74 +233,25 @@ COPY = {
         "metadata_exists": "Database metadata exists",
         "rationale_exists": "Economic rationale exists",
         "has_backtest": "Backtest run exists",
+        "has_predictive_evidence": "Phase 2 predictive evidence exists",
         "has_returns": "Return log exists",
         "has_trades": "Trade ledger exists",
         "has_importance": "Feature importance exists",
         "has_tick_ml": "Tick ML study exists",
         "has_market_metadata": "Suitability metadata exists",
         "market_tested": "This market was tested",
-        "criteria": "Gate definitions and scoring",
         "no_blockers": "No automatic blockers detected.",
-        "tickets_title": "Evidence Ticket Inbox",
-        "tickets_desc": "Review inbox for evidence saved by discovery and validation pages before promotion review.",
-        "tickets_empty": "No evidence tickets have been saved yet. Start from Intraday Event Study and click Save Evidence Ticket after a hypothesis produces events.",
-        "tickets_total": "Tickets",
-        "tickets_ready": "Ready for Review",
-        "tickets_promote": "Promote Decisions",
-        "tickets_open": "Open",
-        "ticket_source": "Source Page",
-        "ticket_type": "Evidence Type",
-        "ticket_status": "Status",
-        "ticket_decision": "Decision",
-        "ticket_family": "Research Family",
-        "ticket_metric": "Metric",
-        "ticket_confidence": "Confidence",
-        "ticket_updated": "Updated",
-        "ticket_select": "Inspect ticket",
-        "ticket_thesis": "Thesis",
-        "ticket_metrics": "Metrics",
-        "ticket_context": "Context",
-        "ticket_artifacts": "Linked Artifacts",
-        "ticket_metadata": "Metadata",
-        "ticket_review_title": "Review Action",
-        "ticket_review_note": "Reviewer note",
-        "ticket_mark_reviewed": "Mark Reviewed",
-        "ticket_needs_more_evidence": "Needs More Evidence",
-        "ticket_archive": "Archive",
-        "ticket_action_success": "Updated ticket {ticket_id} to {status}.",
-        "ticket_action_error": "Could not update ticket",
-        "criteria_text": """
-**Avg Review Score:** the mean `Review Score` of the currently visible factors. This is a research hygiene gauge, not a trading performance metric.
-
-**Review Score:** `evidence points - blocker penalties`, clipped to 0-100. Evidence points: source +8, DB metadata +7, rationale +7, first test +10, repeat/calibration +10, return log +13, trades +8, positive holdout IC +10, holdout IC >= 1% +7, Sharpe > 0 and <= 10 +10, positive annual return +5, drawdown better than -35% +5, survives multiple-testing penalty +8.
-
-**Automatic Blockers:** machine-detected reasons a factor should not advance yet. Examples: no test evidence, missing return log, no trades, non-positive holdout IC, non-positive Sharpe, unrealistic Sharpe, deep drawdown, weak p-value after multiple-testing correction, latest diagnostic failure codes, or index/proxy data that still needs tradable-contract validation. Ordinary blockers subtract 7 points; serious blockers subtract 18 points.
-
-**Research Penalty:** `Raw p` is the holdout alpha p-value. `Trials m` is the count of distinct parameter/data signatures tried inside the same research family. `Bonf. p = min(raw p * m, 1)`. A factor should survive the Bonferroni p-value before being trusted as a paper-trading candidate.
-
-**Idea:** a factor file or metadata row exists, but no test evidence yet.
-
-**Hypothesis Tested:** at least one backtest or tick ML study exists.
-
-**Calibrated:** repeated rounds exist, or tick ML/calibration evidence exists.
-
-**Backtested:** executable returns were saved and the strategy produced trades.
-
-**Validation Candidate:** first-pass out-of-sample evidence is acceptable: return log exists, trades exist, holdout IC > 0, Sharpe > 0, max drawdown better than -35%, and no serious diagnostic blocker. The summary card counts how many visible factors currently pass this softer validation gate.
-
-**Paper-Trading Candidate:** stronger deployment-simulation gate: holdout IC >= 1%, Sharpe between 1 and 10, annual return > 0, max drawdown better than -25%, at least 10 trades, no serious blockers, and if statistical evidence exists, Bonferroni-adjusted p <= 0.05. This is the bucket for simulated paper trading, not live deployment.
-
-**Market Vertical:** promotion is now evaluated per tested or declared market. A Chinese futures candidate does not automatically become a US equity candidate. Untested cross-market rows are marked `Translation Required` until they have their own vertical backtest evidence.
-
-**Retired / Repair:** evidence exists, but diagnostics or repeated weak OOS metrics say the factor needs redesign.
-""",
     },
     "ZH": {
-        "title": "因子审查",
-        "subtitle": "集中审查因子证据、阻碍项、证据票据与候选快照。",
+        "title": "研究评审",
+        "subtitle": "在同一工作区评审已开发因子、验证证据、晋级阻碍项与已完成回测。",
         "main_tab": "审查看板",
-        "drilldown_tab": "因子明细",
-        "tickets_tab": "证据票据",
+        "library_tab": "因子库",
+        "sleeve_tab": "策略腿库",
+        "router_tab": "路由器库",
+        "construction_tab": "策略构建",
+        "optimization_tab": "优化",
+        "comparison_tab": "运行对比",
         "stage": "阶段",
         "category": "类别",
         "market": "市场垂直",
@@ -218,6 +261,8 @@ COPY = {
         "refresh": "刷新证据",
         "summary": "审查总览",
         "funnel": "生命周期漏斗",
+        "component_mix": "研究组件分布",
+        "count": "数量",
         "table": "审查看板",
         "drilldown": "因子明细",
         "factors": "因子数",
@@ -230,14 +275,41 @@ COPY = {
         "runs": "回测次数",
         "best_sharpe": "最佳夏普",
         "best_ic": "最佳样本外 IC",
+        "quality_guide": "如何解读 IC 与夏普标签",
+        "quality_labels": {
+            "not_available": "暂无数据",
+            "negative": "负值",
+            "weak": "偏弱",
+            "marginal": "临界",
+            "modest": "中等",
+            "good": "良好",
+            "strong": "较强",
+            "high_audit": "偏高 - 需审计",
+            "extreme_audit": "极高 - 需审计",
+        },
+        "quality_help": {
+            "not_available": "该指标目前没有有限数值。",
+            "negative": "该估计值非正，尚未显示正向预测能力或风险调整后证据。",
+            "weak": "该估计值虽为正，但在没有更强稳定性证据前仍不足以视为有效。",
+            "marginal": "该估计值接近可用区间，但考虑成本和抽样误差后仍较脆弱。",
+            "modest": "IC 值值得继续研究，但不足以单独支撑晋级。",
+            "good": "如果确为样本外、具有稳定性，并在适用时计入成本，则属于可信研究区间。",
+            "strong": "证据较强，但仍需检查跨时间、跨资产和参数变化的稳定性。",
+            "high_audit": "数值异常偏高。在采信前应审计年化方式、交易成本、试验筛选、收益重叠和参数稳定性。",
+            "extreme_audit": "数值极高。应视为完整性警告，检查前视偏差、目标泄漏、曲线拟合、遗漏成本和收益构造。",
+        },
+        "quality_guide_text": """
+**样本外 IC**（假设因子方向已经正确对齐）：`<= 0` 为负；`(0, 0.01)` 偏弱；`[0.01, 0.03)` 中等；`[0.03, 0.05)` 良好；`[0.05, 0.10)` 较强；`>= 0.10` 触发完整性审计。
+
+**夏普比率**（只有在计入成本且未使用过的样本外收益上才有充分意义）：`<= 0` 为负；`(0, 0.5)` 偏弱；`[0.5, 1.0)` 临界；`[1.0, 2.0)` 良好；`[2.0, 3.0)` 较强；`[3.0, 5.0)` 异常偏高并需要审计；`>= 5.0` 属于极高完整性警告。
+
+这些只是**诊断启发式标签，不是晋级门槛**。IC 只能在相同定义、预测周期、资产池和采样方法下比较。夏普需要检查年化方式、序列相关、重叠收益、换手率和执行成本。本页显示的是**所有已记录运行中的最佳值**，因此试验次数和完整运行分布比单个最大值更重要。极高数值并不自动证明存在泄漏，但应触发对前视偏差、目标泄漏、曲线拟合、结果挑选和遗漏成本的检查。
+""",
         "raw_p": "原始 p 值",
         "adjusted_p": "Bonf. p",
+        "adjusted_p_help": "Bonferroni 修正后的 p 值：min(原始 p 值 x 试验次数, 1)。它用于控制尝试多个版本带来的假阳性。数值 <= 0.05 表示通过修正；N/A 表示尚未记录可用的 p 值或试验次数证据。",
         "fdr_q": "FDR q",
         "trial_count": "试验数 m",
-        "evidence_tickets": "证据票据",
-        "ready_tickets": "待审票据",
-        "reviewed_tickets": "已审票据",
-        "latest_ticket_status": "最新票据",
         "best_return": "最佳年化收益",
         "max_dd": "最佳回撤",
         "trades": "交易数",
@@ -246,11 +318,48 @@ COPY = {
         "next": "建议下一步",
         "evidence": "证据清单",
         "runs_title": "运行历史",
+        "runs_empty": "暂无回测运行。",
+        "runs_desc": "已记录的运行证据。当前因子完全没有可用数值的列会自动隐藏。",
+        "run_provenance_title": "数据与执行来源",
+        "run_provenance_desc": "每次运行创建时记录的数据集、供应商、频率与执行假设。",
+        "run_provenance_missing": "这 {count} 次历史运行早于来源信息采集。请使用当前回测 CLI 重新运行，以记录数据集、频率、供应商、资产池和执行假设。",
+        "run_not_recorded": "未记录",
+        "run_record_complete": "完整",
+        "run_record_partial": "部分",
+        "run_record_legacy": "历史记录",
+        "assets_suffix": "个资产",
+        "traded_suffix": "个有交易",
+        "run_columns": {
+            "run_id": "运行",
+            "round_number": "轮次",
+            "timestamp": "时间",
+            "market": "市场",
+            "universe": "资产池",
+            "validation_ic": "验证 IC",
+            "holdout_ic": "样本外 IC",
+            "crisis_ic": "危机期 IC",
+            "annualized_return": "年化收益",
+            "sharpe_ratio": "夏普",
+            "max_drawdown": "最大回撤",
+            "turnover_rate": "换手率",
+            "total_trades": "交易数",
+            "stat_adjusted_p_value": "Bonf. p",
+            "stat_significance": "统计结果",
+            "failure_code": "诊断",
+            "record_status": "记录状态",
+            "dataset_id": "数据集",
+            "universe_id": "资产池 ID",
+            "data_frequency": "频率",
+            "data_vendor": "供应商",
+            "execution_assumption": "执行假设",
+        },
         "gate_title": "晋级门槛",
         "artifact_title": "产物证据",
         "exported_title": "已导出的候选快照状态",
         "exported_empty": "该因子/市场行还没有导出研究候选快照。",
         "exported_issues": "候选产物问题",
+        "candidate_handoff": "模拟交易交接",
+        "candidate_handoff_desc": "可选晋级操作。只有在研究运行完成审查并准备进入共享候选合约时才需要导出。",
         "recent_exports_title": "最近候选快照",
         "recent_exports_desc": "当前筛选范围内因子和市场垂直对应的最新研究快照。只有 Paper Queue Eligible 的行才可以进入模拟盘提案流程。",
         "recent_exports_empty": "当前看板筛选范围内没有匹配的候选快照。",
@@ -272,67 +381,14 @@ COPY = {
         "metadata_exists": "数据库元数据存在",
         "rationale_exists": "经济逻辑存在",
         "has_backtest": "已有回测运行",
+        "has_predictive_evidence": "已有第二阶段预测证据",
         "has_returns": "已有收益日志",
         "has_trades": "已有交易明细",
         "has_importance": "已有特征重要性",
         "has_tick_ml": "已有 Tick ML 研究",
         "has_market_metadata": "已有适用市场元数据",
         "market_tested": "该市场已测试",
-        "criteria": "门槛定义与打分逻辑",
         "no_blockers": "未发现自动 blocker。",
-        "tickets_title": "证据票据收件箱",
-        "tickets_desc": "集中审阅由发现和验证页面保存的证据票据，在因子晋级前完成状态确认。",
-        "tickets_empty": "还没有保存证据票据。可以先到日内事件研究，在假设产生事件后点击保存证据票据。",
-        "tickets_total": "票据数",
-        "tickets_ready": "待审阅",
-        "tickets_promote": "晋级决策",
-        "tickets_open": "打开中",
-        "ticket_source": "来源页面",
-        "ticket_type": "证据类型",
-        "ticket_status": "状态",
-        "ticket_decision": "决策",
-        "ticket_family": "研究家族",
-        "ticket_metric": "指标",
-        "ticket_confidence": "置信度",
-        "ticket_updated": "更新时间",
-        "ticket_select": "查看票据",
-        "ticket_thesis": "研究假设",
-        "ticket_metrics": "指标",
-        "ticket_context": "上下文",
-        "ticket_artifacts": "关联产物",
-        "ticket_metadata": "元数据",
-        "ticket_review_title": "审阅操作",
-        "ticket_review_note": "审阅备注",
-        "ticket_mark_reviewed": "标记已审阅",
-        "ticket_needs_more_evidence": "需要更多证据",
-        "ticket_archive": "归档",
-        "ticket_action_success": "已将票据 {ticket_id} 更新为 {status}。",
-        "ticket_action_error": "无法更新票据",
-        "criteria_text": """
-**平均审查分数：** 当前可见因子的 `审查分数` 均值。它衡量研究池证据完整度/研究质量，不是交易收益指标。
-
-**审查分数：** `证据加分 - blocker 扣分`，最终限制在 0-100。证据加分：源码 +8、数据库元数据 +7、经济逻辑 +7、首次测试 +10、重复测试/校准 +10、收益日志 +13、有交易 +8、holdout IC 为正 +10、holdout IC >= 1% +7、Sharpe > 0 且 <= 10 +10、年化收益为正 +5、回撤好于 -35% +5、通过多重检验惩罚 +8。
-
-**自动 blocker：** 机器识别出的暂时不能晋级原因，例如没有测试证据、没有收益日志、没有交易、样本外 IC 非正、Sharpe 非正、Sharpe 不现实、回撤过深、多重检验修正后 p 值太弱、最近诊断失败，或当前回测仍然基于指数/代理数据、尚未用可交易合约验证。普通 blocker 扣 7 分；严重 blocker 扣 18 分。
-
-**研究惩罚：** `原始 p 值` 是 holdout 上的 alpha 证据；`试验数 m` 是同一研究家族里尝试过的不同参数/数据签名数量；`Bonf. p = min(原始 p 值 * m, 1)`。如果一个因子想进入模拟盘候选，最好先通过 Bonferroni 修正后的 p <= 0.05。
-
-**Idea / 想法：** 有因子源码或数据库元数据，但还没有测试证据。
-
-**Hypothesis Tested / 已验证假设：** 至少有一次回测或 tick ML 研究。
-
-**Calibrated / 已校准：** 有多轮实验，或存在 tick ML / 参数校准证据。
-
-**Backtested / 已回测：** 已保存可执行收益曲线，并且策略产生了交易。
-
-**Validation Candidate / 验证候选：** 初步样本外证据可接受：有收益日志、有交易、holdout IC > 0、Sharpe > 0、最大回撤好于 -35%，且没有严重诊断 blocker。顶部指标卡统计当前可见因子里有多少通过了这个较宽松的验证门槛。
-
-**Paper-Trading Candidate / 模拟盘候选：** 更严格的模拟部署门槛：holdout IC >= 1%、Sharpe 在 1 到 10 之间、年化收益 > 0、最大回撤好于 -25%、至少 10 笔交易、没有严重 blocker；如果已有统计证据，则 Bonferroni 修正 p <= 0.05。这个类别适合进入模拟盘观察，不等于实盘上线。
-
-**市场垂直：** 现在按已测试或已声明的市场分别评估晋级状态。中国期货上的候选因子不会自动变成美股候选。跨市场但尚未验证的行会标记为 `Translation Required`，直到该市场有自己的垂直回测证据。
-
-**Retired / Repair / 修复或退役：** 已有证据，但诊断或多轮弱样本外表现说明该因子需要重构。
-""",
     },
 }
 
@@ -361,6 +417,13 @@ class FactorEvidence:
     feature_importance_exists: bool
     return_logs: int
     trade_logs: int
+    predictive_evidence: dict | None
+
+
+@dataclass(frozen=True)
+class MetricQuality:
+    label_key: str
+    color: str
 
 
 class FactorPromotionView:
@@ -372,7 +435,12 @@ class FactorPromotionView:
         self.factors_dir = self.base_dir / "factors"
         self.logs_dir = Path(LOGS_DIR)
 
-    def render(self, lang: str = "EN", theme_mode: str = "LIGHT") -> None:
+    def render(
+        self,
+        lang: str = "EN",
+        theme_mode: str = "LIGHT",
+        comparison_view=None,
+    ) -> None:
         copy = COPY.get(lang, COPY["EN"])
         tpl = get_plotly_template(theme_mode)
 
@@ -397,19 +465,58 @@ class FactorPromotionView:
             st.info("No factors match the current filters.")
             return
 
-        board_tab, drilldown_tab, tickets_tab = st.tabs(
-            [copy["main_tab"], copy["drilldown_tab"], copy["tickets_tab"]]
-        )
+        tab_labels = [
+            copy["main_tab"],
+            copy["library_tab"],
+            copy["sleeve_tab"],
+            copy["router_tab"],
+            copy["construction_tab"],
+            copy["optimization_tab"],
+        ]
+        if comparison_view is not None:
+            tab_labels.append(copy["comparison_tab"])
+        tabs = st.tabs(tab_labels)
+        (
+            board_tab,
+            library_tab,
+            sleeve_tab,
+            router_tab,
+            construction_tab,
+            optimization_tab,
+        ) = tabs[:6]
         with board_tab:
-            self._render_summary(filtered, tpl, copy)
-            st.markdown("---")
-            self._render_recent_candidate_exports(filtered, copy)
+            self._render_summary(filtered, tpl, copy, theme_mode)
             st.markdown("---")
             self._render_board(filtered, copy)
-        with drilldown_tab:
-            self._render_drilldown(filtered, detail, tpl, copy)
-        with tickets_tab:
-            self._render_evidence_ticket_inbox(copy)
+            st.markdown("---")
+            self._render_recent_candidate_exports(filtered, copy)
+        with library_tab:
+            FactorLibraryView(self.base_dir).render(
+                lang=lang,
+                theme_mode=theme_mode,
+                drilldown_renderer=lambda: self._render_drilldown(
+                    filtered,
+                    detail,
+                    tpl,
+                    copy,
+                    lang,
+                ),
+            )
+        with sleeve_tab:
+            SleeveLibraryView(self.base_dir).render(lang=lang)
+        with router_tab:
+            RouterLibraryView(self.base_dir).render(lang=lang)
+        with construction_tab:
+            render_strategy_composition_panel(self.logs_dir, lang=lang)
+        with optimization_tab:
+            render_optimization_workspace_panel(self.logs_dir, lang=lang)
+        if comparison_view is not None:
+            with tabs[6]:
+                comparison_view.render(
+                    lang=lang,
+                    theme_mode=theme_mode,
+                    embedded=True,
+                )
 
     def _render_filters(self, board: pd.DataFrame, copy: dict) -> pd.DataFrame:
         cols = st.columns(3)
@@ -429,7 +536,13 @@ class FactorPromotionView:
             filtered = filtered[filtered["market_vertical"] == selected_market]
         return filtered
 
-    def _render_summary(self, board: pd.DataFrame, tpl: str, copy: dict) -> None:
+    def _render_summary(
+        self,
+        board: pd.DataFrame,
+        tpl: str,
+        copy: dict,
+        theme_mode: str,
+    ) -> None:
         st.markdown(f"### {copy['summary']}")
         cards = st.columns(5)
         cards[0].metric(copy["factors"], f"{len(board):,}")
@@ -444,7 +557,7 @@ class FactorPromotionView:
             .agg(count=("factor_id", "count"))
             .sort_values("stage_order")
         )
-        fig = px.bar(
+        funnel = px.bar(
             counts,
             x="stage",
             y="count",
@@ -453,26 +566,37 @@ class FactorPromotionView:
             template=tpl,
             title=copy["funnel"],
         )
-        fig.update_layout(height=330, showlegend=False, margin=dict(l=10, r=10, t=50, b=20))
-        st.plotly_chart(fig, width="stretch")
-        st.markdown(f"#### {copy['criteria']}")
-        st.markdown(copy["criteria_text"])
+        funnel.update_layout(
+            height=350,
+            showlegend=False,
+            margin=dict(l=10, r=10, t=50, b=20),
+        )
+        chart_cols = st.columns(2)
+        with chart_cols[0]:
+            st.plotly_chart(funnel, width="stretch")
+        with chart_cols[1]:
+            snapshot = load_factor_library_snapshot(str(self.base_dir))
+            FactorLibraryView._render_component_mix(
+                snapshot.component_summary,
+                theme_mode,
+                copy,
+            )
 
     def _render_board(self, board: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['table']}")
+        board = board[
+            board["factor_id"].astype(str).str.startswith("fac_")
+        ].copy()
         show_cols = [
             "stage",
+            "factor_id",
+            "last_run_at",
             "promotion_score",
+            "category",
             "market_vertical",
             "native_market",
             "vertical_status",
-            "factor_id",
             "name",
-            "category",
-            "evidence_ticket_count",
-            "ready_ticket_count",
-            "reviewed_ticket_count",
-            "latest_ticket_status",
             "run_count",
             "best_holdout_ic",
             "best_raw_p_value",
@@ -483,7 +607,6 @@ class FactorPromotionView:
             "best_annualized_return",
             "best_max_drawdown",
             "total_trades",
-            "last_run_at",
             "blockers",
             "suggested_next_step",
         ]
@@ -497,10 +620,6 @@ class FactorPromotionView:
                 "factor_id": "factor_id",
                 "name": copy["factor"],
                 "category": copy["category"],
-                "evidence_ticket_count": copy["evidence_tickets"],
-                "ready_ticket_count": copy["ready_tickets"],
-                "reviewed_ticket_count": copy["reviewed_tickets"],
-                "latest_ticket_status": copy["latest_ticket_status"],
                 "run_count": copy["runs"],
                 "best_holdout_ic": copy["best_ic"],
                 "best_raw_p_value": copy["raw_p"],
@@ -516,12 +635,14 @@ class FactorPromotionView:
                 "suggested_next_step": copy["next"],
             }
         )
+        display[copy["last_run"]] = (
+            pd.to_datetime(display[copy["last_run"]], errors="coerce")
+            .dt.strftime("%Y-%m-%d %H:%M")
+            .fillna("")
+        )
         styled = display.style.format(
             {
                 copy["score"]: "{:.0f}",
-                copy["evidence_tickets"]: "{:.0f}",
-                copy["ready_tickets"]: "{:.0f}",
-                copy["reviewed_tickets"]: "{:.0f}",
                 copy["best_ic"]: "{:.4f}",
                 copy["raw_p"]: "{:.4f}",
                 copy["adjusted_p"]: "{:.4f}",
@@ -558,198 +679,14 @@ class FactorPromotionView:
                 )
                 st.dataframe(issue_df, width="stretch", hide_index=True)
 
-    def _render_evidence_ticket_inbox(self, copy: dict) -> None:
-        st.markdown(f"### {copy['tickets_title']}")
-        st.caption(copy["tickets_desc"])
-        flash = st.session_state.pop("evidence_ticket_flash", "")
-        if flash:
-            st.success(flash)
-
-        tickets = self._load_evidence_tickets()
-        if tickets.empty:
-            st.info(copy["tickets_empty"])
-            return
-
-        tickets = self._prepare_ticket_frame(tickets)
-        summary_cols = st.columns(4)
-        summary_cols[0].metric(copy["tickets_total"], f"{len(tickets):,}")
-        summary_cols[1].metric(copy["tickets_ready"], f"{(tickets['status'] == 'ready_for_review').sum():,}")
-        summary_cols[2].metric(copy["tickets_promote"], f"{(tickets['decision'] == 'promote_to_validation').sum():,}")
-        summary_cols[3].metric(copy["tickets_open"], f"{(tickets['status'] == 'open').sum():,}")
-
-        filters = st.columns(4)
-        all_label = copy["all"]
-        selected_status = filters[0].selectbox(
-            copy["ticket_status"],
-            [all_label, *sorted(tickets["status"].dropna().astype(str).unique())],
-            key="evidence-ticket-status-filter",
-        )
-        selected_source = filters[1].selectbox(
-            copy["ticket_source"],
-            [all_label, *sorted(tickets["source_page"].dropna().astype(str).unique())],
-            key="evidence-ticket-source-filter",
-        )
-        selected_decision = filters[2].selectbox(
-            copy["ticket_decision"],
-            [all_label, *sorted(tickets["decision"].dropna().astype(str).unique())],
-            key="evidence-ticket-decision-filter",
-        )
-        selected_family = filters[3].selectbox(
-            copy["ticket_family"],
-            [all_label, *sorted(tickets["research_family"].dropna().astype(str).unique())],
-            key="evidence-ticket-family-filter",
-        )
-
-        visible = tickets.copy()
-        if selected_status != all_label:
-            visible = visible[visible["status"] == selected_status]
-        if selected_source != all_label:
-            visible = visible[visible["source_page"] == selected_source]
-        if selected_decision != all_label:
-            visible = visible[visible["decision"] == selected_decision]
-        if selected_family != all_label:
-            visible = visible[visible["research_family"] == selected_family]
-
-        display_cols = [
-            "status",
-            "decision",
-            "source_page",
-            "evidence_type",
-            "stage",
-            "factor_id",
-            "research_family",
-            "metric_name",
-            "metric_value",
-            "confidence_score",
-            "updated_at",
-        ]
-        display = visible[[col for col in display_cols if col in visible.columns]].rename(
-            columns={
-                "status": copy["ticket_status"],
-                "decision": copy["ticket_decision"],
-                "source_page": copy["ticket_source"],
-                "evidence_type": copy["ticket_type"],
-                "stage": copy["stage"],
-                "factor_id": "factor_id",
-                "research_family": "research_family",
-                "metric_name": copy["ticket_metric"],
-                "metric_value": "value",
-                "confidence_score": copy["ticket_confidence"],
-                "updated_at": copy["ticket_updated"],
-            }
-        )
-        st.dataframe(
-            display.style.format(
-                {
-                    "value": "{:.4f}",
-                    copy["ticket_confidence"]: "{:.2f}",
-                },
-                na_rep="",
-            ),
-            width="stretch",
-            hide_index=True,
-            height=320,
-        )
-        if visible.empty:
-            return
-
-        labels = [
-            f"{row.ticket_id} | {row.source_page} | {row.decision}"
-            for row in visible.itertuples(index=False)
-        ]
-        selected = st.selectbox(copy["ticket_select"], labels)
-        ticket_id = selected.split(" | ", 1)[0]
-        ticket = visible[visible["ticket_id"] == ticket_id].iloc[0]
-
-        st.markdown(f"#### {ticket['title']}")
-        st.caption(
-            f"{copy['ticket_status']}: `{ticket['status']}` | "
-            f"{copy['ticket_decision']}: `{ticket['decision']}` | "
-            f"{copy['ticket_source']}: `{ticket['source_page']}`"
-        )
-        self._render_ticket_review_actions(copy, ticket)
-        with st.expander(copy["ticket_thesis"], expanded=True):
-            st.write(ticket.get("thesis") or "")
-        with st.expander(copy["ticket_metrics"], expanded=False):
-            st.json(ticket.get("metrics") or {}, expanded=True)
-        with st.expander(copy["ticket_context"], expanded=False):
-            st.json(ticket.get("context") or {}, expanded=True)
-        with st.expander(copy["ticket_artifacts"], expanded=False):
-            artifacts = ticket.get("artifacts") or []
-            if artifacts:
-                st.dataframe(pd.DataFrame(artifacts), width="stretch", hide_index=True)
-            else:
-                st.write([])
-        with st.expander(copy["ticket_metadata"], expanded=False):
-            st.json(ticket.get("metadata") or {}, expanded=True)
-
-    def _render_ticket_review_actions(self, copy: dict, ticket: pd.Series) -> None:
-        ticket_id = str(ticket.get("ticket_id") or "")
-        current_status = str(ticket.get("status") or "")
-        st.markdown(f"#### {copy['ticket_review_title']}")
-        note = st.text_area(
-            copy["ticket_review_note"],
-            key=f"evidence-ticket-review-note-{ticket_id}",
-            height=84,
-        )
-        cols = st.columns(3)
-        actions = [
-            (
-                cols[0],
-                copy["ticket_mark_reviewed"],
-                "reviewed",
-                current_status not in {"ready_for_review", "needs_more_evidence"},
-            ),
-            (
-                cols[1],
-                copy["ticket_needs_more_evidence"],
-                "needs_more_evidence",
-                current_status not in {"open", "ready_for_review"},
-            ),
-            (
-                cols[2],
-                copy["ticket_archive"],
-                "archived",
-                current_status not in {"open", "ready_for_review", "needs_more_evidence", "reviewed"},
-            ),
-        ]
-        for col, label, next_status, disabled in actions:
-            if col.button(
-                label,
-                key=f"evidence-ticket-action-{next_status}-{ticket_id}",
-                width="stretch",
-                disabled=disabled,
-            ):
-                self._apply_ticket_review_action(copy, ticket_id, next_status, note)
-
-    def _apply_ticket_review_action(
+    def _render_drilldown(
         self,
+        board: pd.DataFrame,
+        detail: dict[str, FactorEvidence],
+        tpl: str,
         copy: dict,
-        ticket_id: str,
-        status: str,
-        reviewer_note: str,
+        lang: str,
     ) -> None:
-        try:
-            updated = update_evidence_ticket_status(
-                self.db_path,
-                ticket_id,
-                status=status,
-                reviewer_note=reviewer_note,
-                metadata_patch={"review_source_page": "08_Factor_Review"},
-                reviewer="factor_promotion_pipeline",
-            )
-        except Exception as exc:
-            st.error(f"{copy['ticket_action_error']}: {exc}")
-            return
-
-        st.session_state["evidence_ticket_flash"] = copy["ticket_action_success"].format(
-            ticket_id=ticket_id,
-            status=updated.get("status", status),
-        )
-        st.cache_data.clear()
-        st.rerun()
-
-    def _render_drilldown(self, board: pd.DataFrame, detail: dict[str, FactorEvidence], tpl: str, copy: dict) -> None:
         st.markdown(f"### {copy['drilldown']}")
         labels = [
             f"{row.factor_id} | {row.market_vertical} | {row.stage} | Score {row.promotion_score:.0f}"
@@ -761,13 +698,61 @@ class FactorPromotionView:
         row = board[board["evidence_key"] == evidence_key].iloc[0]
         evidence = detail[evidence_key]
 
-        cols = st.columns(6)
-        cols[0].metric(copy["stage"], row["stage"])
-        cols[1].metric(copy["score"], f"{row['promotion_score']:.0f}/100")
-        cols[2].metric(copy["best_sharpe"], self._fmt(row["best_sharpe"], "{:.2f}"))
-        cols[3].metric(copy["best_ic"], self._fmt(row["best_holdout_ic"], "{:.4f}"))
-        cols[4].metric(copy["adjusted_p"], self._fmt(row["best_adjusted_p_value"], "{:.4f}"))
-        cols[5].metric(copy["trades"], f"{int(row['total_trades']):,}")
+        primary_cols = st.columns(3)
+        with primary_cols[0]:
+            stage = str(row["stage"])
+            stage_color = STAGE_COLORS.get(stage, "#64748b")
+            st.markdown(
+                f"""
+                <div style="min-height: 4.7rem; padding-top: 0.1rem;">
+                    <div style="font-size: 0.875rem; line-height: 1.2; margin-bottom: 0.55rem;">
+                        {escape(copy["stage"])}
+                    </div>
+                    <div title="{escape(stage)}" style="
+                        display: inline-flex;
+                        max-width: 100%;
+                        padding: 0.4rem 0.55rem;
+                        border: 1px solid {stage_color}66;
+                        border-left: 4px solid {stage_color};
+                        border-radius: 4px;
+                        background: {stage_color}14;
+                        font-size: 0.95rem !important;
+                        font-weight: 700;
+                        line-height: 1.2;
+                        white-space: normal !important;
+                        overflow-wrap: anywhere;
+                    ">
+                        {escape(stage)}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        primary_cols[1].metric(copy["score"], f"{row['promotion_score']:.0f}/100")
+        self._render_quality_metric(
+            primary_cols[2],
+            copy["best_sharpe"],
+            self._fmt(row["best_sharpe"], "{:.2f}"),
+            self._classify_sharpe(row["best_sharpe"]),
+            copy,
+        )
+        secondary_cols = st.columns(3)
+        self._render_quality_metric(
+            secondary_cols[0],
+            copy["best_ic"],
+            self._fmt(row["best_holdout_ic"], "{:.4f}"),
+            self._classify_holdout_ic(row["best_holdout_ic"]),
+            copy,
+        )
+        secondary_cols[1].metric(
+            copy["adjusted_p"],
+            self._fmt(row["best_adjusted_p_value"], "{:.4f}"),
+            help=copy["adjusted_p_help"],
+        )
+        secondary_cols[2].metric(copy["trades"], f"{int(row['total_trades']):,}")
+
+        with st.expander(copy["quality_guide"]):
+            st.markdown(copy["quality_guide_text"])
 
         st.markdown(f"**{row['name']}**")
         if evidence.economic_rationale:
@@ -778,6 +763,38 @@ class FactorPromotionView:
             st.success(copy["no_blockers"])
         st.info(f"{copy['next']}: {row['suggested_next_step']}")
 
+        render_predictive_evidence_panel(
+            self.logs_dir,
+            evidence.factor_id,
+            evidence.market_vertical,
+            lang=lang,
+            plotly_template=tpl,
+        )
+        render_sleeve_evidence_panel(
+            self.logs_dir,
+            evidence.factor_id,
+            evidence.market_vertical,
+            lang=lang,
+            plotly_template=tpl,
+        )
+        render_standalone_sleeve_test_panel(
+            self.logs_dir,
+            evidence.factor_id,
+            evidence.market_vertical,
+            lang=lang,
+            plotly_template=tpl,
+        )
+        render_conditional_behaviour_panel(
+            self.logs_dir,
+            evidence.factor_id,
+            evidence.market_vertical,
+            lang=lang,
+            plotly_template=tpl,
+        )
+
+        st.markdown(f"#### {copy['runs_title']}")
+        self._render_run_history(evidence.runs, tpl, copy)
+
         left, right = st.columns([0.46, 0.54])
         with left:
             self._render_evidence_checklist(evidence, copy)
@@ -785,11 +802,10 @@ class FactorPromotionView:
             self._render_artifacts(evidence, copy)
 
         candidate_exports, candidate_issues = self._candidate_exports_for_evidence(evidence)
-        self._render_candidate_readback(candidate_exports, candidate_issues, copy)
-        self._render_candidate_export(row, evidence, copy, candidate_exports)
-
-        st.markdown(f"#### {copy['runs_title']}")
-        self._render_run_history(evidence.runs, tpl)
+        with st.expander(copy["candidate_handoff"], expanded=False):
+            st.caption(copy["candidate_handoff_desc"])
+            self._render_candidate_readback(candidate_exports, candidate_issues, copy)
+            self._render_candidate_export(row, evidence, copy, candidate_exports)
 
     def _render_evidence_checklist(self, evidence: FactorEvidence, copy: dict) -> None:
         st.markdown(f"#### {copy['evidence']}")
@@ -798,8 +814,15 @@ class FactorPromotionView:
             (copy["metadata_exists"], evidence.metadata_exists),
             (copy["rationale_exists"], bool(evidence.economic_rationale)),
             (copy["has_market_metadata"], evidence.suitability_declared),
-            (copy["market_tested"], not evidence.runs.empty),
+            (
+                copy["market_tested"],
+                not evidence.runs.empty or evidence.predictive_evidence is not None,
+            ),
             (copy["has_backtest"], not evidence.runs.empty),
+            (
+                copy["has_predictive_evidence"],
+                evidence.predictive_evidence is not None,
+            ),
             (copy["has_returns"], evidence.return_logs > 0),
             (copy["has_trades"], evidence.trade_logs > 0),
             (copy["has_importance"], evidence.feature_importance_exists),
@@ -1115,9 +1138,9 @@ class FactorPromotionView:
         except ValueError:
             return str(path)
 
-    def _render_run_history(self, runs: pd.DataFrame, tpl: str) -> None:
+    def _render_run_history(self, runs: pd.DataFrame, tpl: str, copy: dict) -> None:
         if runs.empty:
-            st.info("No backtest runs yet.")
+            st.info(copy["runs_empty"])
             return
 
         plot_df = runs.copy()
@@ -1138,152 +1161,185 @@ class FactorPromotionView:
         fig.update_layout(template=tpl, height=310, margin=dict(l=10, r=10, t=20, b=20), yaxis_title=metric)
         st.plotly_chart(fig, width="stretch")
 
-        show_cols = [
-            "run_id",
-            "round_number",
-            "timestamp",
-            "asset_class",
-            "market_vertical",
-            "dataset_id",
-            "universe_id",
-            "data_frequency",
-            "data_vendor",
-            "execution_assumption",
-            "universe_size",
-            "traded_tickers",
+        st.caption(copy["runs_desc"])
+        history = runs.copy().sort_values("timestamp", ascending=False)
+        history["market"] = history.apply(self._run_market_label, axis=1)
+        history["universe"] = history.apply(
+            lambda row: self._run_universe_label(
+                row,
+                copy["assets_suffix"],
+                copy["traded_suffix"],
+            ),
+            axis=1,
+        )
+
+        core_cols = ["run_id", "round_number", "timestamp", "market"]
+        optional_cols = [
+            "universe",
             "validation_ic",
             "holdout_ic",
             "crisis_ic",
             "annualized_return",
             "sharpe_ratio",
-            "stat_raw_p_value",
-            "stat_adjusted_p_value",
-            "stat_fdr_q_value",
-            "stat_trial_count",
-            "stat_significance",
             "max_drawdown",
             "turnover_rate",
             "total_trades",
+            "stat_adjusted_p_value",
+            "stat_significance",
             "failure_code",
-            "suggested_action",
         ]
-        for col in show_cols:
-            if col not in runs.columns:
-                runs[col] = np.nan
+        show_cols = core_cols + [
+            col for col in optional_cols if self._series_has_values(history, col)
+        ]
+        percentage_cols = ["annualized_return", "max_drawdown", "turnover_rate"]
+        for col in percentage_cols:
+            if col in history.columns:
+                history[col] = pd.to_numeric(history[col], errors="coerce") * 100.0
+        if "total_trades" in history.columns:
+            history["total_trades"] = pd.to_numeric(
+                history["total_trades"], errors="coerce"
+            ).astype("Int64")
+
+        labels = copy["run_columns"]
+        display = history[show_cols].rename(columns=labels)
+        column_config = {
+            labels["run_id"]: st.column_config.TextColumn(width="medium"),
+            labels["round_number"]: st.column_config.NumberColumn(format="%d", width="small"),
+            labels["timestamp"]: st.column_config.DatetimeColumn(
+                format="YYYY-MM-DD HH:mm", width="medium"
+            ),
+            labels["market"]: st.column_config.TextColumn(width="medium"),
+        }
+        for col in ("validation_ic", "holdout_ic", "crisis_ic", "stat_adjusted_p_value"):
+            if col in show_cols:
+                column_config[labels[col]] = st.column_config.NumberColumn(format="%.4f")
+        if "sharpe_ratio" in show_cols:
+            column_config[labels["sharpe_ratio"]] = st.column_config.NumberColumn(format="%.2f")
+        for col in percentage_cols:
+            if col in show_cols:
+                column_config[labels[col]] = st.column_config.NumberColumn(format="%.2f%%")
+        if "total_trades" in show_cols:
+            column_config[labels["total_trades"]] = st.column_config.NumberColumn(format="%d")
+        if "failure_code" in show_cols:
+            column_config[labels["failure_code"]] = st.column_config.TextColumn(width="medium")
+
         st.dataframe(
-            runs[show_cols].sort_values("timestamp", ascending=False),
+            display,
             width="stretch",
             hide_index=True,
+            column_config=column_config,
         )
 
-    @st.cache_data(show_spinner=False)
-    def _load_evidence_tickets(_self) -> pd.DataFrame:
-        try:
-            return list_evidence_tickets(_self.db_path, parse_json=True)
-        except Exception:
-            return pd.DataFrame()
+        provenance_fields = [
+            "dataset_id",
+            "universe_id",
+            "data_frequency",
+            "data_vendor",
+            "execution_assumption",
+        ]
+        provenance_cols = [
+            "run_id",
+            "timestamp",
+            "market",
+            "record_status",
+        ]
+        available_provenance = [
+            col for col in provenance_fields if self._series_has_values(history, col)
+        ]
+        with st.expander(copy["run_provenance_title"], expanded=False):
+            st.caption(copy["run_provenance_desc"])
+            if not available_provenance:
+                st.info(copy["run_provenance_missing"].format(count=len(history)))
+            else:
+                provenance = history.copy()
+                provenance["record_status"] = provenance.apply(
+                    lambda row: self._run_provenance_status(row, provenance_fields, copy),
+                    axis=1,
+                )
+                for col in available_provenance:
+                    provenance[col] = provenance[col].apply(
+                        lambda value: self._display_text(value) or copy["run_not_recorded"]
+                    )
+                provenance_display = provenance[
+                    provenance_cols + available_provenance
+                ].rename(columns=labels)
+                provenance_column_config = {
+                    labels["run_id"]: st.column_config.TextColumn(width="medium"),
+                    labels["timestamp"]: st.column_config.DatetimeColumn(
+                        format="YYYY-MM-DD HH:mm", width="medium"
+                    ),
+                }
+                if "execution_assumption" in available_provenance:
+                    provenance_column_config[
+                        labels["execution_assumption"]
+                    ] = st.column_config.TextColumn(width="large")
+                st.dataframe(
+                    provenance_display,
+                    width="stretch",
+                    hide_index=True,
+                    column_config=provenance_column_config,
+                )
 
     @staticmethod
-    def _prepare_ticket_frame(tickets: pd.DataFrame) -> pd.DataFrame:
-        out = tickets.copy()
-        defaults = {
-            "ticket_id": "",
-            "title": "",
-            "source_page": "",
-            "evidence_type": "",
-            "stage": "",
-            "status": "",
-            "decision": "",
-            "thesis": "",
-            "factor_id": "",
-            "research_family": "",
-            "run_id": "",
-            "trial_signature": "",
-            "metric_name": "",
-            "metric_value": np.nan,
-            "confidence_score": np.nan,
-            "metrics": {},
-            "artifacts": [],
-            "context": {},
-            "metadata": {},
-            "created_at": pd.NaT,
-            "updated_at": pd.NaT,
-        }
-        for col, default in defaults.items():
-            if col not in out.columns:
-                if isinstance(default, dict):
-                    out[col] = [dict(default) for _ in range(len(out))]
-                elif isinstance(default, list):
-                    out[col] = [list(default) for _ in range(len(out))]
-                else:
-                    out[col] = default
-        for col in ["created_at", "updated_at"]:
-            out[col] = pd.to_datetime(out[col], errors="coerce")
-        for col in ["metric_value", "confidence_score"]:
-            out[col] = pd.to_numeric(out[col], errors="coerce")
-        out["updated_at"] = out["updated_at"].fillna(out["created_at"])
-        return out.sort_values(["updated_at", "ticket_id"], ascending=[False, True])
+    def _display_text(value) -> str:
+        if value is None or pd.isna(value):
+            return ""
+        text = str(value).strip()
+        return "" if text.lower() in {"", "none", "nan", "nat"} else text
 
-    @staticmethod
-    def _empty_ticket_summary() -> dict:
-        return {
-            "evidence_ticket_count": 0,
-            "ready_ticket_count": 0,
-            "reviewed_ticket_count": 0,
-            "open_ticket_count": 0,
-            "archived_ticket_count": 0,
-            "needs_more_evidence_ticket_count": 0,
-            "latest_ticket_status": "",
-            "latest_ticket_updated_at": pd.NaT,
-        }
+    @classmethod
+    def _series_has_values(cls, frame: pd.DataFrame, column: str) -> bool:
+        if column not in frame.columns:
+            return False
+        series = frame[column]
+        if pd.api.types.is_numeric_dtype(series):
+            return bool(series.notna().any())
+        return bool(series.map(cls._display_text).ne("").any())
 
-    @staticmethod
-    def _ticket_summary_by_factor(tickets: pd.DataFrame) -> pd.DataFrame:
-        columns = ["factor_id", *FactorPromotionView._empty_ticket_summary().keys()]
-        if tickets.empty:
-            return pd.DataFrame(columns=columns)
-
-        normalized = FactorPromotionView._prepare_ticket_frame(tickets)
-        if normalized.empty:
-            return pd.DataFrame(columns=columns)
-
-        normalized["factor_id"] = normalized["factor_id"].fillna("").astype(str).str.strip()
-        normalized["status"] = normalized["status"].fillna("").astype(str).str.strip()
-        normalized = normalized[normalized["factor_id"] != ""].copy()
-        if normalized.empty:
-            return pd.DataFrame(columns=columns)
-
-        summary = normalized.groupby("factor_id", dropna=False).agg(
-            evidence_ticket_count=("ticket_id", "nunique")
+    @classmethod
+    def _run_market_label(cls, row: pd.Series) -> str:
+        return cls._display_text(row.get("market_vertical")) or cls._display_text(
+            row.get("asset_class")
         )
-        status_counts = pd.crosstab(normalized["factor_id"], normalized["status"])
-        for status, column in (
-            ("ready_for_review", "ready_ticket_count"),
-            ("reviewed", "reviewed_ticket_count"),
-            ("open", "open_ticket_count"),
-            ("archived", "archived_ticket_count"),
-            ("needs_more_evidence", "needs_more_evidence_ticket_count"),
-        ):
-            summary[column] = status_counts[status] if status in status_counts else 0
 
-        latest = (
-            normalized.sort_values(["updated_at", "ticket_id"], ascending=[False, True])
-            .drop_duplicates("factor_id")
-            .set_index("factor_id")
-        )
-        summary["latest_ticket_status"] = latest["status"]
-        summary["latest_ticket_updated_at"] = latest["updated_at"]
-        summary = summary.reset_index()
-        for column in [
-            "evidence_ticket_count",
-            "ready_ticket_count",
-            "reviewed_ticket_count",
-            "open_ticket_count",
-            "archived_ticket_count",
-            "needs_more_evidence_ticket_count",
-        ]:
-            summary[column] = pd.to_numeric(summary[column], errors="coerce").fillna(0).astype(int)
-        return summary[columns]
+    @classmethod
+    def _run_universe_label(
+        cls,
+        row: pd.Series,
+        assets_suffix: str,
+        traded_suffix: str,
+    ) -> str:
+        universe_id = cls._display_text(row.get("universe_id"))
+        traded = cls._display_text(row.get("traded_tickers"))
+        size = pd.to_numeric(pd.Series([row.get("universe_size")]), errors="coerce").iloc[0]
+        size_label = f"{int(size):,} {assets_suffix}" if pd.notna(size) else ""
+
+        if universe_id:
+            return f"{universe_id} ({size_label})" if size_label else universe_id
+        if traded.upper() == "ALL":
+            return f"ALL ({size_label})" if size_label else "ALL"
+        if traded:
+            tickers = [ticker.strip() for ticker in traded.split(",") if ticker.strip()]
+            if len(tickers) <= 4:
+                base = ", ".join(tickers)
+            else:
+                base = f"{len(tickers):,} {traded_suffix}"
+            return f"{base} ({size_label})" if size_label else base
+        return size_label
+
+    @classmethod
+    def _run_provenance_status(
+        cls,
+        row: pd.Series,
+        fields: list[str],
+        copy: dict,
+    ) -> str:
+        populated = sum(bool(cls._display_text(row.get(field))) for field in fields)
+        if populated == len(fields):
+            return copy["run_record_complete"]
+        if populated:
+            return copy["run_record_partial"]
+        return copy["run_record_legacy"]
 
     @st.cache_data(show_spinner=False)
     def _load_board(_self) -> tuple[pd.DataFrame, dict[str, FactorEvidence]]:
@@ -1291,12 +1347,6 @@ class FactorPromotionView:
         runs = _self._load_runs()
         tick_ml = _self._load_tick_ml_studies()
         importance_index = _self._feature_importance_index()
-        ticket_summary = _self._ticket_summary_by_factor(_self._load_evidence_tickets())
-        ticket_by_factor = (
-            ticket_summary.set_index("factor_id").to_dict("index")
-            if not ticket_summary.empty
-            else {}
-        )
         evidence_by_factor = {}
         rows = []
 
@@ -1339,22 +1389,53 @@ class FactorPromotionView:
                     feature_importance_exists=feature_importance_exists,
                     return_logs=return_logs,
                     trade_logs=trade_logs,
+                    predictive_evidence=load_predictive_evidence_snapshot(
+                        str(_self.logs_dir), factor_id, market_vertical
+                    ),
                 )
                 evidence_by_factor[evidence_key] = evidence
                 row = _self._score_factor(evidence)
-                row.update(_self._empty_ticket_summary())
-                row.update(ticket_by_factor.get(factor_id, {}))
                 rows.append(row)
 
         board = pd.DataFrame(rows)
         if not board.empty:
             board["stage_rank"] = board["stage"].map({stage: idx for idx, stage in enumerate(STAGE_ORDER)}).fillna(0)
             board["board_priority"] = board["stage"].map(BOARD_PRIORITY).fillna(0)
-            board = board.sort_values(
-                ["board_priority", "promotion_score", "best_sharpe"],
-                ascending=[False, False, False],
-            )
+            board = _self._sort_board_by_recency(board)
         return board, evidence_by_factor
+
+    @staticmethod
+    def _sort_board_by_recency(board: pd.DataFrame) -> pd.DataFrame:
+        if board.empty:
+            return board
+
+        out = board.copy()
+        out["_last_run_sort"] = pd.to_datetime(
+            out.get("last_run_at"),
+            errors="coerce",
+        )
+        sort_cols = [
+            col
+            for col in [
+                "_last_run_sort",
+                "board_priority",
+                "promotion_score",
+                "best_sharpe",
+                "factor_id",
+            ]
+            if col in out.columns
+        ]
+        ascending = [col == "factor_id" for col in sort_cols]
+        return (
+            out.sort_values(
+                sort_cols,
+                ascending=ascending,
+                na_position="last",
+                kind="stable",
+            )
+            .drop(columns=["_last_run_sort"])
+            .reset_index(drop=True)
+        )
 
     def _normalize_board_stages(self, board: pd.DataFrame) -> pd.DataFrame:
         if board.empty or "stage" not in board.columns:
@@ -1364,10 +1445,7 @@ class FactorPromotionView:
         out["stage"] = out["stage"].replace(LEGACY_STAGE_MAP)
         out["stage_rank"] = out["stage"].map({stage: idx for idx, stage in enumerate(STAGE_ORDER)}).fillna(0)
         out["board_priority"] = out["stage"].map(BOARD_PRIORITY).fillna(0)
-        sort_cols = [col for col in ["board_priority", "promotion_score", "best_sharpe"] if col in out.columns]
-        if sort_cols:
-            out = out.sort_values(sort_cols, ascending=[False] * len(sort_cols))
-        return out
+        return self._sort_board_by_recency(out)
 
     def _load_factor_inventory(self) -> dict[str, dict]:
         inventory: dict[str, dict] = {}
@@ -1650,6 +1728,10 @@ class FactorPromotionView:
             return "native_validated"
         if not evidence.runs.empty:
             return "cross_market_validated"
+        if evidence.predictive_evidence is not None:
+            if market == evidence.native_market:
+                return "native_predictive_evidence"
+            return "cross_market_predictive_evidence"
         if market in evidence.experimental_markets:
             return "experimental_not_tested"
         if market in evidence.suitable_markets and market != evidence.native_market:
@@ -1663,19 +1745,42 @@ class FactorPromotionView:
         market = evidence.market_vertical
         if market in evidence.unsupported_markets:
             blockers.append("market_unsupported")
-        if market in evidence.experimental_markets and evidence.runs.empty:
+        if (
+            market in evidence.experimental_markets
+            and evidence.runs.empty
+            and evidence.predictive_evidence is None
+        ):
             blockers.append("market_experimental")
-        if evidence.runs.empty and market != evidence.native_market:
+        if (
+            evidence.runs.empty
+            and evidence.predictive_evidence is None
+            and market != evidence.native_market
+        ):
             blockers.append("market_not_validated")
         return blockers
 
     def _score_factor(self, evidence: FactorEvidence) -> dict:
         runs = evidence.runs
         run_count = len(runs)
+        has_predictive_evidence = evidence.predictive_evidence is not None
         total_trades = int(pd.to_numeric(runs.get("total_trades", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
         best_sharpe = self._max_numeric(runs, "sharpe_ratio")
         best_holdout = self._max_numeric(runs, "holdout_ic")
         best_validation = self._max_numeric(runs, "validation_ic")
+        if has_predictive_evidence:
+            predictive_split = evidence.predictive_evidence["split_summary"].set_index(
+                "research_split"
+            )
+            if pd.isna(best_validation) and "validation" in predictive_split.index:
+                best_validation = pd.to_numeric(
+                    predictive_split.loc["validation", "mean_rank_ic"],
+                    errors="coerce",
+                )
+            if pd.isna(best_holdout) and "holdout" in predictive_split.index:
+                best_holdout = pd.to_numeric(
+                    predictive_split.loc["holdout", "mean_rank_ic"],
+                    errors="coerce",
+                )
         best_ann_return = self._max_numeric(runs, "annualized_return")
         best_max_dd = self._best_drawdown(runs)
         best_raw_p = self._min_numeric(runs, "stat_raw_p_value")
@@ -1691,7 +1796,7 @@ class FactorPromotionView:
         score += 8 if evidence.source_exists else 0
         score += 7 if evidence.metadata_exists else 0
         score += 7 if evidence.economic_rationale else 0
-        score += 10 if run_count > 0 or not evidence.tick_ml_rows.empty else 0
+        score += 10 if run_count > 0 or not evidence.tick_ml_rows.empty or has_predictive_evidence else 0
         score += 10 if run_count >= 2 or not evidence.tick_ml_rows.empty else 0
         score += 13 if evidence.return_logs > 0 else 0
         score += 8 if total_trades > 0 or evidence.trade_logs > 0 else 0
@@ -1702,7 +1807,7 @@ class FactorPromotionView:
         score += 5 if pd.notna(best_max_dd) and best_max_dd > -0.35 else 0
         score += 8 if pd.notna(best_adjusted_p) and best_adjusted_p <= 0.05 else 0
 
-        if run_count == 0 and evidence.tick_ml_rows.empty:
+        if run_count == 0 and evidence.tick_ml_rows.empty and not has_predictive_evidence:
             blockers.append("no_test_evidence")
         if run_count > 0 and pd.isna(best_raw_p):
             blockers.append("missing_statistical_evidence")
@@ -1741,7 +1846,7 @@ class FactorPromotionView:
         has_serious_failure = bool(serious_failures.intersection(blockers))
         score = max(score - self._blocker_penalty(blockers, serious_failures), 0)
         stage = self._infer_stage(
-            run_count=run_count,
+            run_count=run_count + int(has_predictive_evidence),
             tick_ml_count=len(evidence.tick_ml_rows),
             return_logs=evidence.return_logs,
             total_trades=total_trades,
@@ -1769,6 +1874,7 @@ class FactorPromotionView:
             "promotion_score": min(float(score), 100.0),
             "run_count": run_count,
             "tick_ml_count": len(evidence.tick_ml_rows),
+            "predictive_evidence_count": int(has_predictive_evidence),
             "best_validation_ic": best_validation,
             "best_holdout_ic": best_holdout,
             "best_raw_p_value": best_raw_p,
@@ -1885,7 +1991,7 @@ class FactorPromotionView:
         if stage == "Calibrated":
             return "Run full evaluator/backtest with saved return log."
         if stage == "Hypothesis Tested":
-            return "Calibrate parameters and repeat on another sample."
+            return "Review holdout stability and concentration, then test a frozen portfolio translation after costs."
         return "Write thesis and run first test."
 
     @staticmethod
@@ -2026,3 +2132,79 @@ class FactorPromotionView:
         if pd.isna(value):
             return "N/A"
         return pattern.format(value)
+
+    @staticmethod
+    def _classify_holdout_ic(value) -> MetricQuality:
+        numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        if pd.isna(numeric) or not np.isfinite(numeric):
+            return MetricQuality("not_available", "#64748b")
+        if numeric <= 0:
+            return MetricQuality("negative", "#ef4444")
+        if numeric < 0.01:
+            return MetricQuality("weak", "#ef4444")
+        if numeric < 0.03:
+            return MetricQuality("modest", "#f59e0b")
+        if numeric < 0.05:
+            return MetricQuality("good", "#22c55e")
+        if numeric < 0.10:
+            return MetricQuality("strong", "#14b8a6")
+        return MetricQuality("extreme_audit", "#ef4444")
+
+    @staticmethod
+    def _classify_sharpe(value) -> MetricQuality:
+        numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        if pd.isna(numeric) or not np.isfinite(numeric):
+            return MetricQuality("not_available", "#64748b")
+        if numeric <= 0:
+            return MetricQuality("negative", "#ef4444")
+        if numeric < 0.5:
+            return MetricQuality("weak", "#ef4444")
+        if numeric < 1.0:
+            return MetricQuality("marginal", "#f59e0b")
+        if numeric < 2.0:
+            return MetricQuality("good", "#22c55e")
+        if numeric < 3.0:
+            return MetricQuality("strong", "#14b8a6")
+        if numeric < 5.0:
+            return MetricQuality("high_audit", "#8b5cf6")
+        return MetricQuality("extreme_audit", "#ef4444")
+
+    @staticmethod
+    def _render_quality_metric(
+        column,
+        metric_label: str,
+        metric_value: str,
+        quality: MetricQuality,
+        copy: dict,
+    ) -> None:
+        label = copy["quality_labels"][quality.label_key]
+        help_text = copy["quality_help"][quality.label_key]
+        column.html(
+            f"""
+            <div style="min-height: 4.7rem; padding-top: 0.1rem;">
+                <div style="font-size: 0.875rem; line-height: 1.2; margin-bottom: 0.55rem;">
+                    {escape(metric_label)}
+                </div>
+                <div style="white-space: nowrap; overflow: visible; line-height: 1.1;">
+                    <span style="display: inline-block; font-size: 1.75rem; line-height: 1.1; font-weight: 400; vertical-align: middle;">
+                        {escape(metric_value)}
+                    </span>
+                    <span title="{escape(help_text)}" style="
+                        display: inline-flex;
+                        margin-left: 0.35rem;
+                        padding: 0.18rem 0.3rem;
+                        border: 1px solid {quality.color}66;
+                        border-radius: 4px;
+                        background: {quality.color}14;
+                        font-size: 0.62rem;
+                        font-weight: 700;
+                        line-height: 1.15;
+                        white-space: nowrap;
+                        vertical-align: middle;
+                    ">
+                        {escape(label)}
+                    </span>
+                </div>
+            </div>
+            """
+        )

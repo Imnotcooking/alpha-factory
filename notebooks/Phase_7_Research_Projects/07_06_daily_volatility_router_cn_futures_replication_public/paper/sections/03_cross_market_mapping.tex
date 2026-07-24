@@ -1,0 +1,53 @@
+\section{Cross-Market Mapping and Hypotheses}
+
+\subsection{The unavoidable mapping problem}
+
+An equity index has a natural market-capitalization weighting. Futures open interest is
+not corporate ownership, and the number of outstanding contracts cannot be compared
+across products without accounting for price units and multipliers. We therefore use two
+market-return proxies that are defensible for different reasons.
+
+The primary proxy weights each available product return by lagged open-interest notional:
+\begin{equation}
+  w^{OI}_{i,d}=
+  \frac{P_{i,d-1}M_iOI_{i,d-1}}
+  {\sum_j P_{j,d-1}M_jOI_{j,d-1}},
+  \qquad
+  r^{M,OI}_{d}=\sum_i w^{OI}_{i,d}r_{i,d},
+  \label{eq:oi-market}
+\end{equation}
+where $P$, $M$, and $OI$ denote lagged price, contract multiplier, and lagged open
+interest. This proxy emphasizes products with larger outstanding notional activity. The
+robustness proxy assigns equal weight to each available product return. It emphasizes the
+typical product rather than the concentration of notional activity.
+
+Neither proxy is declared universally correct. Their disagreement is part of the test.
+Choosing the proxy that produces the best endpoint after observing returns would replace
+cross-market replication with specification search.
+
+\subsection{Pre-specified hypotheses}
+
+The source mechanism implies three directional hypotheses:
+
+\begin{enumerate}
+  \item Momentum should dominate reversal in volatility states Q1--Q3.
+  \item Reversal should strengthen and dominate momentum in Q4.
+  \item The Q4 switch should improve momentum, reversal, and a static equal blend without
+  depending on one event or one market proxy.
+\end{enumerate}
+
+The third condition is stricter than comparing the router only with reversal. A selector
+can appear successful simply because it spends most months in the stronger sleeve. It
+must add information relative to the best standalone sleeve and to a no-state
+diversification benchmark.
+
+\subsection{Why the static benchmark is 50/50}
+
+Momentum and reversal are constructed with the same unit long and unit short gross
+exposure. Their static blend is
+\begin{equation}
+  R^{50/50}_{m}=0.5R^{MOM}_{m}+0.5R^{REV}_{m}.
+\end{equation}
+The equal allocation is not estimated. It is the parameter-free question: does dynamic
+state selection improve on holding both sleeves without forecasting the state? It is not
+claimed to be the optimal ex-post combination.

@@ -13,6 +13,10 @@ class MatrixView:
         t = TEXT[lang]
 
         runs_df = self.dm.get_all_runs()
+        if "execution_status" in runs_df.columns:
+            runs_df = runs_df.loc[
+                runs_df["execution_status"] == "completed"
+            ].copy()
         if runs_df.empty:
             st.info(t.get("db_empty", "No data available."))
             return
@@ -59,6 +63,10 @@ class MatrixView:
         st.caption(t['corr_desc'])
 
         runs_df = self.dm.get_all_runs()
+        if "execution_status" in runs_df.columns:
+            runs_df = runs_df.loc[
+                runs_df["execution_status"] == "completed"
+            ].copy()
         if runs_df.empty:
             return
 

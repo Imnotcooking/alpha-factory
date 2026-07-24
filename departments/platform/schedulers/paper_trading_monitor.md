@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`scripts/run_paper_snapshot_job.sh` is the read-only paper account monitoring
+`scripts/trading/run_paper_snapshot_job.sh` is the read-only paper account monitoring
 job. It checks the IBKR paper profile, writes a separate paper trading SQLite
 ledger, runs a freshness check, and posts a Discord daily report.
 
@@ -35,15 +35,15 @@ submission code exists.
 From the repository root:
 
 ```bash
-./scripts/run_paper_snapshot_job.sh
+./scripts/trading/run_paper_snapshot_job.sh
 ```
 
 Individual steps:
 
 ```bash
-PYTHONPATH=src:. python scripts/check_ibkr_server_readiness.py --profile paper --adapter-check
-PYTHONPATH=src:. python scripts/update_paper_trading_snapshot.py
-PYTHONPATH=src:. python scripts/check_paper_trading_health.py --notify-always
+PYTHONPATH=src:. python scripts/ops/check_ibkr_server_readiness.py --profile paper --adapter-check
+PYTHONPATH=src:. python scripts/ops/update_paper_trading_snapshot.py
+PYTHONPATH=src:. python scripts/ops/check_paper_trading_health.py --notify-always
 ```
 
 ## Proposal Review
@@ -51,7 +51,7 @@ PYTHONPATH=src:. python scripts/check_paper_trading_health.py --notify-always
 Paper proposal review is separate from the daily account monitor:
 
 ```bash
-PYTHONPATH=src:. python scripts/review_paper_trade_proposal.py runtime/artifacts/trade_proposals --notify
+PYTHONPATH=src:. python scripts/trading/review_paper_trade_proposal.py runtime/artifacts/trade_proposals --notify
 ```
 
 This evaluates proposal artifacts against the paper safety policy and writes
@@ -59,7 +59,7 @@ This evaluates proposal artifacts against the paper safety policy and writes
 
 ## Paper Strategy Runner
 
-`scripts/run_paper_strategy_runner.py` is the automated proposal scanner for
+`scripts/trading/run_paper_strategy_runner.py` is the automated proposal scanner for
 strategies that are already approved as `paper_running` in
 `paper_strategy_registry`.
 
@@ -76,13 +76,13 @@ It does not place broker orders.
 Manual run:
 
 ```bash
-./scripts/run_paper_strategy_runner_job.sh
+./scripts/trading/run_paper_strategy_runner_job.sh
 ```
 
 Direct Python run:
 
 ```bash
-PYTHONPATH=src:. python scripts/run_paper_strategy_runner.py runtime/artifacts/trade_proposals --notify-on-action
+PYTHONPATH=src:. python scripts/trading/run_paper_strategy_runner.py runtime/artifacts/trade_proposals --notify-on-action
 ```
 
 `--notify-on-action` stays quiet when no proposals are reviewed, which keeps
@@ -127,8 +127,8 @@ Run after the real portfolio snapshot, or at another time that fits the paper
 trial cadence:
 
 ```cron
-45 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_snapshot_job.sh >> runtime/logs/paper_snapshot_job.log 2>&1
-*/15 13-22 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/run_paper_strategy_runner_job.sh >> runtime/logs/paper_strategy_runner.log 2>&1
+45 21 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/trading/run_paper_snapshot_job.sh >> runtime/logs/paper_snapshot_job.log 2>&1
+*/15 13-22 * * 1-5 cd /home/ubuntu/oqp_new && ./scripts/trading/run_paper_strategy_runner_job.sh >> runtime/logs/paper_strategy_runner.log 2>&1
 ```
 
 ## Safety Boundary

@@ -1,0 +1,56 @@
+\section{Introduction}
+
+Cross-market replication is most informative when it tests not only whether a return
+pattern survives, but whether the state variable retains the economic meaning assigned
+to it in the source market. This distinction matters for volatility-based strategy
+selection. In equities, high market volatility often co-occurs with market distress,
+funding constraints, liquidity demand, and subsequent rebound states in which momentum
+can crash and recent losers can reverse. A scalar volatility measure can therefore act
+as a compact proxy for a richer joint state.
+
+\citet{butt2023} use this idea to propose a constant-leverage switching rule. The rule
+holds cross-sectional momentum when current market volatility lies in the first three
+quartiles of its trailing five-year distribution and holds short-term reversal in the
+highest quartile. Its appeal is practical as well as economic: it avoids the ex-post
+leverage normalization used by some volatility-scaled momentum strategies and can be
+specified before next-month returns are observed.
+
+We ask whether that same state variable is sufficient in Chinese futures. Futures are a
+demanding transportability test. Their cross-section spans financial contracts,
+industrial inputs, agricultural commodities, energy, and other products whose price
+changes originate in different cash-market constraints. They also lack a unique analogue
+of the equity market-capitalization portfolio. A high aggregate volatility observation
+may reflect a broad deleveraging episode, a sector-specific supply shock, a policy change,
+or several unrelated shocks occurring simultaneously. These states need not imply the
+same next-month ranking of momentum and reversal.
+
+The empirical design is deliberately restrictive. We translate the published rule before
+viewing the replication returns; retain the fixed 75th-percentile boundary; use all
+eligible products rather than an outcome-selected subset; and report two defensible
+futures-market return proxies separately. We do not search for a better percentile after
+observing the results. This converts proxy sensitivity and event concentration into
+falsification evidence rather than tuning opportunities.
+
+The results do not support a robust replication. The primary switch earns a gross
+arithmetic annual return of 13.69\%, compared with 13.25\% for momentum, but the
+increment has a HAC $t$-statistic of only 0.06. Reversal beats momentum in 4 of 14
+primary-proxy high-volatility months. The mean advantage is positive only because of one
+large event; the median and the mean excluding that event are negative. More importantly,
+an equal-product volatility proxy reverses the Q4 sleeve ranking and produces a router
+that underperforms momentum. The two volatility series have a correlation of 0.83, yet
+their quartile states agree in only 42.4\% of strategy months.
+
+The negative result is not equivalent to saying that volatility is noise. In the primary
+proxy, Q4 signal months have the highest average pairwise product correlation,
+cross-sectional dispersion, and directional coherence. Volatility successfully measures
+the intensity and commonality of shocks. What it fails to identify is whether the shock
+is trend-generating or reversal-generating.
+
+The paper makes four contributions. First, it provides a transparent cross-asset
+replication of a fixed equity routing rule in a heterogeneous futures market. Second, it
+shows why high correlation between alternative state measures is not enough when the
+decision depends on crossing a quantile boundary. Third, it separates an event-level
+crash-hedge echo from a stable conditional relation. Fourth, it develops an economic
+interpretation of state insufficiency: volatility is an intensity scalar, whereas
+strategy selection requires information about direction, source, breadth, and shock
+stage.

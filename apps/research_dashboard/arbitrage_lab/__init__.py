@@ -1,1 +1,1 @@
-"""Reusable UI helpers for the Arbitrage Lab."""
+"""Reusable relationship-research UI helpers for Discovery Lab."""

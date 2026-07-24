@@ -24,6 +24,16 @@ from oqp.execution.guardrails import (
     evaluate_trade_proposal,
 )
 from oqp.execution.models import OrderIntent, ProposalStatus, TradeProposal
+from oqp.execution.transaction_costs import (
+    CostUseCase,
+    OrderCostEstimate,
+    TransactionCostConfigurationError,
+    TransactionCostProfile,
+    TransactionCostReadinessError,
+    TransactionCostRegistry,
+    attach_transaction_cost_policy,
+    ensure_transaction_cost_policy,
+)
 
 
 _RESEARCH_BRIDGE_EXPORTS = {
@@ -57,6 +67,9 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "evaluate_trade_proposal",
+    "attach_transaction_cost_policy",
+    "CostUseCase",
+    "ensure_transaction_cost_policy",
     "GuardrailCheck",
     "GuardrailReport",
     "GuardrailSeverity",
@@ -83,6 +96,11 @@ __all__ = [
     "signal_from_row",
     "load_trade_proposal_artifacts",
     "TradeProposal",
+    "OrderCostEstimate",
+    "TransactionCostConfigurationError",
+    "TransactionCostProfile",
+    "TransactionCostReadinessError",
+    "TransactionCostRegistry",
     "trade_proposal_directory",
     "trade_proposal_to_dict",
     "write_research_signal_proposal",

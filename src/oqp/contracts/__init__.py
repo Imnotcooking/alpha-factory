@@ -23,6 +23,13 @@ from oqp.contracts.market_vertical import (
     market_vertical_taxonomy,
     normalize_market_vertical,
 )
+from oqp.contracts.regime_state import (
+    ModelIdentity,
+    OrderedFeatureSchema,
+    ProbabilitySemantics,
+    RegimeInference,
+    RegimeQualityFlag,
+)
 from oqp.contracts.strategy_candidate import (
     CandidateIntakeState,
     CandidateMetrics,
@@ -57,6 +64,11 @@ __all__ = [
     "MARKET_VERTICAL_SPECS",
     "MarketVertical",
     "MarketVerticalSpec",
+    "ModelIdentity",
+    "OrderedFeatureSchema",
+    "ProbabilitySemantics",
+    "RegimeInference",
+    "RegimeQualityFlag",
     "StrategyCandidate",
     "StrategyCandidateArtifactError",
     "StrategyCandidateArtifactIssue",

@@ -1,0 +1,212 @@
+schema_version: oqp_risk_limit_catalog_v1
+catalog_owner: risk
+reporting_currency: USD
+
+controls:
+  - id: portfolio_gross_exposure_nav
+    category: exposure
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/portfolio/live_reporting.py:position_risk_frame
+    owner: risk
+    description: Gross marked exposure divided by consolidated NAV.
+
+  - id: largest_position_weight
+    category: concentration
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/portfolio/live_reporting.py:concentration_diagnostics_frame
+    owner: risk
+    description: Largest marked position or cash-equivalent exposure weight.
+
+  - id: top5_position_weight
+    category: concentration
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/portfolio/live_reporting.py:concentration_diagnostics_frame
+    owner: risk
+    description: Cumulative marked weight of the five largest exposures.
+
+  - id: largest_sector_weight
+    category: concentration
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/portfolio/live_reporting.py:sector_exposure_frame
+    owner: risk
+    description: Largest sector exposure after instrument-master classification.
+
+  - id: largest_currency_weight
+    category: currency
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/portfolio/live_reporting.py:currency_exposure_frame
+    owner: risk
+    description: Largest marked exposure share by native or reporting currency.
+
+  - id: daily_loss_nav
+    category: loss
+    scope: account
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/accounts/reporting.py:account_performance_summary
+    owner: risk
+    description: Negative daily PnL as a positive share of current NAV.
+
+  - id: drawdown_nav
+    category: loss
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/accounts/reporting.py:account_nav_drawdowns
+    owner: risk
+    description: Current peak-to-trough NAV loss magnitude.
+
+  - id: historical_var_95_nav
+    category: tail_risk
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: migration
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/risk/portfolio.py:summarize_portfolio_risk
+    owner: risk
+    description: Legacy historical one-day 95 percent NAV VaR without option repricing.
+
+  - id: historical_cvar_95_nav
+    category: tail_risk
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: migration
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/risk/portfolio.py:summarize_portfolio_risk
+    owner: risk
+    description: Legacy historical one-day 95 percent expected shortfall without option repricing.
+
+  - id: margin_utilization
+    category: liquidity
+    scope: account
+    unit: ratio
+    direction: max
+    calculation_status: planned
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/accounts/models.py:AccountSnapshot
+    owner: risk
+    description: Broker margin used divided by approved available margin or NAV.
+
+  - id: option_delta_abs_nav
+    category: options
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/options/book.py:option_book_summary
+    owner: risk
+    description: Absolute option delta-dollar exposure divided by NAV.
+
+  - id: option_gamma_1pct_nav
+    category: options
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/options/book.py:option_book_summary
+    owner: risk
+    description: Absolute option gamma PnL for a one-percent spot move divided by NAV.
+
+  - id: option_vega_1vol_nav
+    category: options
+    scope: portfolio
+    unit: ratio
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/options/book.py:option_book_summary
+    owner: risk
+    description: Absolute option vega PnL for one volatility point divided by NAV.
+
+  - id: option_model_gap_count
+    category: model_quality
+    scope: portfolio
+    unit: count
+    direction: max
+    calculation_status: active
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/options/book.py:option_book_summary
+    owner: risk
+    description: Option positions with missing or invalid model inputs.
+
+  - id: critical_reconciliation_break_count
+    category: operational
+    scope: portfolio
+    unit: count
+    direction: max
+    calculation_status: planned
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/accounts/reconciliation.py:reconcile_account_snapshots
+    owner: middle_office
+    description: Unresolved critical account breaks affecting risk inputs.
+
+  - id: post_trade_gross_exposure_nav
+    category: pre_trade
+    scope: order
+    unit: ratio
+    direction: max
+    calculation_status: planned
+    enforcement_mode: observe
+    warning_threshold: null
+    hard_threshold: null
+    metric_source: src/oqp/execution/guardrails.py:evaluate_trade_proposal
+    owner: risk
+    description: Projected portfolio gross exposure after applying the proposed order.

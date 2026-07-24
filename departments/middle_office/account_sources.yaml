@@ -1,0 +1,142 @@
+schema_version: oqp_account_source_catalog_v1
+catalog_owner: middle_office
+canonical_ledger: runtime/db/accounts/account_ledger.db
+
+sources:
+  - id: ibkr_live_readonly
+    provider: ibkr
+    profile: ibkr_live_readonly
+    environment: live
+    account_role: primary_broker_account
+    authority: broker
+    writers: [scripts/ops/update_live_portfolio_snapshot.py]
+    runtime_paths:
+      - runtime/db/accounts/account_ledger.db
+      - runtime/state/portfolio/ibkr_metrics.json
+    freshness_max_age_hours: 36
+    required: true
+    broker_access: read_only
+    lifecycle: active
+    reconciliation_scope: [positions, cash, nav, trade_events]
+    description: Read-only IBKR live account snapshot and broker metrics.
+
+  - id: ibkr_paper_readonly
+    provider: ibkr
+    profile: ibkr_paper_readonly
+    environment: paper
+    account_role: paper_broker_account
+    authority: broker
+    writers: [scripts/ops/update_paper_trading_snapshot.py]
+    runtime_paths:
+      - runtime/db/accounts/account_ledger.db
+      - runtime/db/paper_trading/paper_trading.db
+    freshness_max_age_hours: 36
+    required: false
+    broker_access: read_only
+    lifecycle: active
+    reconciliation_scope: [positions, cash, nav, trade_events]
+    description: Read-only IBKR paper account and paper-trading sidecar snapshot.
+
+  - id: qmt_live_readonly
+    provider: qmt
+    profile: qmt_live_readonly
+    environment: live
+    account_role: primary_broker_account
+    authority: broker
+    writers: [scripts/trading/update_qmt_account_snapshot.py]
+    runtime_paths:
+      - runtime/db/accounts/account_ledger.db
+    freshness_max_age_hours: 36
+    required: false
+    broker_access: read_only
+    lifecycle: planned
+    reconciliation_scope: [positions, cash, nav, trade_events]
+    description: Planned read-only QMT live account snapshot after broker approval.
+
+  - id: qmt_paper_readonly
+    provider: qmt
+    profile: qmt_paper_readonly
+    environment: paper
+    account_role: paper_broker_account
+    authority: broker
+    writers: [scripts/trading/update_qmt_account_snapshot.py]
+    runtime_paths:
+      - runtime/db/accounts/account_ledger.db
+    freshness_max_age_hours: 36
+    required: false
+    broker_access: read_only
+    lifecycle: planned
+    reconciliation_scope: [positions, cash, nav, trade_events]
+    description: Planned QMT paper account snapshot for connector validation.
+
+  - id: broker_csv_imports
+    provider: broker_file_imports
+    profile: broker_csv_imports
+    environment: live
+    account_role: supplementary_broker_export
+    authority: broker_export
+    writers: [scripts/ops/update_live_portfolio_snapshot.py]
+    runtime_paths:
+      - runtime/imports/broker_exports
+      - runtime/db/portfolio/portfolio_ledger.db
+    freshness_max_age_hours: 0
+    required: false
+    broker_access: none
+    lifecycle: migration
+    reconciliation_scope: [positions]
+    description: Futu and Trading212 file imports currently retained in the legacy portfolio lane.
+
+  - id: manual_external
+    provider: approved_manual
+    profile: manual_external
+    environment: live
+    account_role: external_manual_holdings
+    authority: approved_manual
+    writers:
+      - scripts/data/import_manual_external_holdings.py
+      - scripts/data/refresh_manual_external_holdings.py
+      - scripts/ops/update_unified_live_account_snapshot.py
+    runtime_paths:
+      - runtime/state/portfolio/manual_external_holdings.json
+      - runtime/db/accounts/account_ledger.db
+    freshness_max_age_hours: 0
+    required: false
+    broker_access: none
+    lifecycle: active
+    reconciliation_scope: [positions]
+    description: Explicitly attributed external holdings that are absent from broker snapshots.
+
+  - id: unified_live
+    provider: local_pipeline
+    profile: unified_live
+    environment: live
+    account_role: consolidated_reporting_account
+    authority: aggregate_reporting
+    writers: [scripts/ops/update_unified_live_account_snapshot.py]
+    runtime_paths:
+      - runtime/db/accounts/account_ledger.db
+    freshness_max_age_hours: 36
+    required: true
+    broker_access: none
+    lifecycle: active
+    reconciliation_scope: [positions, cash, nav]
+    description: Consolidated reporting view combining broker-owned and approved manual state.
+
+  - id: legacy_portfolio_ledger
+    provider: local_pipeline
+    profile: legacy_portfolio
+    environment: live
+    account_role: migration_ledger
+    authority: legacy_derived
+    writers:
+      - scripts/ops/update_live_portfolio_snapshot.py
+      - scripts/ops/update_portfolio_nav.py
+    runtime_paths:
+      - runtime/db/portfolio/portfolio_ledger.db
+      - runtime/state/portfolio/manual_inputs.json
+    freshness_max_age_hours: 0
+    required: false
+    broker_access: none
+    lifecycle: migration
+    reconciliation_scope: [positions, nav]
+    description: Legacy derived portfolio view retained only until account-ledger parity is proven.

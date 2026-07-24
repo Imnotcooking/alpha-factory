@@ -1,6 +1,6 @@
 # Data Storage Map
 
-Last reviewed: 2026-07-02
+Last reviewed: 2026-07-17
 
 This repo intentionally has several paths with `data` in the name. They should
 not all mean the same thing.
@@ -20,6 +20,9 @@ not all mean the same thing.
 - Role: architecture, process, and operating docs for data quality, market
   data, instrument master, vendors, and feature-store work.
 - Git policy: commit docs and lightweight specs, not vendor extracts.
+- Canonical inventory: `source_catalog.yaml` defines the runtime data lanes
+  inspected by Data Health. A catalog entry describes a supported location; it
+  does not guarantee that the location is populated or fresh.
 
 ## Runtime Storage
 
@@ -46,6 +49,9 @@ not all mean the same thing.
 - Git policy: ignored through the parent `runtime/` rule.
 - Examples: `portfolio_snapshot_health.json`, `paper_trading_health.json`,
   dashboard `.log` files.
+- Historical logs retained during migrations belong under
+  `runtime/logs/archive/`; active services must continue writing directly to
+  `runtime/logs/`.
 
 `runtime/artifacts/`
 
@@ -68,19 +74,18 @@ not all mean the same thing.
 - Architectural note: do not recreate this folder. Use `runtime/logs/` for
   operational logs and `runtime/artifacts/` for research/backtest outputs.
 
-## Research-Local Storage
+## Research And Scratch Storage
 
-`alpha_research_lab/data_cache/`
+The former `alpha_research_lab/` storage paths are retired. Research inputs and
+derived state now use the same canonical runtime boundaries as the rest of the
+repository:
 
-- Role: alpha-lab research data cache for local experiments and dashboard
-  source files.
-- Git policy: ignored/private. Do not promote cached market data.
-
-`alpha_research_lab/metadata/` and `alpha_research_lab/data_engine/metadata/`
-
-- Role: local research metadata and data-engine side files.
-- Git policy: ignored/private unless a specific sanitized schema or template is
-  intentionally promoted.
+- asset-class market data: `runtime/data/<asset_class>/<timeframe>/`;
+- feature, regime, metadata, and universe state: the corresponding cataloged
+  folder under `runtime/data/`;
+- generated research evidence: `runtime/artifacts/research/`;
+- research databases: `runtime/db/research/`;
+- dashboard and job logs: `runtime/logs/`.
 
 `notebooks/**/data/`
 
@@ -92,6 +97,8 @@ not all mean the same thing.
 
 - New reusable code belongs under `src/oqp/data`, `src/oqp/research`, or another
   domain package, not under root `data/`.
+- New canonical data lanes must be registered in `source_catalog.yaml` and use
+  a path beneath `runtime/data/`.
 - New runtime artifacts should prefer `runtime/data/` or `runtime/artifacts/`.
 - Root `data/` and root `logs/` should stay deleted. Do not add new runtime or
   source assets there.

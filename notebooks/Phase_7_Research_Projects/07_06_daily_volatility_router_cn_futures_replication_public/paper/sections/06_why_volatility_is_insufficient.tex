@@ -1,0 +1,69 @@
+\section{Why Volatility Is Not a Sufficient State}
+
+\subsection{Proxy correlation is not decision stability}
+
+The two monthly volatility series have a correlation of 0.83. If volatility were used as
+a continuous descriptive variable, this might appear reassuring. The router, however,
+uses a discontinuous decision: crossing the rolling 75th percentile changes the entire
+portfolio from momentum to reversal. Small differences in weighting or rank near the
+boundary can therefore produce different holdings.
+
+Across the 66 holding months, the two proxies assign the same quartile only 42.4\% of the
+time. Their Q4 sets have a Jaccard overlap of 54.5\%. \Cref{fig:stability} distinguishes
+correlation in levels from agreement in the actual decision state.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{fig03_public_proxy_stability.png}
+\caption{Aggregate agreement between the two pre-specified futures-market volatility
+proxies.}
+\label{fig:stability}
+\end{figure}
+
+This disagreement is not a technical nuisance. Open-interest-notional weighting asks
+where outstanding notional activity is concentrated; equal weighting asks what happens
+to the typical product. Futures have no theorem that makes either object the unique
+``market portfolio.'' A successful router must either survive both or provide an
+economic reason why one proxy is causally tied to sleeve failure.
+
+\subsection{High volatility does identify stronger common shocks}
+
+The failure is not explained by Q4 being random. Under the primary proxy, average
+pairwise product correlation rises from 0.147 in Q1 to 0.254 in Q4. Average
+cross-sectional dispersion rises from 1.21\% to 1.71\%, and directional coherence rises
+from 0.300 to 0.376. Q4 therefore represents a more systemic and more heterogeneous
+shock environment.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.96\textwidth]{fig04_public_market_anatomy.png}
+\caption{Cross-sectional market anatomy in the primary proxy's signal month.}
+\label{fig:anatomy}
+\end{figure}
+
+The simultaneous increase in correlation and dispersion is revealing. More products move
+in a common direction, while the magnitude of their responses becomes more unequal. This
+can arise when a common macro shock is transmitted through products with different
+exposures, or when several large sector shocks coincide. Neither case determines whether
+the cross-sectional ranking will reverse next month.
+
+\subsection{Intensity is a scalar; strategy state is a vector}
+
+Volatility answers how large price changes are. A momentum--reversal decision additionally
+depends on at least four dimensions:
+
+\begin{enumerate}
+  \item \textbf{Direction:} a distressed decline followed by rebound versus a directional
+  repricing that continues;
+  \item \textbf{Source:} demand, supply, inventory, policy, funding, currency, or liquidity;
+  \item \textbf{Breadth:} broad participation versus concentration in a subset of large
+  products;
+  \item \textbf{Stage:} shock initiation, continued absorption, crowded liquidation, or
+  exhaustion and repair.
+\end{enumerate}
+
+Two months can have the same $\sigma_t$ and differ along every dimension above. The
+equity result can be understood as a setting in which high volatility more reliably
+coincides with a particular distress-and-rebound vector. The futures cross-section mixes
+trend-generating physical shocks with reversal-generating liquidity shocks. A scalar
+cannot identify which one is present.

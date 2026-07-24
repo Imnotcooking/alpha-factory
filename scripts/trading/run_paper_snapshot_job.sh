@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO_ROOT="${OQP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$REPO_ROOT"
+mkdir -p runtime/logs
+
+if [[ -f "$HOME/.oqp_server_env" ]]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.oqp_server_env"
+fi
+
+if [[ -f "$HOME/.oqp_portfolio_health_env" ]]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.oqp_portfolio_health_env"
+fi
+
+if [[ -f "$HOME/.oqp_paper_trading_env" ]]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.oqp_paper_trading_env"
+fi
+
+if [[ -d ".venv" ]]; then
+  # shellcheck disable=SC1091
+  source ".venv/bin/activate"
+fi
+
+export PYTHONPATH="src:.:${PYTHONPATH:-}"
+export IBKR_PAPER_CLIENT_ID="${IBKR_PAPER_SNAPSHOT_CLIENT_ID:-111}"
+
+echo "[$(date -Is)] paper snapshot job started"
+python scripts/ops/check_ibkr_server_readiness.py --profile paper --adapter-check
+python scripts/ops/update_paper_trading_snapshot.py
+python scripts/ops/check_paper_trading_health.py \
+  --max-age-hours "${OQP_PAPER_HEALTH_MAX_AGE_HOURS:-36}" \
+  --status-path runtime/logs/paper_trading_health.json \
+  --notify-always
+echo "[$(date -Is)] paper snapshot job completed"

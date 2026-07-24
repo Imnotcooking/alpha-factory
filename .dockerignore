@@ -8,6 +8,11 @@
 .ipynb_checkpoints/
 __pycache__/
 *.py[cod]
+*.aux
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
 
 # Python environments and package builds
 venv/
@@ -37,6 +42,9 @@ dist/
 # Private/runtime state
 runtime/
 logs/
+reports/
+output/
+manager_research_demo/
 **/execution_logs/
 *.db
 *.sqlite
@@ -84,7 +92,18 @@ alpha_research_lab/**/*candidate*
 alpha_research_lab/**/*trial*
 alpha_research_lab/**/*promotion*
 departments/research/strategy_registry/alpha_lab/private_factors/
+departments/research/factors/**
+departments/research/archive/**
+departments/research/routers/**
+departments/research/position_policies/**
+departments/research/strategy_overlays/**
+departments/research/strategies/**
+departments/research/optimization_studies/**
+notebooks/Phase_7_Research_Projects/*_private/
+scripts/research/experiments/
 tests/test_*factor*.py
+tests/research/private_factors/
+tests/research/archive/
 
 # Native build outputs
 *.so

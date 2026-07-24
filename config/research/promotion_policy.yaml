@@ -1,0 +1,25 @@
+schema_version: 1
+registry_id: oqp_phase10_promotion_policy_v1
+as_of: 2026-07-22
+
+profiles:
+  router_validation_promotion_v1:
+    research_object: router
+    status: active
+    minimum_validation_months: 24
+    minimum_holdout_months: 6
+    minimum_validation_switches: 12
+    minimum_selections_per_sleeve: 10
+    minimum_validation_subperiods: 2
+    required_positive_validation_subperiod_fraction: 1.0
+    maximum_top_month_positive_increment_share: 0.35
+    maximum_top_product_positive_increment_share: 0.35
+    minimum_perturbation_count: 4
+    minimum_positive_perturbation_fraction: 0.75
+    minimum_switching_benefit_cost_ratio: 1.0
+    minimum_paper_observations: 60
+    minimum_paper_switches: 4
+    maximum_realized_to_modeled_cost_ratio: 1.50
+    date_col: date
+    product_col: ticker
+    split_col: research_split

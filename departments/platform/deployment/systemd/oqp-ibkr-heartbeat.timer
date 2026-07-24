@@ -2,7 +2,7 @@
 Description=Run OQP IBKR API Heartbeat Every 15 Minutes
 
 [Timer]
-OnBootSec=5min
+OnActiveSec=1min
 OnUnitActiveSec=15min
 Persistent=true
 Unit=oqp-ibkr-heartbeat.service

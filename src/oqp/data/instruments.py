@@ -62,20 +62,25 @@ class ChineseFuturesRegistry(BaseRegistry):
             'AP': [10, 1.0, 'CZCE', '生鲜'],     'CF': [5, 5.0, 'CZCE', '软商品'],
             'CJ': [5, 5.0, 'CZCE', '生鲜'],      'CY': [5, 5.0, 'CZCE', '软商品'],
             'FG': [20, 1.0, 'CZCE', '建材'],     'MA': [10, 1.0, 'CZCE', '化工'],
+            'JR': [20, 1.0, 'CZCE', '软商品'],   'LR': [20, 1.0, 'CZCE', '软商品'],
             'OI': [10, 1.0, 'CZCE', '油脂油料'], 'PF': [5, 2.0, 'CZCE', '化工'],
             'PK': [5, 2.0, 'CZCE', '生鲜'],      'PL': [20, 1.0, 'CZCE', '化工'],
+            'PM': [50, 1.0, 'CZCE', '软商品'],   'RI': [20, 1.0, 'CZCE', '软商品'],
             'PR': [15, 2.0, 'CZCE', '化工'],     'PX': [5, 2.0, 'CZCE', '化工'],
             'RM': [10, 1.0, 'CZCE', '油脂油料'], 'SA': [20, 1.0, 'CZCE', '建材'],
+            'RS': [10, 1.0, 'CZCE', '油脂油料'],
             'SF': [5, 2.0, 'CZCE', '黑色'],      'SH': [30, 1.0, 'CZCE', '化工'],
             'SM': [5, 2.0, 'CZCE', '黑色'],      'SR': [10, 1.0, 'CZCE', '软商品'],
             'TA': [5, 2.0, 'CZCE', '化工'],      'UR': [20, 1.0, 'CZCE', '化工'],
+            'WH': [20, 1.0, 'CZCE', '软商品'],   'ZC': [100, 0.2, 'CZCE', '能源'],
 
             # --- 大商所 (DCE) ---
             'a': [10, 1.0, 'DCE', '油脂油料'],   'b': [10, 1.0, 'DCE', '油脂油料'],
+            'bb': [500, 0.05, 'DCE', '建材'],    'fb': [10, 0.05, 'DCE', '建材'],
             'c': [10, 1.0, 'DCE', '软商品'],     'cs': [10, 1.0, 'DCE', '软商品'],
             'eb': [5, 1.0, 'DCE', '化工'],       'eg': [10, 1.0, 'DCE', '化工'],
             'i': [100, 0.5, 'DCE', '黑色'],      'j': [100, 0.5, 'DCE', '黑色'],
-            'jd': [10, 1.0, 'DCE', '生鲜'],      'jm': [60, 0.5, 'DCE', '黑色'],
+            'jd': [5, 1.0, 'DCE', '生鲜'],       'jm': [60, 0.5, 'DCE', '黑色'],
             'l': [5, 1.0, 'DCE', '化工'],        'lg': [90, 0.5, 'DCE', '建材'],
             'lh': [16, 5.0, 'DCE', '生鲜'],      'm': [10, 1.0, 'DCE', '油脂油料'],
             'p': [10, 2.0, 'DCE', '油脂油料'],   'pg': [20, 1.0, 'DCE', '能源'],
@@ -95,7 +100,8 @@ class ChineseFuturesRegistry(BaseRegistry):
             'rb': [10, 1.0, 'SHFE', '黑色'],     'ru': [10, 5.0, 'SHFE', '化工'],
             'sc': [1000, 0.1, 'INE', '能源'],    'sn': [1, 10.0, 'SHFE', '有色'],
             'sp': [10, 2.0, 'SHFE', '软商品'],   'ss': [5, 5.0, 'SHFE', '黑色'],
-            'zn': [5, 5.0, 'SHFE', '有色'],      'ec': [50, 0.1, 'INE', '航运'],
+            'wr': [10, 1.0, 'SHFE', '黑色'],     'zn': [5, 5.0, 'SHFE', '有色'],
+            'ec': [50, 0.1, 'INE', '航运'],
 
             # --- 广期所 (GFEX) ---
             'si': [5, 5.0, 'GFEX', '新能源'],    'ps': [3, 5.0, 'GFEX', '新能源'],
@@ -390,6 +396,46 @@ class CNOptionsRegistry(GenericOptionsRegistry):
         super().__init__(exchange="CN", multiplier=10_000, margin_rate=1.0, tick_size=0.0001, fee_open=5.0)
 
 
+class UnsupportedInstrumentRegistry(BaseRegistry):
+    """Explicitly block markets whose physical contract registry is unfinished."""
+
+    def __init__(self, market_vertical: str) -> None:
+        self.market_vertical = market_vertical
+
+    def _unsupported(self):
+        raise ValueError(
+            f"Instrument specifications for {self.market_vertical} are not registered. "
+            "This market cannot use another market's contract multipliers, ticks, margins, or fees."
+        )
+
+    def get_profile(self, ticker: str) -> InstrumentProfile:
+        self._unsupported()
+
+    def get_sector_map(self) -> Dict[str, str]:
+        self._unsupported()
+
+    def get_margin_map(self) -> Dict[str, float]:
+        self._unsupported()
+
+    def get_multiplier_map(self) -> Dict[str, int]:
+        self._unsupported()
+
+    def get_fee_profile_map(self) -> Dict[str, Dict[str, Any]]:
+        self._unsupported()
+
+    def get_fee_type_map(self) -> Dict[str, str]:
+        self._unsupported()
+
+    def get_fee_open_map(self) -> Dict[str, float]:
+        self._unsupported()
+
+    def get_fee_close_history_map(self) -> Dict[str, float]:
+        self._unsupported()
+
+    def get_fee_close_today_map(self) -> Dict[str, float]:
+        self._unsupported()
+
+
 # ---------------------------------------------------------
 # 5. The Master Factory Router
 # ---------------------------------------------------------
@@ -401,8 +447,7 @@ class InstrumentMaster:
     def __init__(self, asset_class: str = "FUTURES_CN"):
         asset_class = normalize_market_vertical(asset_class)
         if asset_class not in ASSET_TAXONOMY:
-            print(f"⚠️ WARNING: '{asset_class}' not in ASSET_TAXONOMY. Defaulting to FUTURES_CN.")
-            asset_class = "FUTURES_CN"
+            raise ValueError(f"Unknown market vertical {asset_class!r}; no InstrumentMaster fallback is allowed.")
             
         self.asset_class = asset_class
         self.taxonomy = ASSET_TAXONOMY[asset_class]
@@ -421,8 +466,7 @@ class InstrumentMaster:
         elif "OPTIONS_CN" in asset_class:
             self.registry = CNOptionsRegistry()
         else:
-            # Fallback
-            self.registry = ChineseFuturesRegistry()
+            self.registry = UnsupportedInstrumentRegistry(asset_class)
 
     # Pass-through methods to the active registry
     def get_profile(self, ticker: str) -> InstrumentProfile:

@@ -56,8 +56,8 @@ Mac:
 - `src/oqp/brokers/qmt.py`: connector-backed `BrokerAdapter`
 - `src/oqp/brokers/registry.py`: QMT profiles
 - `src/oqp/qmt_connector/stub_server.py`: stdlib fake connector for pre-QMT development
-- `scripts/run_qmt_connector_stub.py`: local connector stub runner
-- `scripts/update_qmt_account_snapshot.py`: pulls QMT state into account ledger
+- `scripts/trading/run_qmt_connector_stub.py`: local connector stub runner
+- `scripts/trading/update_qmt_account_snapshot.py`: pulls QMT state into account ledger
 - `src/oqp/accounts/converters.py`: generic broker snapshot to account snapshot
 - `src/oqp/ops/status.py`: QMT connector status and safety checks
 - `.env.example`: QMT runtime and safety variables
@@ -105,7 +105,7 @@ written and tested.
 Before broker registration, run the local connector stub from the repo:
 
 ```bash
-PYTHONPATH=src:. python scripts/run_qmt_connector_stub.py \
+PYTHONPATH=src:. python scripts/trading/run_qmt_connector_stub.py \
   --host 127.0.0.1 \
   --port 58668 \
   --mode readonly \
@@ -125,13 +125,13 @@ QMT_PAPER_ACCOUNT_ID=PAPER123
 Then test the read-only ledger path:
 
 ```bash
-PYTHONPATH=src:. python scripts/update_qmt_account_snapshot.py --profile qmt_paper_readonly
+PYTHONPATH=src:. python scripts/trading/update_qmt_account_snapshot.py --profile qmt_paper_readonly
 ```
 
 For a controlled paper-submit demo only, restart the stub with:
 
 ```bash
-PYTHONPATH=src:. python scripts/run_qmt_connector_stub.py \
+PYTHONPATH=src:. python scripts/trading/run_qmt_connector_stub.py \
   --host 127.0.0.1 \
   --port 58669 \
   --mode paper_submit \
@@ -365,7 +365,7 @@ Response:
 7. Run:
 
 ```bash
-PYTHONPATH=src:. python scripts/update_qmt_account_snapshot.py --profile qmt_paper_readonly
+PYTHONPATH=src:. python scripts/trading/update_qmt_account_snapshot.py --profile qmt_paper_readonly
 ```
 
 8. Open Ops Dashboard and confirm QMT heartbeat/account rows.

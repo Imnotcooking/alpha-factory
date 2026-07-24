@@ -36,7 +36,7 @@ runtime/artifacts/trade_proposals/
 The review command is:
 
 ```bash
-PYTHONPATH=src:. python scripts/review_paper_trade_proposal.py runtime/artifacts/trade_proposals --notify
+PYTHONPATH=src:. python scripts/trading/review_paper_trade_proposal.py runtime/artifacts/trade_proposals --notify
 ```
 
 The review writes audit rows to:
@@ -108,13 +108,13 @@ accepts normalized strategy ids such as `iron_condor`, `long_call`,
 Submission preflight, no broker order:
 
 ```bash
-PYTHONPATH=src:. python scripts/run_paper_order_submitter.py --record-events
+PYTHONPATH=src:. python scripts/trading/run_paper_order_submitter.py --record-events
 ```
 
 Guarded broker submission for tickets already marked `approved_for_submit`:
 
 ```bash
-PYTHONPATH=src:. python scripts/run_paper_order_submitter.py --submit-approved --notify
+PYTHONPATH=src:. python scripts/trading/run_paper_order_submitter.py --submit-approved --notify
 ```
 
 This path requires all of the following:

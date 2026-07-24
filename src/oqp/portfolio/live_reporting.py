@@ -314,6 +314,7 @@ def asset_sleeve_mix(
             errors="coerce",
         ).abs()
         out["Sleeve"] = out.apply(_asset_sleeve, axis=1)
+        out["Sleeve Symbol"] = out.apply(_sleeve_display_symbol, axis=1)
         grouped = (
             out.loc[out["Exposure Value"] > 0]
             .groupby("Sleeve", sort=False)
@@ -321,7 +322,7 @@ def asset_sleeve_mix(
                 **{
                     "Exposure Value": ("Exposure Value", "sum"),
                     "Rows": ("Symbol", "count"),
-                    "Symbols": ("Symbol", _compact_symbols),
+                    "Symbols": ("Sleeve Symbol", _compact_symbols),
                 }
             )
             .reset_index()
@@ -676,6 +677,23 @@ def _asset_sleeve(row: pd.Series) -> str:
     if "equity" in asset_class or "stock" in asset_class:
         return "Equity (core)"
     return "Other"
+
+
+def _sleeve_display_symbol(row: pd.Series) -> str:
+    """Use the underlying ticker instead of a full option contract label."""
+
+    symbol = str(row.get("Symbol") or "").upper().strip()
+    asset_class = str(row.get("Asset Class") or "").lower()
+    dte = row.get("DTE")
+    if "option" not in asset_class and pd.isna(dte):
+        return symbol
+    underlying = str(row.get("Underlying") or "").upper().strip()
+    if underlying:
+        return underlying
+    parsed = parse_option_contract(
+        {"symbol": symbol, "asset_class": asset_class or "option", "metadata_json": "{}"}
+    )
+    return parsed.underlying if parsed is not None and parsed.underlying else symbol
 
 
 def _sector_for_row(

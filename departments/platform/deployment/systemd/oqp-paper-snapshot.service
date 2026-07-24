@@ -10,6 +10,6 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/oqp_new
 EnvironmentFile=-/home/ubuntu/.oqp_server_env
 Environment=PYTHONPATH=src:.
-ExecStart=/home/ubuntu/oqp_new/scripts/run_paper_snapshot_job.sh
+ExecStart=/home/ubuntu/oqp_new/scripts/trading/run_paper_snapshot_job.sh
 StandardOutput=append:/home/ubuntu/oqp_new/runtime/logs/paper_snapshot_job.log
 StandardError=append:/home/ubuntu/oqp_new/runtime/logs/paper_snapshot_job.log

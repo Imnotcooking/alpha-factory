@@ -178,6 +178,41 @@ def latest_model_artifact(
     return dict(row) if row else None
 
 
+def list_model_artifacts(
+    db_path: str | Path = DEFAULT_RESEARCH_DB_PATH,
+    *,
+    model_type: str | None = None,
+    factor_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return recent model artifacts for dashboard and audit consumers."""
+
+    ensure_model_registry_tables(db_path)
+    clauses: list[str] = []
+    params: list[Any] = []
+    if model_type:
+        clauses.append("model_type = ?")
+        params.append(str(model_type).lower())
+    if factor_id:
+        clauses.append("factor_id = ?")
+        params.append(factor_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(max(1, int(limit)))
+
+    with closing(sqlite3.connect(Path(db_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT * FROM {MODEL_REGISTRY_TABLE}
+            {where}
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def record_from_artifact(
     *,
     artifact_id: str,

@@ -1,0 +1,48 @@
+version: 1
+active_program: null
+execution_policy:
+  parallel_alpha_search: false
+  publication_review_required_before_new_research: true
+  threshold_search_requires_validated_router: true
+  universe_optimization_requires_validated_router: true
+  private_by_default: true
+programs:
+  daily_replication:
+    project: 07_04_daily_volatility_router_cn_futures_replication_private
+    status: frozen_complete
+    phase: replication_and_internal_report_editorial_review_complete
+    publication_status: manager_signoff_pending
+    role: faithful_replication
+    feeds: [daily_vector_state_router, daily_public_paper]
+  daily_vector_state_router:
+    project: 07_05_daily_vector_state_router_cn_futures_private
+    status: frozen_complete_no_router
+    phase: daily_mechanism_program_complete_no_router_unlocked
+    role: private_mechanism_and_alpha_extension
+    receives_from: [daily_replication]
+    feeds: [daily_public_paper]
+  daily_public_paper:
+    project: 07_06_daily_volatility_router_cn_futures_replication_public
+    status: frozen_complete
+    phase: sanitized_replication_manuscript_complete
+    role: sanitized_publication_mirror
+    receives_from: [daily_replication, daily_vector_state_router]
+  intraday_microstructure:
+    project: 07_03_intraday_alpha_router_cn_futures_private
+    status: paused
+    phase: paused_at_m1b_mechanism_checkpoint
+    role: private_mechanism_and_alpha_research
+    public_mirror: 07_02_intraday_volatility_router_cn_futures
+  intraday_public_paper:
+    project: 07_02_intraday_volatility_router_cn_futures
+    status: evidence_intake_frozen
+    role: sanitized_publication_mirror
+  daily_latent_regimes:
+    project: 07_01_daily_latent_regimes_cn_futures
+    status: separate
+    role: independent_preexisting_project
+  gtja_alpha191_equity_cn:
+    project: 07_07_gtja_alpha191_equity_cn_private
+    status: implementation_complete_validation_blocked
+    phase: factor_library_and_futures_adaptation_audit_complete
+    role: private_factor_collection_import

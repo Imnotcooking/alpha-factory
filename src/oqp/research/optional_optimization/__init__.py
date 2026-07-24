@@ -1,0 +1,93 @@
+"""Governed single-layer optional optimization for Phase 8."""
+
+from oqp.research.optional_optimization.contracts import (
+    LAYER_COMPONENT_TYPES,
+    PHASE8_SCHEMA_VERSION,
+    PHASE8_SUPPORTED_SAMPLERS,
+    OptimizationLayer,
+    Phase8ExperimentSpec,
+    Phase8FoldConfig,
+    Phase8ObjectiveSpec,
+    load_phase8_experiment_spec,
+)
+from oqp.research.optional_optimization.folds import (
+    Phase8Fold,
+    build_phase8_folds,
+)
+from oqp.research.optional_optimization.factor_evaluator import (
+    FactorPredictiveFoldEvaluator,
+    load_factor_development_data,
+)
+from oqp.research.optional_optimization.readiness import (
+    audit_phase8_readiness,
+    write_phase8_readiness,
+)
+from oqp.research.optional_optimization.runner import (
+    FrozenPhase8Candidate,
+    Phase8FoldEvaluator,
+    Phase8HoldoutEvaluator,
+    Phase8SearchResult,
+    bayesian_shrunk_mean,
+    evaluate_final_holdout_once,
+    freeze_phase8_candidate,
+    run_phase8_search,
+    write_phase8_search_result,
+)
+from oqp.research.optional_optimization.study_builder import (
+    DEFAULT_PHASE8_ARTIFACT_ROOT,
+    DEFAULT_STUDY_CONFIG_ROOT,
+    FrozenComponentOption,
+    OptimizationComponentOption,
+    OptimizationDatasetOption,
+    build_component_study_definition,
+    build_factor_study_definition,
+    default_study_id,
+    load_component_options,
+    load_dataset_options,
+    load_frozen_component_options,
+    parameter_schema_rows,
+    resolve_selected_component_schema,
+    study_definition_payload,
+    write_frozen_study_definition,
+)
+
+__all__ = [
+    "LAYER_COMPONENT_TYPES",
+    "DEFAULT_PHASE8_ARTIFACT_ROOT",
+    "DEFAULT_STUDY_CONFIG_ROOT",
+    "PHASE8_SCHEMA_VERSION",
+    "PHASE8_SUPPORTED_SAMPLERS",
+    "FrozenPhase8Candidate",
+    "FrozenComponentOption",
+    "FactorPredictiveFoldEvaluator",
+    "OptimizationLayer",
+    "OptimizationComponentOption",
+    "OptimizationDatasetOption",
+    "Phase8ExperimentSpec",
+    "Phase8Fold",
+    "Phase8FoldConfig",
+    "Phase8FoldEvaluator",
+    "Phase8HoldoutEvaluator",
+    "Phase8ObjectiveSpec",
+    "Phase8SearchResult",
+    "audit_phase8_readiness",
+    "bayesian_shrunk_mean",
+    "build_phase8_folds",
+    "build_component_study_definition",
+    "build_factor_study_definition",
+    "default_study_id",
+    "evaluate_final_holdout_once",
+    "freeze_phase8_candidate",
+    "load_phase8_experiment_spec",
+    "load_component_options",
+    "load_dataset_options",
+    "load_frozen_component_options",
+    "load_factor_development_data",
+    "parameter_schema_rows",
+    "resolve_selected_component_schema",
+    "run_phase8_search",
+    "write_phase8_readiness",
+    "write_phase8_search_result",
+    "study_definition_payload",
+    "write_frozen_study_definition",
+]

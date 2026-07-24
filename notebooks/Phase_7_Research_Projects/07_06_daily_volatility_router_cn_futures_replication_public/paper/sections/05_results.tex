@@ -1,0 +1,79 @@
+\section{Replication Results}
+
+\subsection{Standalone sleeve economics}
+
+\begin{table}[H]
+\centering
+\caption{Gross strategy performance}
+\label{tab:performance}
+\begin{tabular}{lrrr}
+\toprule
+Strategy & Annual return & Sharpe & Maximum drawdown \\
+\midrule
+Momentum & 13.25\% & 0.46 & $-39.35\%$ \\
+Reversal & $-2.89\%$ & $-0.10$ & $-50.48\%$ \\
+Static 50/50 & 5.18\% & 0.33 & $-17.61\%$ \\
+Primary router & 13.69\% & 0.51 & $-36.24\%$ \\
+Equal-proxy router & 7.77\% & 0.30 & $-47.37\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Momentum is positive in the evaluation sample, although its risk-adjusted performance is
+modest and its drawdown is large. Reversal has negative unconditional economics. This is
+already a challenge for the source mechanism: a router can create stable value only if
+the replacement sleeve is economically useful in the states in which it is selected.
+
+The primary router has the highest endpoint and a slightly smaller drawdown than
+momentum. It does not dominate the static blend on drawdown, and the equal-proxy router
+performs materially worse than momentum. \Cref{fig:performance} illustrates why endpoint
+ranking alone is an incomplete replication criterion.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.96\textwidth]{fig01_public_performance.png}
+\caption{Gross performance and path risk. The two routers differ only in the definition
+of aggregate market volatility.}
+\label{fig:performance}
+\end{figure}
+
+\subsection{The conditional relation is neither monotonic nor proxy-stable}
+
+Under the primary proxy, reversal exceeds momentum in Q2 and Q4, while momentum strongly
+dominates in Q3. In Q4 both sleeves lose money: momentum averages $-0.71\%$ per month and
+reversal averages $-0.54\%$. The 17 basis-point difference satisfies the source
+direction only weakly and does not show that reversal becomes a positive high-volatility
+sleeve.
+
+Under equal-product volatility, the Q4 ranking reverses. Momentum averages 2.40\% per
+month and reversal 0.90\%. Q3, not Q4, is the state in which reversal exceeds momentum.
+The conditional pattern is therefore not a monotonic function of volatility and is not
+stable to a reasonable market definition.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.96\textwidth]{fig02_public_conditional_returns.png}
+\caption{Conditional gross returns by the lagged volatility state used for the holding
+month.}
+\label{fig:conditional}
+\end{figure}
+
+\subsection{The primary improvement is event-concentrated}
+
+The primary router improves on momentum by only 3.69 basis points per month on average,
+with a HAC $t$-statistic of 0.06. Among 14 Q4 months, reversal wins four. Its mean
+advantage over momentum is 0.17\% per month, but the median is $-2.68\%$. One event has a
+34.28 percentage-point reversal advantage; excluding it, the mean Q4 advantage is
+$-2.45\%$ per month.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{fig05_public_event_influence.png}
+\caption{Aggregate Q4 influence diagnostics. The event date and return series are not
+included in the sanitized evidence package.}
+\label{fig:influence}
+\end{figure}
+
+This pattern is better described as an event-level momentum-crash hedge echo than a
+stable Q4 routing relation. A single successful rescue is economically interesting, but
+it does not make high volatility a sufficient switching condition.

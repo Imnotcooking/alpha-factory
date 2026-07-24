@@ -1,0 +1,83 @@
+\section{Data and Empirical Design}
+
+\subsection{Sample construction}
+
+The daily panel spans January 2016 through June 2026 and begins from 88 futures products
+across 13 broad economic sectors. Daily main contracts are selected causally using only
+lagged activity. Returns are computed only when consecutive product observations refer to
+the same underlying contract, preventing a change in quoted delivery contract from being
+treated as an asset return. The analysis does not delete products or sectors because of
+realized strategy performance.
+
+\begin{table}[H]
+\centering
+\caption{Sanitized sample and design summary}
+\label{tab:sample}
+\begin{tabular}{lr}
+\toprule
+Item & Value \\
+\midrule
+Daily data span & 2016-01 to 2026-06 \\
+Initial product set & 88 \\
+Broad sectors & 13 \\
+Evaluation period & 2021-01 to 2026-06 \\
+Evaluation months & 66 \\
+Mean eligible products per month & 65.9 \\
+Momentum formation / skip & 11 months / 1 month \\
+Reversal formation & 1 month \\
+Long and short tails & 10\% each \\
+Volatility history & 60 months \\
+Router boundary & Fixed Q4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The distinction between the full data span and the strategy evaluation span is
+important. Five years of observations are required before a monthly volatility can be
+placed in its trailing distribution. The approximately ten-year panel therefore yields
+only 66 evaluable holding months and 14 primary-proxy Q4 months. The effective tail-state
+sample is small even though the underlying daily panel is broad.
+
+\subsection{Sleeves}
+
+For holding month $m$, the momentum score compounds product returns from $m-12$ through
+$m-2$:
+\begin{equation}
+  MOM_{i,m}=\prod_{k=2}^{12}(1+R_{i,m-k})-1.
+\end{equation}
+The momentum sleeve buys the top decile and sells the bottom decile. The reversal score
+is the most recent complete-month return,
+\begin{equation}
+  REVScore_{i,m}=R_{i,m-1},
+\end{equation}
+and the portfolio buys prior losers and sells prior winners. Each long and short leg is
+equally weighted and has unit gross exposure.
+
+\subsection{Volatility states and causal routing}
+
+For each proxy, monthly market volatility is the sample standard deviation of daily
+market returns within month $t$:
+\begin{equation}
+  \sigma_t=sd\{r^M_d:d\in t\}.
+\end{equation}
+The current observation is ranked in the trailing 60-month volatility distribution. The
+state determined in $t$ first affects holdings in $t+1$:
+\begin{equation}
+R^{Router}_{t+1}=
+\begin{cases}
+R^{REV}_{t+1}, & \sigma_t\in Q4,\\
+R^{MOM}_{t+1}, & \sigma_t\in\{Q1,Q2,Q3\}.
+\end{cases}
+\label{eq:router}
+\end{equation}
+The 75th-percentile boundary and both market proxies were specified without searching the
+reported return sample.
+
+\subsection{Evaluation logic}
+
+We report arithmetic annual return, annualized volatility, Sharpe ratio, maximum
+drawdown, conditional monthly means, and heteroskedasticity-and-autocorrelation-consistent
+tests of return differences. Robust replication additionally requires that the Q4
+relation be positive and representative across months, survive the equal-product proxy,
+and improve on momentum and the static blend. Indicative implementation adjustments are
+treated as a secondary feasibility check rather than a reason to modify signals.

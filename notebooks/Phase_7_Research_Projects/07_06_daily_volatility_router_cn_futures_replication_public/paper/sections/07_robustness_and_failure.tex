@@ -1,0 +1,51 @@
+\section{Robustness and Failure Audit}
+
+\subsection{Predefined diagnostic gates}
+
+We distinguish source-direction checks from robust replication. The primary sample can
+pass a directional check---reversal loses slightly less than momentum in Q4---while
+failing every stability condition needed for a usable router.
+
+\begin{table}[H]
+\centering
+\caption{Robust replication diagnostics}
+\label{tab:gates}
+\begin{tabularx}{\textwidth}{YcY}
+\toprule
+Diagnostic & Passed & Interpretation \\
+\midrule
+Primary Q4 reversal mean is positive & No & Replacement sleeve still loses in Q4 \\
+Primary Q4 reversal wins at least half of months & No & Wins in 4 of 14 months \\
+Primary router increment has HAC $t\geq 1$ & No & Increment $t=0.06$ \\
+Equal-proxy Q4 reversal exceeds momentum & No & Q4 ranking reverses \\
+Equal-proxy router exceeds momentum & No & Router endpoint is lower \\
+Positive increment is broad across time & No & One event determines the sign \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The failure is overdetermined: it does not rest on one conventional significance cutoff.
+It appears in sign stability, win frequency, event influence, market-proxy sensitivity,
+and benchmark ranking.
+
+\subsection{Why no percentile search follows}
+
+It would be straightforward to search for a volatility percentile at which the primary
+sample looks better. Such a search would answer a different question. The source paper's
+75th-percentile rule was the object of replication; the current evidence indicates that
+volatility does not impose a stable ordering on the sleeves. Optimizing a boundary on a
+non-monotonic and proxy-sensitive relation would primarily fit the locations of a small
+number of events.
+
+For the same reason, we do not remove products or sectors based on historical
+contribution. Outcome-based universe reduction would change the cross-market replication
+into a strategy-selection exercise and understate specification uncertainty.
+
+\subsection{Indicative implementation evidence}
+
+An indicative implementation check applied product-specific fee conventions and uniform
+adverse slippage. It did not change the economic ranking between the primary router and
+momentum. The difference remained small relative to model and path uncertainty. We do
+not report execution parameters or interpret this translation as a fully implementable
+portfolio: it excludes integer-lot positioning, capacity, exchange-limit, and margin
+models. Detailed execution research is unnecessary until the gross mechanism is stable.

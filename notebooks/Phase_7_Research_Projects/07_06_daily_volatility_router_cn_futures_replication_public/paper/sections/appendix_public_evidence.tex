@@ -1,0 +1,73 @@
+\section{Public Evidence Contract}
+
+\subsection{Sanitization boundary}
+
+The manuscript and all five figures build from a single reviewed JSON file containing
+rounded aggregate statistics. The public evidence package excludes source-data files,
+contract identifiers, target positions, product- and sector-level PnL attribution,
+return time series, event dates, account assumptions, and execution schedules. The
+figure builder reads no other research input.
+
+This separation serves two purposes. It prevents accidental disclosure of proprietary
+research surfaces, and it makes every public empirical claim auditable against a compact
+allowlist. Rounding can create small arithmetic differences between displayed aggregates;
+no inference is recomputed from rounded values.
+
+\subsection{Methodology lock}
+
+Before the replication returns were inspected, the following objects were fixed:
+
+\begin{itemize}
+  \item causal daily main-contract construction and same-contract returns;
+  \item 11-month momentum formation with a one-month skip;
+  \item one-month reversal formation;
+  \item equal-weight top and bottom 10\% portfolio legs;
+  \item a 60-month volatility distribution and fixed Q4 switch;
+  \item one-month signal-to-holding lag;
+  \item primary lagged open-interest-notional and equal-product market proxies;
+  \item prohibition of threshold, sector, product, and universe selection.
+\end{itemize}
+
+\subsection{Reproduction of public figures}
+
+The public figures can be rebuilt with the standalone script described in the project
+README. The boundary test verifies that the public tree contains no private research
+paths, contract-level files, source hashes, or disallowed execution fields, and that the
+figure script reads only the aggregate evidence JSON.
+
+\section{Additional Aggregate Tables}
+
+\begin{table}[H]
+\centering
+\caption{Conditional mean monthly gross returns (percent)}
+\begin{tabular}{llrrr}
+\toprule
+Proxy & State & Months & Momentum & Reversal \\
+\midrule
+OI-notional & Q1 & 21 & 0.66 & $-0.12$ \\
+OI-notional & Q2 & 17 & $-0.92$ & 2.86 \\
+OI-notional & Q3 & 14 & 6.04 & $-3.89$ \\
+OI-notional & Q4 & 14 & $-0.71$ & $-0.54$ \\
+\midrule
+Equal product & Q1 & 12 & 5.20 & $-1.97$ \\
+Equal product & Q2 & 15 & $-1.07$ & $-1.05$ \\
+Equal product & Q3 & 19 & $-1.14$ & 0.29 \\
+Equal product & Q4 & 20 & 2.40 & 0.90 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Primary-proxy cross-sectional anatomy by signal state}
+\begin{tabular}{lrrr}
+\toprule
+State & Pairwise correlation & Dispersion & Directional coherence \\
+\midrule
+Q1 & 0.147 & 1.21\% & 0.300 \\
+Q2 & 0.191 & 1.33\% & 0.332 \\
+Q3 & 0.187 & 1.50\% & 0.326 \\
+Q4 & 0.254 & 1.71\% & 0.376 \\
+\bottomrule
+\end{tabular}
+\end{table}

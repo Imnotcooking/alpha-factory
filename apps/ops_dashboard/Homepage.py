@@ -33,7 +33,6 @@ from oqp.accounts import (  # noqa: E402
     load_latest_account_positions,
 )
 from oqp.config import load_settings  # noqa: E402
-from oqp.intelligence import EngineContext, default_intelligence_coordinator  # noqa: E402
 from oqp.ops import collect_ops_status  # noqa: E402
 from oqp.paper_trading import (  # noqa: E402
     PaperOrderTicketStatus,
@@ -59,15 +58,11 @@ from oqp.ui import (  # noqa: E402
     nav_tiles,
     ops_text,
     page_header,
-    qmt_account_rows,
     qmt_overall_status,
-    qmt_safety_gate_frame,
-    qmt_status_frame,
     qmt_submit_state,
     render_dark_bar_chart,
     render_dark_line_chart,
     render_dark_table,
-    render_market_lane_overview,
     section_header,
     tr,
 )
@@ -177,6 +172,28 @@ def humanize_detail_timestamps(value: Any) -> str:
     return ISO_TIMESTAMP_RE.sub(replace, text)
 
 
+def ibkr_status_priority(row: pd.Series, *, today: pd.Timestamp | None = None) -> str:
+    """Promote IBKR status artifacts not dated yesterday to red/high."""
+
+    category = str(row.get("Category") or "")
+    check = str(row.get("Check") or "")
+    detail = str(row.get("Detail") or "")
+    if category != "Broker Heartbeat" or "IBKR" not in check.upper():
+        return "medium"
+    match = ISO_TIMESTAMP_RE.search(detail)
+    if match is None:
+        return "high"
+    modified = pd.to_datetime(match.group(0), errors="coerce", utc=True)
+    if pd.isna(modified):
+        return "high"
+    local_today = today or pd.Timestamp.now(tz="Asia/Shanghai")
+    if local_today.tzinfo is None:
+        local_today = local_today.tz_localize("Asia/Shanghai")
+    expected_date = (local_today - pd.Timedelta(days=1)).date()
+    modified_date = modified.tz_convert(local_today.tzinfo).date()
+    return "medium" if modified_date == expected_date else "high"
+
+
 def source_label(value: Any) -> str:
     text = str(value or "").strip().lower()
     if "account ledger" in text:
@@ -214,65 +231,6 @@ def parse_metadata(value: Any) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return decoded if isinstance(decoded, dict) else {}
-
-
-def status_dataframe(rows: list[dict[str, object]] | pd.DataFrame) -> None:
-    frame = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
-    render_dark_table(frame, empty_message="No status rows available.", max_height_px=420)
-
-
-def engine_results_frame(results: dict[str, Any]) -> pd.DataFrame:
-    rows = []
-    for result in results.values():
-        rows.append(
-            {
-                "Engine": result.engine_name,
-                "Engine ID": result.engine_id,
-                "Status": status_label(result.status.value),
-                "Summary": result.summary,
-                "Generated": result.generated_at.isoformat(timespec="seconds"),
-                "Frames": ", ".join(result.frames) if result.frames else "none",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def render_engine_result(result: Any) -> None:
-    st.subheader(result.engine_name)
-    cols = st.columns(4)
-    cols[0].metric("Status", status_label(result.status.value))
-    cols[1].metric("Engine ID", result.engine_id)
-    cols[2].metric("Frames", str(len(result.frames)))
-    cols[3].metric("Generated", result.generated_at.isoformat(timespec="seconds"))
-
-    if result.status.value == "pass":
-        st.success(result.summary)
-    elif result.status.value in {"warn", "skipped"}:
-        st.warning(result.summary)
-    else:
-        st.error(result.summary)
-
-    if result.metrics:
-        render_dark_table(
-            pd.DataFrame(
-                [
-                    {"Metric": key, "Value": value}
-                    for key, value in result.metrics.items()
-                ]
-            ),
-        )
-
-    if result.frames:
-        frame_tabs = st.tabs([name.replace("_", " ").title() for name in result.frames])
-        for tab, (name, frame) in zip(frame_tabs, result.frames.items()):
-            with tab:
-                if frame.empty:
-                    st.info(f"No rows available for {name}.")
-                else:
-                    render_dark_table(frame, max_height_px=420)
-
-    if result.signals:
-        st.caption(f"Signals: {json.dumps(result.signals, default=str)}")
 
 
 def category_rows(frame: pd.DataFrame, category: str) -> list[dict[str, object]]:
@@ -376,22 +334,6 @@ def environment_summary(
         "as_of": as_of,
         "source": source,
         "performance": performance,
-    }
-
-
-def summary_metric_row(name: str, summary: dict[str, Any]) -> dict[str, str]:
-    performance = summary["performance"]
-    return {
-        "Account": name,
-        "NAV": compact_money(summary["nav"]),
-        "Total Cash": compact_money(summary["cash"]),
-        "P&L": compact_signed_money(summary["daily_pnl"]),
-        "Pos": str(summary["position_count"]),
-        "Day %": percent(performance.get("daily_return")),
-        "Max Drawdown": percent(performance.get("max_drawdown_pct")),
-        "Gross Exposure / NAV": percent(performance.get("gross_exposure_pct")),
-        "Source": source_label(summary["source"]),
-        "Updated": human_timestamp(summary["as_of"]),
     }
 
 
@@ -547,12 +489,17 @@ def action_queue_rows(
                 "inspect the System tab",
             )
         for _, row in items[items["Status"].eq("warn")].head(5).iterrows():
+            priority = ibkr_status_priority(row)
             add(
-                "medium",
+                priority,
                 str(row.get("Category", "")),
                 "warn",
                 f"{row.get('Check')}: {row.get('Detail')}",
-                "inspect the relevant detail page",
+                (
+                    "restore the IBKR adapter and regenerate yesterday's status"
+                    if priority == "high" and str(row.get("Category")) == "Broker Heartbeat"
+                    else "inspect the relevant detail page"
+                ),
             )
 
     if dry_run_count:
@@ -623,6 +570,8 @@ def action_queue_rows(
             "no immediate action detected",
             "monitor next scheduled snapshot and strategy cycle",
         )
+    priority_order = {"high": 0, "medium": 1, "low": 2, "none": 3}
+    rows.sort(key=lambda row: priority_order.get(row["Priority"], 9))
     return rows
 
 
@@ -785,31 +734,6 @@ def policy_gate_rows(
             "Detail": "Option proposals stay blocked unless this policy is enabled.",
         },
     ]
-
-
-def system_summary_rows(items: pd.DataFrame) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for category in [
-        "Gateway",
-        "Broker Heartbeat",
-        "Accounts",
-        "Jobs",
-        "Schedulers",
-        "Notifications",
-        "Safety",
-        "Host",
-    ]:
-        subset = category_rows(items, category)
-        frame = pd.DataFrame(subset)
-        rows.append(
-            {
-                "Area": category,
-                "Status": status_label(worst_status(frame)),
-                "Checks": str(len(frame)),
-                "Detail": status_detail(frame, "all checks passing"),
-            }
-        )
-    return rows
 
 
 def pipeline_rows(
@@ -1177,9 +1101,6 @@ paper_summary = environment_summary(
 )
 
 overall_counts = items_df["Status"].value_counts().to_dict() if not items_df.empty else {}
-failed_or_warn = (
-    items_df[items_df["Status"].isin(["fail", "warn"])] if not items_df.empty else pd.DataFrame()
-)
 paper_review_ready = bool(
     settings.trading_mode.lower() == "paper"
     and not settings.allow_live_trading
@@ -1239,7 +1160,6 @@ actionable_count = int(
     else 0
 )
 ticket_status = ticket_status_frame(paper_orders)
-system_summary = pd.DataFrame(system_summary_rows(items_df))
 page_header(
     title="Ops Dashboard",
     title_zh="运营驾驶舱",
@@ -1247,7 +1167,6 @@ page_header(
     subtitle_zh="统一监控实盘、模拟交易、执行安全与服务器健康状态。",
     language=OPS_LANG,
 )
-render_market_lane_overview(language=OPS_LANG, expanded=True)
 st.caption(T("checked_at", time=human_timestamp(snapshot.checked_at)))
 if server_sync:
     st.caption(
@@ -1268,17 +1187,22 @@ with st.container(border=True):
         ),
         accent="teal",
     )
-    top_cols = st.columns(10)
-    top_cols[0].metric(T("overall"), status_label(snapshot.overall_status))
-    top_cols[1].metric(T("failures"), str(overall_counts.get("fail", 0)))
-    top_cols[2].metric(T("warnings"), str(overall_counts.get("warn", 0)))
-    top_cols[3].metric(T("live_nav"), money(live_summary["nav"]))
-    top_cols[4].metric(T("paper_nav"), money(paper_summary["nav"]))
-    top_cols[5].metric(T("dry_run_tickets"), str(dry_run_count))
-    top_cols[6].metric(T("paper_submit"), T("armed") if paper_submit_ready else T("locked"))
-    top_cols[7].metric(T("action_items"), str(actionable_count))
-    top_cols[8].metric("QMT Heartbeat", qmt_overall_status(snapshot))
-    top_cols[9].metric("QMT Submit", qmt_submit_state(settings))
+    command_metrics = [
+        (T("overall"), status_label(snapshot.overall_status)),
+        (T("failures"), str(overall_counts.get("fail", 0))),
+        (T("warnings"), str(overall_counts.get("warn", 0))),
+        (T("live_nav"), money(live_summary["nav"])),
+        (T("paper_nav"), money(paper_summary["nav"])),
+        (tr(OPS_LANG, "Dry Runs", "模拟票据"), str(dry_run_count)),
+        (T("paper_submit"), T("armed") if paper_submit_ready else T("locked")),
+        (T("action_items"), str(actionable_count)),
+        ("QMT Heartbeat", qmt_overall_status(snapshot)),
+        ("QMT Submit", qmt_submit_state(settings)),
+    ]
+    for start in range(0, len(command_metrics), 5):
+        metric_cols = st.columns(5)
+        for column, (label, value) in zip(metric_cols, command_metrics[start : start + 5]):
+            column.metric(label, value)
 
     if paper_submit_ready:
         st.warning(T("paper_submission_armed"))
@@ -1313,16 +1237,6 @@ with st.container(border=True):
                 tr(OPS_LANG, "Discretionary", "主观工作台"),
                 "/Discretionary_Workbench",
                 tr(OPS_LANG, "Valuation and options tools", "估值与期权工具"),
-            ),
-            (
-                tr(OPS_LANG, "Risk Control", "风险控制"),
-                "/Risk_Control_Room",
-                tr(OPS_LANG, "Exposure and allocation", "敞口与配置"),
-            ),
-            (
-                tr(OPS_LANG, "Execution", "执行监控"),
-                "/Execution_Strategy_Monitor",
-                tr(OPS_LANG, "Orders and strategy ops", "订单与策略运营"),
             ),
             (
                 tr(OPS_LANG, "Journal", "日志报告"),
@@ -1405,69 +1319,5 @@ with st.container(border=True):
         ),
         empty_message=T("no_policy_rows"),
     )
-    st.subheader("QMT Bridge Gates")
-    render_dark_table(qmt_safety_gate_frame(settings), max_height_px=280)
-
-account_left, account_right = st.columns([1.2, 1])
-with account_left:
-    with st.container(border=True):
-        section_header(
-            tr(OPS_LANG, "Account Summary", "账户摘要"),
-            subtitle=tr(
-                OPS_LANG,
-                "Live and paper account state from the unified account ledger.",
-                "来自统一账户账本的实盘与模拟账户状态。",
-            ),
-            accent="blue",
-        )
-        render_dark_table(
-            pd.DataFrame(
-                [
-                    summary_metric_row("Live", live_summary),
-                    summary_metric_row("Paper", paper_summary),
-                ]
-            ),
-            empty_message=T("no_account_summary_rows"),
-        )
-        st.subheader("QMT Account Rows")
-        render_dark_table(
-            qmt_account_rows(snapshot),
-            empty_message="No QMT account rows are available yet.",
-            max_height_px=240,
-        )
-with account_right:
-    with st.container(border=True):
-        section_header(
-            tr(OPS_LANG, "System Summary", "系统摘要"),
-            subtitle=tr(
-                OPS_LANG,
-                "Gateway, scheduler, notification, and host checks.",
-                "网关、调度、通知与主机检查。",
-            ),
-            accent="teal",
-        )
-        render_dark_table(system_summary, empty_message=T("no_system_summary_rows"))
-        st.subheader("QMT System Rows")
-        render_dark_table(
-            qmt_status_frame(snapshot),
-            empty_message="No QMT status rows are available yet.",
-            max_height_px=240,
-        )
-
-with st.container(border=True):
-    section_header(
-        tr(OPS_LANG, "Attention", "需要关注"),
-        subtitle=tr(
-            OPS_LANG,
-            "Full warning and failure detail for anything that still needs review.",
-            "仍需查看的警告与失败细节。",
-        ),
-        accent="rose",
-    )
-    if failed_or_warn.empty:
-        st.success(T("all_ops_passing"))
-    else:
-        status_dataframe(failed_or_warn)
-
 st.caption(T("unified_account_ledger", path=display_path(account_ledger_path)))
 st.stop()

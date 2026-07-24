@@ -1,0 +1,196 @@
+schema_version: oqp_data_source_catalog_v1
+catalog_owner: data_platform
+data_root: runtime/data
+
+datasets:
+  - id: core_feature_store
+    asset_class: CORE
+    timeframe: feature_store
+    relative_path: feature_store
+    storage_role: derived_feature_data
+    providers: [local_pipeline]
+    required: true
+    freshness_max_age_days: 30
+    update_mode: generated
+    owner: data_platform
+    description: Point-in-time feature matrices and model-ready derived data.
+
+  - id: core_regime
+    asset_class: CORE
+    timeframe: regime
+    relative_path: regime
+    storage_role: derived_research_data
+    providers: [local_pipeline]
+    required: true
+    freshness_max_age_days: 30
+    update_mode: generated
+    owner: research
+    description: Regime probabilities, macro indices, and regime labels.
+
+  - id: core_metadata
+    asset_class: CORE
+    timeframe: metadata
+    relative_path: metadata
+    storage_role: reference_metadata
+    providers: [instrument_master, local_pipeline]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: generated
+    owner: data_platform
+    description: Dataset-side metadata derived from canonical instrument contracts.
+
+  - id: core_universes
+    asset_class: CORE
+    timeframe: universes
+    relative_path: universes
+    storage_role: reference_universe
+    providers: [local_pipeline]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: generated
+    owner: research
+    description: Explicit research universes and eligibility snapshots.
+
+  - id: futures_cn_daily
+    asset_class: FUTURES_CN
+    timeframe: daily
+    relative_path: futures_cn/daily
+    storage_role: raw_market_data
+    providers: [static_parquet, qmt_planned, wind_planned]
+    required: true
+    freshness_max_age_days: 30
+    update_mode: file_drop
+    owner: data_platform
+    description: Chinese futures daily continuous or index-style market matrices.
+
+  - id: futures_cn_intraday
+    asset_class: FUTURES_CN
+    timeframe: intraday
+    relative_path: futures_cn/intraday
+    storage_role: raw_market_data
+    providers: [static_parquet, qmt_planned, wind_planned]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: file_drop
+    owner: data_platform
+    description: Chinese futures minute and other intraday bars.
+
+  - id: futures_cn_tick
+    asset_class: FUTURES_CN
+    timeframe: tick
+    relative_path: futures_cn/tick
+    storage_role: raw_market_data
+    providers: [static_parquet, qmt_planned]
+    required: false
+    freshness_max_age_days: 14
+    update_mode: file_drop
+    owner: data_platform
+    description: Chinese futures exchange or vendor tick captures.
+
+  - id: equity_cn_daily
+    asset_class: EQUITY_CN
+    timeframe: daily
+    relative_path: equity_cn/daily
+    storage_role: raw_market_data
+    providers: [static_parquet, qmt_planned, wind_planned]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: file_drop
+    owner: data_platform
+    description: Chinese equity daily bars with point-in-time universe metadata.
+
+  - id: equity_cn_intraday
+    asset_class: EQUITY_CN
+    timeframe: intraday
+    relative_path: equity_cn/intraday
+    storage_role: raw_market_data
+    providers: [static_parquet, qmt_planned]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: file_drop
+    owner: data_platform
+    description: Chinese equity intraday bars.
+
+  - id: equity_cn_tick
+    asset_class: EQUITY_CN
+    timeframe: tick
+    relative_path: equity_cn/tick
+    storage_role: raw_market_data
+    providers: [qmt_planned]
+    required: false
+    freshness_max_age_days: 14
+    update_mode: vendor_sync
+    owner: data_platform
+    description: Chinese equity tick data after QMT integration is approved.
+
+  - id: options_cn_daily
+    asset_class: OPTIONS_CN
+    timeframe: daily
+    relative_path: options_cn/daily
+    storage_role: raw_market_data
+    providers: [static_parquet, qmt_planned]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: file_drop
+    owner: data_platform
+    description: Chinese commodity or equity option chains and settlement fields.
+
+  - id: options_cn_tick
+    asset_class: OPTIONS_CN
+    timeframe: tick
+    relative_path: options_cn/tick
+    storage_role: raw_market_data
+    providers: [static_parquet, qmt_planned]
+    required: false
+    freshness_max_age_days: 14
+    update_mode: file_drop
+    owner: data_platform
+    description: Chinese option quote and trade events where licensed.
+
+  - id: equity_us_api_cache
+    asset_class: EQUITY_US
+    timeframe: api_cache
+    relative_path: equity_us/api_cache
+    storage_role: vendor_cache
+    providers: [fmp, yahoo]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: api_cache
+    owner: data_platform
+    description: Optional cache of US equity API responses and normalized bars.
+
+  - id: options_us_api_cache
+    asset_class: OPTIONS_US
+    timeframe: api_cache
+    relative_path: options_us/api_cache
+    storage_role: vendor_cache
+    providers: [massive]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: api_cache
+    owner: data_platform
+    description: Optional cache of Massive option-chain and market-data responses.
+
+  - id: equity_us_api_materialized
+    asset_class: EQUITY_US
+    timeframe: daily
+    relative_path: api_materialized/equity_us/fmp
+    storage_role: immutable_research_dataset
+    providers: [fmp]
+    required: false
+    freshness_max_age_days: 30
+    update_mode: immutable_api_snapshot
+    owner: data_platform
+    description: Fingerprinted FMP daily bars with sanitized request, raw response, quality report, and normalized parquet.
+
+  - id: options_us_api_materialized
+    asset_class: OPTIONS_US
+    timeframe: snapshot
+    relative_path: api_materialized/options_us/massive
+    storage_role: immutable_vendor_snapshot
+    providers: [massive]
+    required: false
+    freshness_max_age_days: 1
+    update_mode: immutable_api_snapshot
+    owner: data_platform
+    description: Fingerprinted current Massive chains for prospective collection; individual snapshots are not historical backtest panels.

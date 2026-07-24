@@ -962,7 +962,7 @@ def _render_nav(options: dict[str, str]) -> str:
     option_keys = list(options.keys())
     _ensure_option_state("tick_pulse_nav", option_keys, option_keys[0])
     selected = st.pills(
-        "Intraday Event Study navigation",
+        "Event Study navigation",
         option_keys,
         selection_mode="single",
         format_func=lambda key: options[key],
@@ -1068,7 +1068,7 @@ def _build_tick_pulse_evidence_ticket_payload(
     hypothesis_key = seed_id if seed_id else selected_hypothesis
     factor_id = f"tick_pulse_{_ticket_slug(hypothesis_key)}"
     signature_payload = {
-        "source_page": "03_Intraday_Event_Study",
+            "source_page": "02_Discovery_Lab",
         "source_file": selected_file,
         "symbol": selected_symbol,
         "hypothesis": selected_hypothesis,
@@ -1086,7 +1086,7 @@ def _build_tick_pulse_evidence_ticket_payload(
     return {
         "ticket_id": ticket_id,
         "title": f"{selected_symbol} {hypothesis_label} @ {int(horizon_ticks)} ticks",
-        "source_page": "03_Intraday_Event_Study",
+            "source_page": "02_Discovery_Lab",
         "evidence_type": "microstructure_hypothesis",
         "stage": "hypothesis_tested",
         "status": "ready_for_review" if events else "open",
@@ -1134,7 +1134,7 @@ def _build_tick_pulse_evidence_ticket_payload(
         },
         "metadata": {
             "schema_version": "tick_pulse_evidence_ticket_v1",
-            "next_page": "08_Factor_Review",
+            "next_page": "08_Research_Review",
         },
     }
 
@@ -1475,10 +1475,11 @@ class TickPulseLabPage:
             hide_index=True,
         )
 
-    def render(self) -> None:
-        init_global_ui_state()
-        apply_global_style()
-        render_global_controls_in_sidebar()
+    def render(self, *, embedded: bool = False) -> None:
+        if not embedded:
+            init_global_ui_state()
+            apply_global_style()
+            render_global_controls_in_sidebar()
 
         lang = st.session_state.lang
         if lang == "CN":
@@ -1486,7 +1487,10 @@ class TickPulseLabPage:
         t = PAGE_TEXT.get(lang, PAGE_TEXT["EN"])
         tpl = get_plotly_template(st.session_state.theme_mode)
 
-        st.title(t["title"])
+        if embedded:
+            st.subheader(t["title"])
+        else:
+            st.title(t["title"])
         st.caption(t["subtitle"])
 
         section_labels = {
@@ -1508,8 +1512,8 @@ class TickPulseLabPage:
                 format_func=lambda path: label_by_path.get(path, path),
             )
         else:
-            selected_file = DEFAULT_TICK_FILE
             st.warning(t["no_tick_files"])
+            st.stop()
 
         file_path = _resolve_path(selected_file)
 

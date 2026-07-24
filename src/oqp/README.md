@@ -43,9 +43,10 @@ direction.
 | `ui` | Shared presentation helpers and bilingual text catalogs. |
 | `utils` | Transitional generic helpers; new helpers need a concrete owner. |
 
-`research/daily_regimes` is a protected, path-sensitive research package. Move
-or rename it only as a dedicated migration with release-lock and source-hash
-tests updated in the same change.
+Paper 01's path-sensitive stage engine is project-local under
+`notebooks/Phase_7_Research_Projects/07_01_daily_latent_regimes_cn_futures/`.
+Reusable regime, latent, and state-space estimators belong under `research/ml`;
+new paper workflows must not be added as top-level `oqp.research` packages.
 
 ## Migration Packages
 

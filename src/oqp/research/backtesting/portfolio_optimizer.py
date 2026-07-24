@@ -133,7 +133,7 @@ class CasinoCapEnforcer:
         return out.drop(columns=["capped_weight"])
 
 
-class PortfolioOptimizer:
+class HeuristicPortfolioSizer:
     """Fuse Kelly alpha scaling with HRP risk budgets and portfolio caps."""
 
     def __init__(self, kelly_fraction=0.5, max_weight=0.05, max_gross_leverage=1.0):
@@ -157,9 +157,14 @@ class PortfolioOptimizer:
         return self.cap.enforce(out, "synthesized_weight")
 
 
+class PortfolioOptimizer(HeuristicPortfolioSizer):
+    """Compatibility name for the legacy heuristic portfolio sizer."""
+
+
 __all__ = [
     "CasinoCapEnforcer",
     "HierarchicalRiskParity",
+    "HeuristicPortfolioSizer",
     "KellySizer",
     "PortfolioOptimizer",
 ]

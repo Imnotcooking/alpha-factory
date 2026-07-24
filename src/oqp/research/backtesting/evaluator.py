@@ -9,6 +9,11 @@ import json
 from pathlib import Path
 
 from oqp.data import InstrumentMaster
+from oqp.execution.transaction_costs import (
+    CostUseCase,
+    TransactionCostRegistry,
+    attach_transaction_cost_policy,
+)
 from oqp.native import QuantCoreUnavailable, load_quant_core
 from oqp.research.backtesting.capital_policy import attach_capital_attrs, resolve_execution_capital
 from oqp.research.backtesting.trade_policy import (
@@ -17,6 +22,20 @@ from oqp.research.backtesting.trade_policy import (
     resolve_execution_trade_policy,
 )
 from oqp.research.evaluation import AlphaMetricEvaluator, EvaluationGeometry
+from oqp.research.artifacts import normalize_workspace_path, slugify
+from oqp.research.dataset_fingerprints import (
+    ensure_dataset_manifest_attrs,
+    register_dataset_manifest,
+)
+from oqp.research.liquidity_eligibility import (
+    apply_liquidity_gate,
+    ensure_liquidity_eligibility,
+)
+from oqp.research.temporal_policy import (
+    ensure_signal_holding_policy,
+    synchronize_temporal_targets,
+    temporal_metric_rows,
+)
 from oqp.research.multiple_testing import (
     benjamini_hochberg_q_values,
     bonferroni_p_value,
@@ -26,6 +45,10 @@ from oqp.research.multiple_testing import (
 )
 from oqp.research.splits import build_chronological_split
 from oqp.research.statistical_tests import AlphaStatisticalTester, sharpe_p_value_from_returns
+from oqp.research.success_criteria import (
+    SuccessCriterionRegistry,
+    success_criterion_manifest_payload,
+)
 from oqp.contracts.market_vertical import ASSET_TAXONOMY, normalize_market_vertical
 from oqp.research.backtesting.models import ExecutionBacktestRequest, ExecutionBacktestResult
 from oqp.research.backtesting.python_backend import PythonBacktestBackend
@@ -75,6 +98,12 @@ FUTURES_SLIPPAGE_ASSUMPTION_TEXT = (
 VERTICAL_TRIAL_COLUMNS = {
     "market_vertical": "TEXT",
     "dataset_id": "TEXT",
+    "dataset_version": "TEXT",
+    "dataset_fingerprint": "TEXT",
+    "dataset_content_sha256": "TEXT",
+    "dataset_schema_sha256": "TEXT",
+    "dataset_manifest_path": "TEXT",
+    "dataset_verified": "INTEGER",
     "universe_id": "TEXT",
     "data_frequency": "TEXT",
     "dataset_role": "TEXT",
@@ -131,6 +160,8 @@ class ExecutionDesk:
         initial_capital: float = 1_000_000.0,
         capital_currency: str = "USD",
         min_trade_weight_delta: float | None = None,
+        transaction_cost_profile_id: str | None = None,
+        transaction_cost_use_case: str | CostUseCase = CostUseCase.RESEARCH_NET,
     ):
         self.asset_class = normalize_market_vertical(asset_class)
         if self.asset_class not in ASSET_TAXONOMY:
@@ -149,15 +180,22 @@ class ExecutionDesk:
         if self.initial_capital <= 0:
             raise ValueError("ExecutionDesk initial_capital must be positive.")
         self.capital_currency = str(capital_currency or "USD").upper()
+        self.transaction_cost_profile_id = transaction_cost_profile_id
+        self.transaction_cost_use_case = CostUseCase(
+            str(getattr(transaction_cost_use_case, "value", transaction_cost_use_case)).lower()
+        )
+        self.transaction_cost_registry = TransactionCostRegistry.load()
 
     @staticmethod
     def _fee_type_code(fee_type: str) -> int:
         return 1 if str(fee_type).strip().lower() == "fixed" else 0
 
     @staticmethod
-    def _fixed_slippage_ticks_per_side(market_policy: dict) -> float:
-        if str(market_policy.get("instrument_family") or "").lower() == "future":
-            return FUTURES_FIXED_SLIPPAGE_TICKS_PER_SIDE
+    def _fixed_slippage_ticks_per_side(cost_profile, use_case: CostUseCase) -> float:
+        if use_case == CostUseCase.EXPLORATORY_GROSS:
+            return 0.0
+        if str(cost_profile.slippage.get("model") or "") == "fixed_ticks":
+            return float(cost_profile.slippage.get("ticks_per_side") or 0.0)
         return 0.0
 
     def _attach_instrument_profiles(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -261,6 +299,38 @@ class ExecutionDesk:
                 df[column] = default
 
     def run_backtest(self, df: pd.DataFrame, benchmark_df: pd.DataFrame = None, signal_col: str = 'signal') -> tuple[pd.DataFrame, float, pd.DataFrame]:
+        profile_already_attached = bool(df.attrs.get("transaction_cost_profile_id"))
+        requested_profile = (
+            df.attrs.get("transaction_cost_profile_id")
+            or self.transaction_cost_profile_id
+        )
+        requested_use_case = CostUseCase(
+            str(
+                df.attrs.get("transaction_cost_use_case")
+                or self.transaction_cost_use_case.value
+            ).lower()
+        )
+        df = attach_transaction_cost_policy(
+            df,
+            market_vertical=self.asset_class,
+            profile_id=requested_profile,
+            use_case=requested_use_case,
+            registry=self.transaction_cost_registry,
+        )
+        cost_profile = self.transaction_cost_registry.resolve(
+            self.asset_class,
+            df.attrs["transaction_cost_profile_id"],
+        )
+        if not profile_already_attached:
+            print(
+                "   [COST PROFILE] "
+                f"market={cost_profile.market_vertical} "
+                f"profile={cost_profile.profile_id} "
+                f"use_case={requested_use_case.value} "
+                f"status={cost_profile.status} "
+                f"research_net_ready={cost_profile.research_net_ready} "
+                f"production_ready={cost_profile.production_ready}"
+            )
         df = df.sort_values(by=['date', 'ticker']).copy()
 
         # Ensure volume exists for TCA
@@ -277,6 +347,10 @@ class ExecutionDesk:
         # 🏢 INJECTING PHYSICAL REALITY (Instrument Master)
         # ---------------------------------------------------------
         df = self._attach_instrument_profiles(df)
+        if requested_use_case == CostUseCase.EXPLORATORY_GROSS:
+            df['fee_open'] = 0.0
+            df['fee_close_history'] = 0.0
+            df['fee_close_today'] = 0.0
 
         # ---------------------------------------------------------
         # ⚖️ TRUST THE RISK DESK: Target Weights already calculated
@@ -297,7 +371,10 @@ class ExecutionDesk:
         requested_vectorizable = bool(config_data.get("vectorizable", True))
         vectorizable = requested_vectorizable and qc is not None
         engine_label = "C++ Execution Engine" if vectorizable else "Python event-driven execution path"
-        fixed_slippage_ticks_per_side = self._fixed_slippage_ticks_per_side(config_data)
+        fixed_slippage_ticks_per_side = self._fixed_slippage_ticks_per_side(
+            cost_profile,
+            requested_use_case,
+        )
         df.attrs["execution_engine_label"] = engine_label
         df.attrs["fixed_slippage_ticks_per_side"] = fixed_slippage_ticks_per_side
         df.attrs["round_trip_slippage_ticks"] = fixed_slippage_ticks_per_side * 2.0
@@ -306,7 +383,10 @@ class ExecutionDesk:
             if fixed_slippage_ticks_per_side > 0.0
             else "No fixed tick slippage overlay; market-specific TCA model only."
         )
-        df.attrs["exchange_fee_source"] = f"InstrumentMaster({self.asset_class}) fee profile"
+        df.attrs["exchange_fee_source"] = (
+            f"TransactionCostRegistry({cost_profile.profile_id}) via "
+            f"{cost_profile.commission.get('model', 'unknown')}"
+        )
         print(f"   ⚡ [PRIME BROKER] Routing {len(df):,} rows to {engine_label}...")
         
         # Extract Volatility (Using Garman-Klass or Fallback to 1%)
@@ -907,6 +987,12 @@ class AlphaEvaluator:
             "stat_significance": "TEXT",
             "stat_research_family": "TEXT",
             "stat_trial_signature": "TEXT",
+            "component_type": "TEXT",
+            "strategy_id": "TEXT",
+            "strategy_core_type": "TEXT",
+            "strategy_config_fingerprint": "TEXT",
+            "backtest_engine": "TEXT",
+            "runner": "TEXT",
         }
         existing_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(backtest_runs)").fetchall()
@@ -967,9 +1053,29 @@ class AlphaEvaluator:
         lot_mode: str = "auto",
     ):
         print(f"🔬 Evaluating Candidate: {factor_id}")
+        df = ensure_dataset_manifest_attrs(
+            df,
+            market_vertical=self.asset_class,
+            strict=False,
+        )
+        df = attach_transaction_cost_policy(
+            df,
+            market_vertical=self.asset_class,
+            profile_id=df.attrs.get("transaction_cost_profile_id"),
+            use_case=df.attrs.get("transaction_cost_use_case") or CostUseCase.RESEARCH_NET,
+        )
+        print(
+            "   [COST PROFILE] "
+            f"market={self.asset_class} "
+            f"profile={df.attrs['transaction_cost_profile_id']} "
+            f"use_case={df.attrs['transaction_cost_use_case']} "
+            f"status={df.attrs['transaction_cost_profile_status']} "
+            f"completeness={df.attrs['transaction_cost_completeness']} "
+            f"research_net_ready={df.attrs['transaction_cost_research_net_ready']} "
+            f"production_ready={df.attrs['transaction_cost_production_ready']}"
+        )
         
         original_len = len(df)
-        is_intraday = infer_frame_frequency(df) in {"intraday", "tick"}
         if "initial_capital" not in df.attrs:
             df = attach_capital_attrs(
                 df,
@@ -985,42 +1091,70 @@ class AlphaEvaluator:
         df.attrs["execution_lot_mode_requested"] = str(lot_mode or "auto")
         df.attrs["execution_lot_mode"] = resolved_lot_mode
 
-        factor_contract = df.attrs.get("factor_contract", {})
-        if not isinstance(factor_contract, dict):
-            factor_contract = {}
-        execution_mode = str(
-            df.attrs.get("execution_mode") or factor_contract.get("execution_mode") or ""
-        ).strip().lower()
-        market_policy = ASSET_TAXONOMY.get(self.asset_class, {})
-        min_daily_traded_value = float(
-            df.attrs.get("min_daily_traded_value")
-            or market_policy.get("min_daily_traded_value")
-            or 0.0
+        portfolio_config = df.attrs.get("factor_portfolio", {})
+        if not isinstance(portfolio_config, dict):
+            portfolio_config = {}
+        max_position_weight = (
+            df.attrs.get("max_weight_per_asset")
+            or portfolio_config.get("max_weight_per_asset")
+            or 0.05
         )
-
-        if is_intraday:
-            print("   🧱 Liquidity Filter: skipped for intraday/tick data.")
-        elif 'close' in df.columns and 'volume' in df.columns:
-            df['dollar_volume'] = df['close'] * df['volume']
-            if execution_mode == "direct":
-                print("   🧱 Liquidity Filter: preserved full row grid for direct-weight execution.")
-            elif min_daily_traded_value > 0:
-                df = df[df['dollar_volume'] >= min_daily_traded_value]
-                dropped_pct = (original_len - len(df)) / original_len * 100
-                print(
-                    "   🧱 Liquidity Filter: "
-                    f"Dropped {dropped_pct:.1f}% below "
-                    f"{min_daily_traded_value:,.0f} daily traded value "
-                    f"({self.asset_class} taxonomy)."
-                )
-            else:
-                print(f"   🧱 Liquidity Filter: no taxonomy threshold for {self.asset_class}.")
-        else:
-            print("   ⚠️ WARNING: 'close' or 'volume' columns missing. Cannot enforce Liquidity Wall.")
-
+        df = ensure_liquidity_eligibility(
+            df,
+            market_vertical=self.asset_class,
+            initial_capital=float(df.attrs["initial_capital"]),
+            capital_currency=str(df.attrs["capital_currency"]),
+            max_position_weight=float(max_position_weight),
+        )
+        liquidity_summary = dict(df.attrs.get("liquidity_eligibility_summary") or {})
+        liquidity_policy = dict(df.attrs.get("liquidity_policy") or {})
+        print(
+            "   🧱 Liquidity Eligibility: "
+            f"{liquidity_summary.get('eligible_rate', 0.0):.1%} eligible; "
+            f"{liquidity_policy.get('lookback_sessions', 0)} completed sessions, "
+            f"{liquidity_policy.get('decision_lag_sessions', 0)}-session lag; "
+            "full row grid preserved."
+        )
         alpha_signal_col = alpha_signal_col or self._select_alpha_signal_col(df)
         if alpha_signal_col is None:
             raise ValueError("Evaluator requires one of factor_score, raw_signal, signal, or final_target_weight.")
+        factor_contract = df.attrs.get("factor_contract", {})
+        if not isinstance(factor_contract, dict):
+            factor_contract = {}
+        temporal_candidate_col = next(
+            (
+                column
+                for column in (
+                    factor_contract.get("execution_weight_col"),
+                    df.attrs.get("execution_weight_col"),
+                    "final_target_weight",
+                    "target_weight",
+                    "signal",
+                    alpha_signal_col,
+                )
+                if column and column in df.columns
+            ),
+            None,
+        )
+        if temporal_candidate_col is None:
+            raise ValueError("Evaluator could not resolve a temporal execution target.")
+        df = ensure_signal_holding_policy(
+            df,
+            candidate_col=str(temporal_candidate_col),
+        )
+        df = synchronize_temporal_targets(
+            df,
+            effective_col=str(temporal_candidate_col),
+        )
+        temporal_summary = dict(df.attrs.get("temporal_policy_summary") or {})
+        temporal_policy = dict(df.attrs.get("temporal_policy") or {})
+        print(
+            "   ⏱️ Temporal Policy: "
+            f"{temporal_policy.get('signal_frequency', 'unknown')} decisions, "
+            f"holding={temporal_policy.get('holding_mode', 'unknown')}; "
+            f"{temporal_summary.get('decision_rows', 0):,} accepted decision rows."
+        )
+        metric_df = temporal_metric_rows(df)
 
         split_gap_policy = self._resolve_split_gap_policy(
             df,
@@ -1029,7 +1163,7 @@ class AlphaEvaluator:
             purge_unit=purge_unit,
         )
         split_result = build_chronological_split(
-            df,
+            metric_df,
             split_date=split_date,
             crisis_period=crisis_period,
             signal_col=alpha_signal_col,
@@ -1044,7 +1178,7 @@ class AlphaEvaluator:
 
         metric_result = self.metric_evaluator.evaluate(
             factor_id=factor_id,
-            df=df,
+            df=metric_df,
             validation_data=validation_data,
             holdout_data=holdout_data,
             crisis_data=crisis_data,
@@ -1099,9 +1233,12 @@ class AlphaEvaluator:
         failure_code = "NONE"
         suggested_action = "N/A"
 
-        if len(df) < (original_len * 0.1): 
+        if len(metric_df) < (original_len * 0.1):
             failure_code = "untradable_illiquidity"
-            suggested_action = "Factor relies on micro-caps. Redesign for large-cap dynamics."
+            suggested_action = (
+                "Fewer than 10% of observations pass the frozen liquidity policy. "
+                "Review data coverage or capacity assumptions before factor research."
+            )
         elif np.isnan(val_ic) or np.isnan(holdout_ic):
             if metric_result.geometry == EvaluationGeometry.CROSS_SECTIONAL:
                 failure_code = "cross_sectional_collapse"
@@ -1132,7 +1269,17 @@ class AlphaEvaluator:
         else:
             print(f"   🟢 Passed pre-execution alpha diagnostics.")
             
-        self._log_to_db(
+        execution_signal_col = "signal" if "signal" in df.columns else "factor_score"
+        execution_df = apply_liquidity_gate(
+            df,
+            weight_columns=(
+                "routed_target_weight",
+                "final_target_weight",
+                "target_weight",
+                execution_signal_col,
+            ),
+        )
+        return self._log_to_db(
             factor_id,
             val_ic,
             holdout_ic,
@@ -1140,11 +1287,329 @@ class AlphaEvaluator:
             turnover_rate,
             failure_code,
             suggested_action,
-            df,
+            execution_df,
             metric_result,
             split_result,
             stat_evidence,
         )
+
+    def record_blocked_run(
+        self,
+        *,
+        strategy_id: str,
+        strategy_name: str,
+        component_factor_id: str,
+        sleeve_id: str,
+        failure_code: str,
+        suggested_action: str,
+        strategy_config: dict | None = None,
+        strategy_config_fingerprint: str = "",
+        batch_id: str = "",
+        dataset_metadata: dict | None = None,
+        assumptions: dict | None = None,
+        research_family: str | None = None,
+    ) -> str:
+        """Record a governed preflight block in the canonical run ledger.
+
+        This is intentionally distinct from ``run_evaluation``: it never
+        invents performance statistics for a strategy that could not reach the
+        evaluator.  The resulting red ledger row and assumption manifest make
+        missing data, an unsupported sleeve, or another preflight failure
+        visible without misrepresenting the attempt as a completed backtest.
+        Calls are idempotent within a screening batch.
+        """
+
+        strategy_id = str(strategy_id).strip()
+        strategy_name = str(strategy_name).strip()
+        component_factor_id = str(component_factor_id).strip()
+        sleeve_id = str(sleeve_id).strip()
+        failure_code = str(failure_code).strip().lower()
+        suggested_action = str(suggested_action).strip()
+        batch_id = str(batch_id).strip()
+        if not strategy_id or not strategy_name or not component_factor_id:
+            raise ValueError(
+                "blocked-run records require strategy_id, strategy_name, and "
+                "component_factor_id"
+            )
+        if not sleeve_id:
+            raise ValueError("blocked-run records require the intended sleeve_id")
+        if not failure_code or failure_code == "none":
+            raise ValueError("blocked-run failure_code must describe a real block")
+        if not suggested_action:
+            raise ValueError("blocked-run suggested_action cannot be empty")
+
+        strategy_config = dict(strategy_config or {})
+        dataset_metadata = dict(dataset_metadata or {})
+        assumptions = dict(assumptions or {})
+        config_fingerprint = (
+            str(strategy_config_fingerprint).strip()
+            or stable_trial_hash(strategy_config)
+        )
+        resolved_family = str(
+            research_family
+            or f"daily_single_factor_screen::{component_factor_id}"
+        )
+        identity = {
+            "record_type": "blocked_strategy_preflight",
+            "batch_id": batch_id,
+            "strategy_id": strategy_id,
+            "strategy_config_fingerprint": config_fingerprint,
+            "failure_code": failure_code,
+        }
+        run_id = f"run_{stable_trial_hash(identity)[:8]}"
+        factor_params = {
+            "component_type": "factor_sleeve_strategy",
+            "component_factor_id": component_factor_id,
+            "sleeve_id": sleeve_id,
+            "screening_batch_id": batch_id,
+            "risk_overlay_ids": list(
+                assumptions.get("risk_overlay_ids") or []
+            ),
+            "preflight_status": "blocked",
+            "strategy_config": strategy_config,
+        }
+
+        with sqlite3.connect(self.db_path) as conn:
+            self._ensure_core_tables(conn)
+            self._ensure_backtest_run_columns(conn)
+            self._ensure_research_trial_columns(conn)
+            existing = conn.execute(
+                "SELECT run_id FROM backtest_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if existing is not None:
+                return run_id
+
+            conn.execute(
+                """
+                INSERT INTO factors (
+                    factor_id, name, category, economic_rationale
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(factor_id) DO UPDATE SET
+                    name = excluded.name,
+                    category = excluded.category,
+                    economic_rationale = excluded.economic_rationale
+                """,
+                (
+                    strategy_id,
+                    strategy_name,
+                    "Daily Single-Factor Screen",
+                    (
+                        f"{component_factor_id} translated by {sleeve_id}; "
+                        f"preflight blocked: {failure_code}."
+                    ),
+                ),
+            )
+            previous_round = conn.execute(
+                "SELECT MAX(round_number) FROM backtest_runs WHERE factor_id = ?",
+                (strategy_id,),
+            ).fetchone()[0]
+            round_number = int(previous_round or 0) + 1
+            trial_signature = stable_trial_hash(
+                {
+                    **identity,
+                    "component_factor_id": component_factor_id,
+                    "sleeve_id": sleeve_id,
+                    "dataset_metadata": dataset_metadata,
+                    "assumptions": assumptions,
+                }
+            )
+            backtest_row = {
+                "run_id": run_id,
+                "factor_id": strategy_id,
+                "round_number": round_number,
+                "asset_class": self.asset_class,
+                "market_vertical": dataset_metadata.get(
+                    "market_vertical", self.asset_class
+                ),
+                "dataset_id": dataset_metadata.get("dataset_id", ""),
+                "dataset_version": dataset_metadata.get("dataset_version", ""),
+                "dataset_fingerprint": dataset_metadata.get(
+                    "dataset_fingerprint", ""
+                ),
+                "dataset_content_sha256": dataset_metadata.get(
+                    "dataset_content_sha256", ""
+                ),
+                "dataset_schema_sha256": dataset_metadata.get(
+                    "dataset_schema_sha256", ""
+                ),
+                "dataset_manifest_path": dataset_metadata.get(
+                    "dataset_manifest_path", ""
+                ),
+                "dataset_verified": dataset_metadata.get(
+                    "dataset_verified", 0
+                ),
+                "universe_id": dataset_metadata.get("universe_id", ""),
+                "data_frequency": dataset_metadata.get(
+                    "data_frequency", "daily"
+                ),
+                "dataset_role": dataset_metadata.get("dataset_role", ""),
+                "data_tradability": dataset_metadata.get(
+                    "data_tradability", ""
+                ),
+                "data_price_source": dataset_metadata.get(
+                    "data_price_source", ""
+                ),
+                "data_roll_model": dataset_metadata.get(
+                    "data_roll_model", ""
+                ),
+                "data_liquidity_model": dataset_metadata.get(
+                    "data_liquidity_model", ""
+                ),
+                "data_execution_reality": dataset_metadata.get(
+                    "data_execution_reality", "preflight_blocked"
+                ),
+                "data_vendor": dataset_metadata.get("data_vendor", ""),
+                "execution_assumption": dataset_metadata.get(
+                    "execution_assumption", ""
+                ),
+                "factor_params": json.dumps(
+                    factor_params, sort_keys=True, default=str
+                ),
+                "evaluation_geometry": dataset_metadata.get(
+                    "evaluation_geometry", ""
+                ),
+                "execution_mode": "direct",
+                "factor_contract_source": "factor_sleeve_strategy_preflight",
+                "initial_capital": assumptions.get("capital"),
+                "capital_currency": assumptions.get("capital_currency", "CNY"),
+                "stat_research_family": resolved_family,
+                "stat_trial_signature": trial_signature,
+                "component_type": "strategy",
+                "strategy_id": strategy_id,
+                "strategy_core_type": "factor_sleeve",
+                "strategy_config_fingerprint": config_fingerprint,
+                "backtest_engine": "typed_strategy_composition",
+                "runner": "daily_factor_screen",
+                "total_trades": 0,
+                "universe_size": dataset_metadata.get("universe_size", 0),
+                "traded_tickers": "NONE",
+            }
+            self._insert_row(conn.cursor(), "backtest_runs", backtest_row)
+            trial_row = {
+                "run_id": run_id,
+                "factor_id": strategy_id,
+                "research_family": resolved_family,
+                "trial_signature": trial_signature,
+                "params_hash": stable_trial_hash(factor_params),
+                "asset_class": self.asset_class,
+                "market_vertical": backtest_row["market_vertical"],
+                "dataset_id": backtest_row["dataset_id"],
+                "dataset_version": backtest_row["dataset_version"],
+                "dataset_fingerprint": backtest_row["dataset_fingerprint"],
+                "dataset_content_sha256": backtest_row[
+                    "dataset_content_sha256"
+                ],
+                "dataset_schema_sha256": backtest_row[
+                    "dataset_schema_sha256"
+                ],
+                "dataset_manifest_path": backtest_row[
+                    "dataset_manifest_path"
+                ],
+                "dataset_verified": backtest_row["dataset_verified"],
+                "universe_id": backtest_row["universe_id"],
+                "data_frequency": backtest_row["data_frequency"],
+                "dataset_role": backtest_row["dataset_role"],
+                "data_tradability": backtest_row["data_tradability"],
+                "data_price_source": backtest_row["data_price_source"],
+                "data_roll_model": backtest_row["data_roll_model"],
+                "data_liquidity_model": backtest_row[
+                    "data_liquidity_model"
+                ],
+                "data_execution_reality": backtest_row[
+                    "data_execution_reality"
+                ],
+                "data_vendor": backtest_row["data_vendor"],
+                "execution_assumption": backtest_row[
+                    "execution_assumption"
+                ],
+                "evaluation_geometry": backtest_row[
+                    "evaluation_geometry"
+                ],
+                "metric_name": "blocked_preflight",
+                "trial_count_m": 1,
+                "significance": "blocked",
+            }
+            self._insert_row(
+                conn.cursor(), "research_trials", trial_row, replace=True
+            )
+            conn.execute(
+                """
+                INSERT INTO diagnostics (run_id, failure_code, suggested_action)
+                VALUES (?, ?, ?)
+                """,
+                (run_id, failure_code, suggested_action),
+            )
+
+        manifest = {
+            "manifest_source": "blocked_strategy_preflight",
+            "run_id": run_id,
+            "factor_id": strategy_id,
+            "asset_class": self.asset_class,
+            "screening": {
+                "batch_id": batch_id,
+                "component_factor_id": component_factor_id,
+                "sleeve_id": sleeve_id,
+                "status": "blocked",
+                "failure_code": failure_code,
+                "suggested_action": suggested_action,
+            },
+            "factor_params": factor_params,
+            "data": dataset_metadata,
+            "signal_and_execution_mode": {
+                "execution_mode": "direct",
+                "execution_assumption": dataset_metadata.get(
+                    "execution_assumption", ""
+                ),
+            },
+            "execution_engine": {
+                "engine": "typed_strategy_composition",
+                "status": "preflight_blocked",
+                "initial_capital": assumptions.get("capital"),
+                "capital_currency": assumptions.get(
+                    "capital_currency", "CNY"
+                ),
+            },
+            "risk_and_allocation": {
+                "maximum_margin_utilization": assumptions.get(
+                    "max_margin_utilization"
+                ),
+                "minimum_cash_reserve": assumptions.get(
+                    "minimum_cash_reserve"
+                ),
+                "maximum_contract_weight": assumptions.get(
+                    "max_contract_weight"
+                ),
+                "risk_overlay_ids": list(
+                    assumptions.get("risk_overlay_ids") or []
+                ),
+                "risk_overlay_policy": assumptions.get(
+                    "risk_overlay_policy", ""
+                ),
+            },
+            "costs_and_slippage": {
+                "transaction_cost_profile": assumptions.get(
+                    "transaction_cost_profile", ""
+                ),
+                "fixed_slippage_ticks_per_side": assumptions.get(
+                    "slippage_ticks_per_side"
+                ),
+            },
+            "realized_summary": {
+                "status": "not_run",
+                "total_trades": 0,
+                "reason": failure_code,
+            },
+        }
+        assumptions_dir = Path(self.logs_dir) / "assumptions"
+        assumptions_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = assumptions_dir / f"assumptions_{run_id}.json"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
+        return run_id
 
     def log_option_backtest_result(
         self,
@@ -1236,6 +1701,51 @@ class AlphaEvaluator:
                 }
             )
         )
+        dataset_lineage = {
+            "dataset_version": str(metadata.get("dataset_version") or "unknown"),
+            "dataset_fingerprint": "",
+            "dataset_content_sha256": "",
+            "dataset_schema_sha256": "",
+            "dataset_manifest_path": "",
+            "dataset_verified": 0,
+        }
+        dataset_sources = [
+            source
+            for source in (option_chain_path, underlying_path)
+            if source
+        ]
+        if dataset_sources:
+            dataset_manifest, dataset_manifest_path = register_dataset_manifest(
+                dataset_sources,
+                dataset_id=slugify(dataset_id, fallback="options_dataset"),
+                dataset_version=(
+                    str(metadata["dataset_version"])
+                    if metadata.get("dataset_version")
+                    else None
+                ),
+                market_vertical=market_vertical,
+                data_frequency="daily",
+                adjustment_method=str(
+                    metadata.get("adjustment_method") or "raw_option_chain"
+                ),
+                metadata={
+                    "option_chain_path": option_chain_path,
+                    "underlying_path": underlying_path,
+                    "registration_source": "option_backtest_evaluator",
+                },
+            )
+            dataset_id = dataset_manifest.dataset_id
+            dataset_lineage = {
+                "dataset_version": dataset_manifest.dataset_version,
+                "dataset_fingerprint": dataset_manifest.aggregate_sha256,
+                "dataset_content_sha256": dataset_manifest.content_sha256,
+                "dataset_schema_sha256": dataset_manifest.schema_sha256,
+                "dataset_manifest_path": normalize_workspace_path(
+                    dataset_manifest_path,
+                    _REPO_ROOT,
+                ),
+                "dataset_verified": 1,
+            }
         universe_id = str(
             metadata.get("universe_id")
             or stable_trial_hash(
@@ -1250,15 +1760,31 @@ class AlphaEvaluator:
         if not isinstance(factor_params, dict):
             factor_params = {"value": factor_params}
         research_family = str(metadata.get("research_family") or factor_id)
-        params_hash = stable_trial_hash({"factor_params": factor_params})
+        parameter_signature = {
+            "factor_params": factor_params,
+            "factor_parameter_schema_fingerprint": metadata.get(
+                "factor_parameter_schema_fingerprint", ""
+            ),
+            "factor_parameter_values_fingerprint": metadata.get(
+                "factor_parameter_values_fingerprint", ""
+            ),
+        }
+        params_hash = stable_trial_hash(parameter_signature)
         trial_signature_payload = {
             "factor_id": factor_id,
             "research_family": research_family,
             "asset_class": self.asset_class,
             "market_vertical": market_vertical,
             "dataset_id": dataset_id,
+            **dataset_lineage,
             "universe_id": universe_id,
             "factor_params": factor_params,
+            "factor_parameter_schema_fingerprint": parameter_signature[
+                "factor_parameter_schema_fingerprint"
+            ],
+            "factor_parameter_values_fingerprint": parameter_signature[
+                "factor_parameter_values_fingerprint"
+            ],
             "factor_contract_source": factor_contract.get("contract_source", ""),
             "alpha_signal_col": factor_contract.get("alpha_signal_col", ""),
             "execution_weight_col": factor_contract.get("execution_weight_col", ""),
@@ -1307,6 +1833,7 @@ class AlphaEvaluator:
                 "asset_class": self.asset_class,
                 "market_vertical": market_vertical,
                 "dataset_id": dataset_id,
+                **dataset_lineage,
                 "universe_id": universe_id,
                 "data_frequency": "daily",
                 "dataset_role": "option_chain",
@@ -1392,6 +1919,7 @@ class AlphaEvaluator:
                 "asset_class": self.asset_class,
                 "market_vertical": market_vertical,
                 "dataset_id": dataset_id,
+                **dataset_lineage,
                 "universe_id": universe_id,
                 "data_frequency": "daily",
                 "dataset_role": "option_chain",
@@ -1443,6 +1971,8 @@ class AlphaEvaluator:
             factor_params=factor_params,
             result=result,
             metadata=metadata,
+            dataset_id=dataset_id,
+            dataset_lineage=dataset_lineage,
             market_vertical=market_vertical,
             option_chain_path=option_chain_path,
             underlying_path=underlying_path,
@@ -1708,7 +2238,7 @@ class AlphaEvaluator:
         *,
         universe_size: int,
         traded_tickers: str,
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         market_vertical = self._attr_text(df, "market_vertical") or self.asset_class
         source_path = (
             self._attr_text(df, "source_path")
@@ -1748,6 +2278,12 @@ class AlphaEvaluator:
         return {
             "market_vertical": market_vertical,
             "dataset_id": dataset_id,
+            "dataset_version": self._attr_text(df, "dataset_version") or "unknown",
+            "dataset_fingerprint": self._attr_text(df, "dataset_fingerprint") or "",
+            "dataset_content_sha256": self._attr_text(df, "dataset_content_sha256") or "",
+            "dataset_schema_sha256": self._attr_text(df, "dataset_schema_sha256") or "",
+            "dataset_manifest_path": self._attr_text(df, "dataset_manifest_path") or "",
+            "dataset_verified": int(bool(df.attrs.get("dataset_verified", False))),
             "universe_id": universe_id,
             "data_frequency": self._attr_text(df, "data_frequency")
             or self._infer_data_frequency(df),
@@ -1950,6 +2486,24 @@ class AlphaEvaluator:
         total_execution_cost = float(portfolio.get("daily_total_cost", pd.Series([0.0])).sum())
         avg_daily_cost_bps = float(portfolio.get("daily_cost_bps", pd.Series([0.0])).mean())
         costs_and_slippage = {
+            "registry_id": asset_df.attrs.get("transaction_cost_registry_id"),
+            "registry_as_of": asset_df.attrs.get("transaction_cost_registry_as_of"),
+            "profile_id": asset_df.attrs.get("transaction_cost_profile_id"),
+            "profile_fingerprint": asset_df.attrs.get(
+                "transaction_cost_profile_fingerprint"
+            ),
+            "profile_status": asset_df.attrs.get("transaction_cost_profile_status"),
+            "profile_completeness": asset_df.attrs.get("transaction_cost_completeness"),
+            "use_case": asset_df.attrs.get("transaction_cost_use_case"),
+            "research_net_ready": asset_df.attrs.get(
+                "transaction_cost_research_net_ready"
+            ),
+            "production_ready": asset_df.attrs.get(
+                "transaction_cost_production_ready"
+            ),
+            "engine_support": asset_df.attrs.get("transaction_cost_engine_support"),
+            "gross_only": asset_df.attrs.get("transaction_cost_gross_only"),
+            "profile_assumptions": asset_df.attrs.get("transaction_cost_assumptions"),
             "summary": asset_df.attrs.get("slippage_assumption"),
             "tca_model": asset_df.attrs.get("tca_model"),
             "fixed_slippage_ticks_per_side": asset_df.attrs.get("fixed_slippage_ticks_per_side"),
@@ -1994,6 +2548,21 @@ class AlphaEvaluator:
             .gt(0.0)
             .sum()
         )
+        factor_portfolio = df.attrs.get("factor_portfolio", {})
+        if not isinstance(factor_portfolio, dict):
+            factor_portfolio = {}
+        configured_overlays = factor_portfolio.get("risk_overlays") or []
+        overlay_ids = [
+            str(value.get("overlay_id") or "").strip()
+            if isinstance(value, dict)
+            else str(value).strip()
+            for value in configured_overlays
+        ]
+        overlay_ids = [value for value in overlay_ids if value]
+        realized_margin = pd.to_numeric(
+            df.get("margin_utilization", pd.Series(dtype=float)),
+            errors="coerce",
+        ).dropna()
 
         manifest = {
             "run_id": run_id,
@@ -2001,9 +2570,43 @@ class AlphaEvaluator:
             "asset_class": self.asset_class,
             "factor_contract": factor_contract,
             "factor_params": df.attrs.get("factor_params", {}),
+            "factor_parameterization": {
+                "schema_version": df.attrs.get(
+                    "factor_parameter_schema_version"
+                ),
+                "schema_fingerprint": df.attrs.get(
+                    "factor_parameter_schema_fingerprint"
+                ),
+                "values": df.attrs.get("factor_parameter_values", {}),
+                "values_fingerprint": df.attrs.get(
+                    "factor_parameter_values_fingerprint"
+                ),
+                "overrides": df.attrs.get("factor_parameter_overrides", {}),
+                "components": df.attrs.get("factor_parameter_components", {}),
+                "components_fingerprint": df.attrs.get(
+                    "factor_parameter_components_fingerprint"
+                ),
+                "router": {
+                    "schema_fingerprint": df.attrs.get(
+                        "router_parameter_schema_fingerprint"
+                    ),
+                    "values": df.attrs.get("router_parameter_values", {}),
+                    "values_fingerprint": df.attrs.get(
+                        "router_parameter_values_fingerprint"
+                    ),
+                },
+            },
+            "success_criterion": success_criterion_manifest_payload(df),
             "market_taxonomy": market_policy,
             "data": {
                 "source_path": df.attrs.get("source_path") or df.attrs.get("data_file"),
+                "dataset_id": df.attrs.get("dataset_id"),
+                "dataset_version": df.attrs.get("dataset_version"),
+                "dataset_fingerprint": df.attrs.get("dataset_fingerprint"),
+                "dataset_content_sha256": df.attrs.get("dataset_content_sha256"),
+                "dataset_schema_sha256": df.attrs.get("dataset_schema_sha256"),
+                "dataset_manifest_path": df.attrs.get("dataset_manifest_path"),
+                "dataset_verified": bool(df.attrs.get("dataset_verified", False)),
                 "frequency": df.attrs.get("data_frequency"),
                 "prepared_data_start": df.attrs.get("prepared_data_start"),
                 "prepared_data_end": df.attrs.get("prepared_data_end"),
@@ -2046,9 +2649,72 @@ class AlphaEvaluator:
                 "capital_currency": capital_currency,
                 "min_trade_weight_delta": float(min_trade_weight_delta),
             },
+            "risk_and_allocation": {
+                "risk_overlay_ids": overlay_ids,
+                "optional_risk_overlay_policy": (
+                    "No optional risk overlay: baseline isolates the factor-plus-sleeve "
+                    "signal. Mandatory allocator, margin, liquidity, and execution-cost "
+                    "controls remain active."
+                    if not overlay_ids
+                    else "Configured optional overlays are listed in risk_overlay_ids."
+                ),
+                "risk_overlay_contracts": df.attrs.get(
+                    "strategy_risk_overlay_contracts", {}
+                ),
+                "max_gross_leverage_safety_ceiling": factor_portfolio.get(
+                    "max_gross_leverage"
+                ),
+                "maximum_contract_weight": factor_portfolio.get(
+                    "max_weight_per_asset"
+                ),
+                "maximum_margin_utilization": df.attrs.get(
+                    "max_margin_utilization",
+                    factor_portfolio.get("max_margin_utilization"),
+                ),
+                "minimum_cash_reserve": df.attrs.get(
+                    "minimum_cash_reserve"
+                ),
+                "realized_maximum_margin_utilization": (
+                    float(realized_margin.max())
+                    if not realized_margin.empty
+                    else None
+                ),
+                "margin_budget_status": df.attrs.get(
+                    "margin_budget_status"
+                ),
+                "margin_scaled_weight_columns": df.attrs.get(
+                    "margin_scaled_weight_columns", []
+                ),
+            },
             "liquidity_policy": {
-                "min_daily_traded_value": market_policy.get("min_daily_traded_value", 0.0),
-                "direct_weight_row_grid_preserved": df.attrs.get("execution_mode") == "direct",
+                **dict(df.attrs.get("liquidity_policy") or {}),
+                "policy_fingerprint": df.attrs.get(
+                    "liquidity_policy_fingerprint"
+                ),
+                "eligibility_summary": df.attrs.get(
+                    "liquidity_eligibility_summary",
+                    {},
+                ),
+                "row_grid_preserved": True,
+                "gated_weight_columns": df.attrs.get(
+                    "liquidity_gated_weight_columns",
+                    [],
+                ),
+                "forced_flat_rows": int(
+                    df.attrs.get("liquidity_forced_flat_rows", 0)
+                ),
+            },
+            "temporal_policy": {
+                **dict(df.attrs.get("temporal_policy") or {}),
+                "policy_fingerprint": df.attrs.get(
+                    "temporal_policy_fingerprint"
+                ),
+                "summary": df.attrs.get("temporal_policy_summary", {}),
+                "candidate_col": df.attrs.get("temporal_candidate_col"),
+                "synchronized_target_columns": df.attrs.get(
+                    "temporal_synchronized_target_columns",
+                    [],
+                ),
             },
             "costs_and_slippage": costs_and_slippage,
             "signal_diagnostics": signal_diagnostics,
@@ -2275,6 +2941,33 @@ class AlphaEvaluator:
                 primary[column] = pd.to_numeric(primary[column], errors="coerce").fillna(0.0)
         return primary
 
+    @staticmethod
+    def _option_success_criterion_payload(
+        metadata: dict,
+    ) -> dict:
+        raw = metadata.get("success_criterion")
+        if isinstance(raw, dict) and raw:
+            return dict(raw)
+        profile_id = str(
+            metadata.get("success_criterion_profile_id") or ""
+        ).strip()
+        if not profile_id:
+            return {
+                "status": "not_declared",
+                "profile_id": None,
+                "profile_fingerprint": None,
+                "definition": {},
+                "evaluation": {},
+            }
+        criterion = SuccessCriterionRegistry.load().resolve(profile_id)
+        return {
+            "status": "declared_not_evaluated",
+            "profile_id": criterion.profile_id,
+            "profile_fingerprint": criterion.fingerprint,
+            "definition": criterion.to_dict(),
+            "evaluation": {},
+        }
+
     def _write_option_assumption_manifest(
         self,
         *,
@@ -2284,6 +2977,8 @@ class AlphaEvaluator:
         factor_params: dict,
         result,
         metadata: dict,
+        dataset_id: str,
+        dataset_lineage: dict,
         market_vertical: str,
         option_chain_path: str | None,
         underlying_path: str | None,
@@ -2317,11 +3012,29 @@ class AlphaEvaluator:
             "asset_class": self.asset_class,
             "factor_contract": factor_contract,
             "factor_params": factor_params,
+            "factor_parameterization": {
+                "schema_version": metadata.get(
+                    "factor_parameter_schema_version"
+                ),
+                "schema_fingerprint": metadata.get(
+                    "factor_parameter_schema_fingerprint"
+                ),
+                "values": metadata.get("factor_parameter_values", {}),
+                "values_fingerprint": metadata.get(
+                    "factor_parameter_values_fingerprint"
+                ),
+                "overrides": metadata.get("factor_parameter_overrides", {}),
+            },
+            "success_criterion": self._option_success_criterion_payload(
+                metadata
+            ),
             "market_taxonomy": market_policy,
             "data": {
                 "source_path": option_chain_path,
                 "option_chain_path": option_chain_path,
                 "underlying_path": underlying_path,
+                "dataset_id": dataset_id,
+                **dataset_lineage,
                 "frequency": "daily",
                 "dataset_role": "option_chain",
                 "tradability": "executable_option_chain",
@@ -2432,13 +3145,40 @@ class AlphaEvaluator:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         run_id = f"run_{uuid.uuid4().hex[:8]}"
-        
-        cursor.execute("SELECT factor_id FROM factors WHERE factor_id = ?", (factor_id,))
-        if not cursor.fetchone():
-            cursor.execute('''
-                INSERT INTO factors (factor_id, name, category, economic_rationale) 
-                VALUES (?, ?, ?, ?)
-            ''', (factor_id, f"Auto-Gen {factor_id}", "Experimental", "Pending human thesis."))
+
+        factor_metadata = df.attrs.get("factor_metadata", {})
+        if not isinstance(factor_metadata, dict):
+            factor_metadata = {}
+        display_name = str(
+            df.attrs.get("strategy_name")
+            or factor_metadata.get("name")
+            or factor_id
+        )
+        display_category = str(
+            factor_metadata.get("category") or "Experimental"
+        )
+        display_rationale = str(
+            factor_metadata.get("economic_rationale")
+            or "Pending human thesis."
+        )
+        cursor.execute(
+            """
+            INSERT INTO factors (
+                factor_id, name, category, economic_rationale
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(factor_id) DO UPDATE SET
+                name = excluded.name,
+                category = excluded.category,
+                economic_rationale = excluded.economic_rationale
+            """,
+            (
+                factor_id,
+                display_name,
+                display_category,
+                display_rationale,
+            ),
+        )
         
         cursor.execute("SELECT MAX(round_number) FROM backtest_runs WHERE factor_id = ?", (factor_id,))
         res = cursor.fetchone()[0]
@@ -2535,14 +3275,52 @@ class AlphaEvaluator:
             or 0
         )
         research_family = str(df.attrs.get("research_family") or factor_id)
-        params_hash = stable_trial_hash({"factor_params": factor_params})
+        parameter_signature = {
+            "factor_params": factor_params,
+            "factor_parameter_schema_fingerprint": df.attrs.get(
+                "factor_parameter_schema_fingerprint", ""
+            ),
+            "factor_parameter_values_fingerprint": df.attrs.get(
+                "factor_parameter_values_fingerprint", ""
+            ),
+            "factor_parameter_components_fingerprint": df.attrs.get(
+                "factor_parameter_components_fingerprint", ""
+            ),
+            "router_parameter_schema_fingerprint": df.attrs.get(
+                "router_parameter_schema_fingerprint", ""
+            ),
+            "router_parameter_values_fingerprint": df.attrs.get(
+                "router_parameter_values_fingerprint", ""
+            ),
+        }
+        params_hash = stable_trial_hash(parameter_signature)
         trial_signature_payload = {
             "factor_id": factor_id,
             "research_family": research_family,
             "factor_params": factor_params,
+            "factor_parameter_schema_fingerprint": parameter_signature[
+                "factor_parameter_schema_fingerprint"
+            ],
+            "factor_parameter_values_fingerprint": parameter_signature[
+                "factor_parameter_values_fingerprint"
+            ],
+            "factor_parameter_components_fingerprint": parameter_signature[
+                "factor_parameter_components_fingerprint"
+            ],
+            "router_parameter_schema_fingerprint": parameter_signature[
+                "router_parameter_schema_fingerprint"
+            ],
+            "router_parameter_values_fingerprint": parameter_signature[
+                "router_parameter_values_fingerprint"
+            ],
             "asset_class": self.asset_class,
             "market_vertical": vertical_metadata["market_vertical"],
             "dataset_id": vertical_metadata["dataset_id"],
+            "dataset_version": vertical_metadata["dataset_version"],
+            "dataset_fingerprint": vertical_metadata["dataset_fingerprint"],
+            "dataset_content_sha256": vertical_metadata["dataset_content_sha256"],
+            "dataset_schema_sha256": vertical_metadata["dataset_schema_sha256"],
+            "dataset_verified": vertical_metadata["dataset_verified"],
             "universe_id": vertical_metadata["universe_id"],
             "data_frequency": vertical_metadata["data_frequency"],
             "dataset_role": vertical_metadata["dataset_role"],
@@ -2553,6 +3331,28 @@ class AlphaEvaluator:
             "data_execution_reality": vertical_metadata["data_execution_reality"],
             "data_vendor": vertical_metadata["data_vendor"],
             "execution_assumption": vertical_metadata["execution_assumption"],
+            "liquidity_policy_id": df.attrs.get("liquidity_policy_id", ""),
+            "liquidity_policy_fingerprint": df.attrs.get(
+                "liquidity_policy_fingerprint",
+                "",
+            ),
+            "temporal_policy_id": df.attrs.get("temporal_policy_id", ""),
+            "temporal_policy_fingerprint": df.attrs.get(
+                "temporal_policy_fingerprint",
+                "",
+            ),
+            "transaction_cost_profile_id": df.attrs.get(
+                "transaction_cost_profile_id",
+                "",
+            ),
+            "transaction_cost_profile_fingerprint": df.attrs.get(
+                "transaction_cost_profile_fingerprint",
+                "",
+            ),
+            "transaction_cost_use_case": df.attrs.get(
+                "transaction_cost_use_case",
+                "",
+            ),
             "factor_contract_source": factor_contract.get("contract_source", ""),
             "alpha_signal_col": factor_contract.get("alpha_signal_col", ""),
             "execution_weight_col": factor_contract.get("execution_weight_col", ""),
@@ -2680,6 +3480,27 @@ class AlphaEvaluator:
         cursor.execute(
             """
             UPDATE backtest_runs
+            SET component_type = ?,
+                strategy_id = ?,
+                strategy_core_type = ?,
+                strategy_config_fingerprint = ?,
+                backtest_engine = ?,
+                runner = ?
+            WHERE run_id = ?
+            """,
+            (
+                str(df.attrs.get("component_type", "") or ""),
+                str(df.attrs.get("strategy_id", "") or ""),
+                str(df.attrs.get("strategy_core_type", "") or ""),
+                str(df.attrs.get("strategy_config_fingerprint", "") or ""),
+                str(df.attrs.get("backtest_engine", "") or ""),
+                str(df.attrs.get("runner", "") or ""),
+                run_id,
+            ),
+        )
+        cursor.execute(
+            """
+            UPDATE backtest_runs
             SET factor_contract_source = ?,
                 alpha_signal_col = ?,
                 execution_weight_col = ?,
@@ -2699,7 +3520,13 @@ class AlphaEvaluator:
                 data_price_source = ?,
                 data_roll_model = ?,
                 data_liquidity_model = ?,
-                data_execution_reality = ?
+                data_execution_reality = ?,
+                dataset_version = ?,
+                dataset_fingerprint = ?,
+                dataset_content_sha256 = ?,
+                dataset_schema_sha256 = ?,
+                dataset_manifest_path = ?,
+                dataset_verified = ?
             WHERE run_id = ?
             """,
             (
@@ -2723,6 +3550,12 @@ class AlphaEvaluator:
                 vertical_metadata["data_roll_model"],
                 vertical_metadata["data_liquidity_model"],
                 vertical_metadata["data_execution_reality"],
+                vertical_metadata["dataset_version"],
+                vertical_metadata["dataset_fingerprint"],
+                vertical_metadata["dataset_content_sha256"],
+                vertical_metadata["dataset_schema_sha256"],
+                vertical_metadata["dataset_manifest_path"],
+                vertical_metadata["dataset_verified"],
                 run_id,
             ),
         )
@@ -2740,7 +3573,13 @@ class AlphaEvaluator:
                 data_price_source = ?,
                 data_roll_model = ?,
                 data_liquidity_model = ?,
-                data_execution_reality = ?
+                data_execution_reality = ?,
+                dataset_version = ?,
+                dataset_fingerprint = ?,
+                dataset_content_sha256 = ?,
+                dataset_schema_sha256 = ?,
+                dataset_manifest_path = ?,
+                dataset_verified = ?
             WHERE run_id = ?
             """,
             (
@@ -2756,6 +3595,12 @@ class AlphaEvaluator:
                 vertical_metadata["data_roll_model"],
                 vertical_metadata["data_liquidity_model"],
                 vertical_metadata["data_execution_reality"],
+                vertical_metadata["dataset_version"],
+                vertical_metadata["dataset_fingerprint"],
+                vertical_metadata["dataset_content_sha256"],
+                vertical_metadata["dataset_schema_sha256"],
+                vertical_metadata["dataset_manifest_path"],
+                vertical_metadata["dataset_verified"],
                 run_id,
             ),
         )
@@ -3116,6 +3961,8 @@ class AlphaEvaluator:
             """, (total_trades, run_id))
             update_conn.commit()
             update_conn.close()
+
+        return run_id
 
 if __name__ == "__main__":
     print("Evaluator module safely loaded. OOP updates complete.")

@@ -228,6 +228,7 @@ def run_options_backtest_route(
     )
     from oqp.research import attach_factor_contract_attrs, resolve_factor_contract
     from oqp.research.backtesting import AlphaEvaluator
+    from oqp.research.parameter_schema import attach_factor_parameter_attrs
 
     if not args.option_chain_file:
         print("❌ ERROR: Option backtests require --option_chain_file.")
@@ -273,6 +274,7 @@ def run_options_backtest_route(
     try:
         factor_df = factor_module.compute(underlying.copy())
         factor_df = normalize_underlying_input(factor_df)
+        factor_df = attach_factor_parameter_attrs(factor_df, factor_module)
     except Exception as e:
         print(f"❌ [FACTOR COMPUTE ERROR] {e}")
         return
@@ -599,6 +601,7 @@ def main():
         normalize_return_horizon,
     )
     from oqp.research.factors import factor_search_roots, load_factor_module
+    from oqp.research.parameter_schema import attach_factor_parameter_attrs
 
     try:
         args.return_horizon = normalize_return_horizon(args.return_horizon)
@@ -990,6 +993,7 @@ def main():
     # 5. Apply the Math
     print("   -> Computing Factor Scores...")
     df = factor_module.compute(df)
+    df = attach_factor_parameter_attrs(df, factor_module)
     apply_vertical_attrs(df, vertical_attrs)
     df = attach_capital_attrs(df, capital_profile)
     df = attach_trade_policy_attrs(df, trade_policy)

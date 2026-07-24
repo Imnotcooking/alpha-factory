@@ -8,6 +8,8 @@ views as external/manual positions.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
@@ -143,6 +145,55 @@ def load_manual_external_positions_file(path: str | Path = DEFAULT_MANUAL_EXTERN
     if not isinstance(rows, list):
         raise ValueError("Manual external holdings JSON must be a list or an object with a positions list.")
     return [row for row in rows if isinstance(row, dict)]
+
+
+def write_manual_external_positions_file(
+    payload: Any,
+    path: str | Path = DEFAULT_MANUAL_EXTERNAL_INPUT_PATH,
+) -> tuple[int, Path | None]:
+    """Validate and atomically save the manual holdings source JSON.
+
+    The previous file is copied to ``.json.bak`` before replacement. Empty
+    portfolios are rejected because the sync path treats this file as the
+    active source of truth.
+    """
+
+    rows = payload.get("positions") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise ValueError("Manual external holdings JSON must contain a positions list.")
+    if not rows:
+        raise ValueError("Manual external holdings must contain at least one position.")
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError("Every manual external holdings position must be a JSON object.")
+
+    position_ids: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        position_id = str(row.get("position_id") or row.get("id") or "").strip()
+        if not position_id:
+            raise ValueError(f"Position {index} is missing position_id.")
+        if not str(row.get("symbol") or "").strip():
+            raise ValueError(f"Position {position_id} is missing symbol.")
+        normalize_manual_external_position(row)
+        position_ids.append(position_id)
+    duplicates = sorted({value for value in position_ids if position_ids.count(value) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate position_id value(s): {', '.join(duplicates)}")
+
+    input_path = Path(path)
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path: Path | None = None
+    if input_path.exists():
+        backup_path = input_path.with_suffix(input_path.suffix + ".bak")
+        shutil.copy2(input_path, backup_path)
+
+    encoded = json.dumps({"positions": rows}, indent=2, ensure_ascii=False) + "\n"
+    temporary_path = input_path.with_suffix(input_path.suffix + ".tmp")
+    try:
+        temporary_path.write_text(encoded, encoding="utf-8")
+        os.replace(temporary_path, input_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return len(rows), backup_path
 
 
 def sync_manual_external_positions_from_json(

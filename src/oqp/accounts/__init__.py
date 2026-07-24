@@ -36,6 +36,7 @@ from oqp.accounts.manual_external import (
     load_manual_external_positions_as_account_positions,
     sync_manual_external_positions_from_json,
     upsert_manual_external_positions,
+    write_manual_external_positions_file,
 )
 from oqp.accounts.models import (
     AccountEnvironment,
@@ -127,6 +128,7 @@ __all__ = [
     "position_snapshot_from_legacy_row",
     "sync_manual_external_positions_from_json",
     "upsert_manual_external_positions",
+    "write_manual_external_positions_file",
     "write_account_snapshot",
     "write_account_trade_event",
     "write_account_trade_events",

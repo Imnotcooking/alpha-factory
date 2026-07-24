@@ -22,6 +22,11 @@ except Exception:  # pragma: no cover - keeps standalone dashboard launches aliv
     ASSET_TAXONOMY = {}
 
 try:
+    from oqp.execution.transaction_costs import TransactionCostRegistry
+except Exception:  # pragma: no cover - dashboard can still render legacy assumptions.
+    TransactionCostRegistry = None
+
+try:
     from views.system_health_view import SystemHealthView
 except Exception:  # pragma: no cover - assumptions view can run without health module.
     SystemHealthView = None
@@ -91,6 +96,8 @@ class AssumptionsView:
             st.caption(f"{copy.get('assumptions_manifest_path', 'Manifest')}: `{self._display_path(manifest_path)}`")
 
         self._render_topline(manifest, copy)
+        self._render_success_criterion(manifest, copy)
+        self._render_transaction_cost_readiness(manifest, copy)
         if manifest.get("manifest_source") == "db_reconstructed_legacy":
             self._render_section(
                 copy.get("assumptions_reconstruction", "Reconstruction Note"),
@@ -101,6 +108,12 @@ class AssumptionsView:
         self._render_data_health_assumptions(manifest, copy)
         self._render_section(copy.get("assumptions_signal", "Signal & execution"), manifest.get("signal_and_execution_mode", {}), copy)
         self._render_section(copy.get("assumptions_engine", "Execution engine"), manifest.get("execution_engine", {}), copy)
+        if manifest.get("risk_and_allocation"):
+            self._render_section(
+                copy.get("assumptions_risk", "Risk & allocation"),
+                manifest.get("risk_and_allocation", {}),
+                copy,
+            )
         if manifest.get("costs_and_slippage"):
             self._render_costs_and_slippage(
                 copy.get("assumptions_costs", "Costs & slippage"),
@@ -372,6 +385,355 @@ class AssumptionsView:
         cols[1].metric(copy.get("assumptions_mode", "Mode"), str(signal.get("execution_mode") or ""))
         cols[2].metric(copy.get("assumptions_alpha_col", "Alpha"), str(signal.get("alpha_signal_col") or ""))
         cols[3].metric(copy.get("assumptions_trades", "Trades"), self._format_value(realized.get("total_trades", "")))
+
+    def _render_transaction_cost_readiness(
+        self,
+        manifest: dict[str, Any],
+        copy: dict[str, Any],
+    ) -> None:
+        status = self._transaction_cost_status(manifest)
+        if status is None:
+            return
+
+        st.markdown(
+            f"#### {copy.get('assumptions_cost_readiness', 'Transaction Cost Readiness')}"
+        )
+        rows = [
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_market", "Market"
+                ),
+                copy.get("assumptions_cost_value", "Value"): status["market_vertical"],
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_profile", "Profile"
+                ),
+                copy.get("assumptions_cost_value", "Value"): status["profile_id"],
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_source", "Source"
+                ),
+                copy.get("assumptions_cost_value", "Value"): (
+                    copy.get("assumptions_cost_source_frozen", "Frozen with run")
+                    if status["frozen_with_run"]
+                    else copy.get(
+                        "assumptions_cost_source_current",
+                        "Current default; not frozen with run",
+                    )
+                ),
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_use_case", "Claim level"
+                ),
+                copy.get("assumptions_cost_value", "Value"): status["use_case"],
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_schedule", "Schedule status"
+                ),
+                copy.get("assumptions_cost_value", "Value"): status["profile_status"],
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_completeness", "Completeness"
+                ),
+                copy.get("assumptions_cost_value", "Value"): status["completeness"],
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_engine_support", "Engine support"
+                ),
+                copy.get("assumptions_cost_value", "Value"): status["engine_support"],
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_net_ready", "Research-net ready"
+                ),
+                copy.get("assumptions_cost_value", "Value"): self._yes_no(
+                    status["research_net_ready"], copy
+                ),
+            },
+            {
+                copy.get("assumptions_cost_field", "Field"): copy.get(
+                    "assumptions_cost_production_ready", "Production ready"
+                ),
+                copy.get("assumptions_cost_value", "Value"): self._yes_no(
+                    status["production_ready"], copy
+                ),
+            },
+        ]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+        if not status["frozen_with_run"]:
+            st.warning(
+                copy.get(
+                    "assumptions_cost_historical_unfrozen",
+                    "This historical run did not freeze a transaction-cost profile. "
+                    "The panel shows the current default for this market and does not validate the old net result.",
+                )
+            )
+
+        if status["frozen_with_run"] and status["production_ready"]:
+            st.success(
+                copy.get(
+                    "assumptions_cost_ready_production",
+                    "This run used a profile approved for research-net and production claims.",
+                )
+            )
+        elif status["frozen_with_run"] and status["research_net_ready"]:
+            st.info(
+                copy.get(
+                    "assumptions_cost_ready_research",
+                    "This profile supports research-net results but is not approved for production claims.",
+                )
+            )
+        elif status["frozen_with_run"] and status["gross_only"]:
+            st.warning(
+                copy.get(
+                    "assumptions_cost_gross_only",
+                    "This is a gross-only run. It must not be reported as net or production-ready.",
+                )
+            )
+        elif status["frozen_with_run"]:
+            st.error(
+                copy.get(
+                    "assumptions_cost_not_net_ready",
+                    "The fee schedule is not fully wired into the engine, so net performance is not validated.",
+                )
+            )
+
+        limitations = status["limitations"]
+        if limitations and not status["production_ready"]:
+            st.markdown(
+                f"**{copy.get('assumptions_cost_required_work', 'Required before promotion')}**"
+            )
+            for item in limitations:
+                st.markdown(f"- {item}")
+
+        fingerprint = status.get("fingerprint")
+        if fingerprint:
+            fingerprint_label = (
+                copy.get("assumptions_cost_fingerprint", "Frozen profile fingerprint")
+                if status["frozen_with_run"]
+                else copy.get(
+                    "assumptions_cost_current_fingerprint",
+                    "Current default profile fingerprint",
+                )
+            )
+            st.caption(
+                f"{fingerprint_label}: `{fingerprint}`"
+            )
+
+    def _render_success_criterion(
+        self,
+        manifest: dict[str, Any],
+        copy: dict[str, Any],
+    ) -> None:
+        status = self._success_criterion_status(manifest)
+        if status is None:
+            return
+        st.markdown(
+            f"#### {copy.get('assumptions_success_criterion', 'Primary Success Criterion')}"
+        )
+        rows = [
+            {
+                "Field": "Status",
+                "Value": status["status"],
+            },
+            {
+                "Field": "Profile",
+                "Value": status["profile_id"],
+            },
+            {
+                "Field": "Research object",
+                "Value": status["research_object"],
+            },
+            {
+                "Field": "Decision sample",
+                "Value": status["decision_sample"],
+            },
+            {
+                "Field": "Primary metric",
+                "Value": status["primary_metric"],
+            },
+            {
+                "Field": "Frozen comparator",
+                "Value": status["comparator_metric"],
+            },
+            {
+                "Field": "Minimum improvement",
+                "Value": status["minimum_improvement"],
+            },
+            {
+                "Field": "Absolute floor",
+                "Value": status["absolute_floor"],
+            },
+        ]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        if status["economic_question"]:
+            st.caption(status["economic_question"])
+
+        decision = status["status"]
+        if decision == "pass":
+            st.success("The recorded metrics satisfy the frozen criterion.")
+        elif decision == "fail":
+            st.error("The recorded metrics do not satisfy the frozen criterion.")
+        elif decision == "incomplete":
+            missing = ", ".join(status["missing_metrics"])
+            st.warning(
+                "The criterion cannot be decided because required evidence is "
+                f"missing or non-finite: {missing or 'see evaluation record'}."
+            )
+        elif decision == "declared_not_evaluated":
+            st.info(
+                "The objective was frozen before the run, but its complete "
+                "decision metrics have not yet been attached."
+            )
+        else:
+            st.warning(
+                "No primary success criterion was frozen for this run. Its "
+                "metrics are exploratory and cannot support a promotion claim."
+            )
+
+        if status["gates"]:
+            st.markdown("**Hard gates**")
+            st.dataframe(
+                pd.DataFrame(status["gates"]),
+                width="stretch",
+                hide_index=True,
+            )
+        if status["profile_fingerprint"]:
+            st.caption(
+                "Frozen criterion fingerprint: "
+                f"`{status['profile_fingerprint']}`"
+            )
+
+    @staticmethod
+    def _success_criterion_status(
+        manifest: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        payload = manifest.get("success_criterion")
+        if not isinstance(payload, dict):
+            return None
+        definition = payload.get("definition") or {}
+        evaluation = payload.get("evaluation") or {}
+        if not isinstance(definition, dict):
+            definition = {}
+        if not isinstance(evaluation, dict):
+            evaluation = {}
+        primary = definition.get("primary") or {}
+        if not isinstance(primary, dict):
+            primary = {}
+        gates = evaluation.get("gates") or definition.get("gates") or []
+        if not isinstance(gates, list):
+            gates = []
+        missing_metrics = evaluation.get("missing_metrics") or []
+        if isinstance(missing_metrics, str):
+            missing_metrics = [missing_metrics]
+        return {
+            "status": str(
+                evaluation.get("decision")
+                or payload.get("status")
+                or "not_declared"
+            ),
+            "profile_id": str(payload.get("profile_id") or ""),
+            "profile_fingerprint": str(
+                payload.get("profile_fingerprint") or ""
+            ),
+            "research_object": str(definition.get("research_object") or ""),
+            "decision_sample": str(definition.get("decision_sample") or ""),
+            "economic_question": str(
+                definition.get("economic_question") or ""
+            ),
+            "primary_metric": str(primary.get("metric") or ""),
+            "comparator_metric": str(primary.get("comparator_metric") or ""),
+            "minimum_improvement": primary.get("minimum_improvement"),
+            "absolute_floor": primary.get("absolute_floor"),
+            "gates": gates,
+            "missing_metrics": list(missing_metrics),
+        }
+
+    @staticmethod
+    def _transaction_cost_status(manifest: dict[str, Any]) -> dict[str, Any] | None:
+        costs = manifest.get("costs_and_slippage") or {}
+        if not isinstance(costs, dict):
+            return None
+        assumptions = costs.get("profile_assumptions") or {}
+        if not isinstance(assumptions, dict):
+            assumptions = {}
+        profile_id = str(costs.get("profile_id") or assumptions.get("profile_id") or "").strip()
+        if not profile_id:
+            market_vertical = str(
+                manifest.get("asset_class")
+                or (manifest.get("data") or {}).get("market_vertical")
+                or ""
+            ).strip()
+            if not market_vertical or TransactionCostRegistry is None:
+                return None
+            try:
+                profile = TransactionCostRegistry.load().resolve(market_vertical)
+            except Exception:
+                return None
+            return {
+                "market_vertical": profile.market_vertical,
+                "profile_id": profile.profile_id,
+                "use_case": "not_recorded",
+                "profile_status": profile.status,
+                "completeness": profile.completeness,
+                "engine_support": profile.engine_support,
+                "research_net_ready": profile.research_net_ready,
+                "production_ready": profile.production_ready,
+                "gross_only": False,
+                "limitations": list(profile.readiness_actions()),
+                "fingerprint": profile.fingerprint,
+                "frozen_with_run": False,
+            }
+        limitations = assumptions.get("limitations") or []
+        if isinstance(limitations, str):
+            limitations = [limitations]
+        return {
+            "market_vertical": str(
+                assumptions.get("market_vertical")
+                or manifest.get("asset_class")
+                or ""
+            ),
+            "profile_id": profile_id,
+            "use_case": str(costs.get("use_case") or "unknown"),
+            "profile_status": str(
+                costs.get("profile_status") or assumptions.get("status") or "unknown"
+            ),
+            "completeness": str(
+                costs.get("profile_completeness")
+                or assumptions.get("completeness")
+                or "unknown"
+            ),
+            "engine_support": str(
+                costs.get("engine_support")
+                or assumptions.get("engine_support")
+                or "unknown"
+            ),
+            "research_net_ready": bool(
+                costs.get("research_net_ready", assumptions.get("research_net_ready", False))
+            ),
+            "production_ready": bool(
+                costs.get("production_ready", assumptions.get("production_ready", False))
+            ),
+            "gross_only": bool(costs.get("gross_only", False)),
+            "limitations": [str(item) for item in limitations if str(item).strip()],
+            "fingerprint": str(costs.get("profile_fingerprint") or ""),
+            "frozen_with_run": True,
+        }
+
+    @staticmethod
+    def _yes_no(value: bool, copy: dict[str, Any]) -> str:
+        return (
+            copy.get("assumptions_cost_yes", "Yes")
+            if value
+            else copy.get("assumptions_cost_no", "No")
+        )
 
     def _render_section(self, title: str, payload: Any, copy: dict[str, Any]) -> None:
         st.markdown(f"#### {title}")

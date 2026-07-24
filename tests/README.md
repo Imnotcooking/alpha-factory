@@ -51,8 +51,8 @@ Moving them would change the reproducibility seal.
 - Do not make the broad suite depend on private data, live accounts, or local
   absolute paths.
 
-Private factor implementation tests live beside the private factor library at
-`departments/research/factors/tests/`; they are intentionally excluded from the
-public repository by the factor boundary in `.gitignore`.
+Private factor implementation tests live in
+`tests/research/private_factors/`. They use synthetic data, remain a separate
+local pytest lane, and are excluded from the public repository in `.gitignore`.
 
 Package ownership is documented in [Source Layout](../src/README.md).

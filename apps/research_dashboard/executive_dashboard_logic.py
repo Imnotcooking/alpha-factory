@@ -23,87 +23,105 @@ class StrategyProfile:
 class ExecutiveDashboardView:
     """Reusable strategy comparison view for research reviews."""
 
-    COLORS = {
-        "Heuristic": "#1f77b4",
-        "Raw ML": "#ff7f0e",
-        "Gatekept / Regime": "#2ca02c",
-        "Additional": "#9467bd",
-        "Benchmark": "#7f8c8d",
-    }
+    SERIES_COLORS = ("#2563eb", "#f97316", "#059669", "#9333ea", "#dc2626", "#0891b2")
+    BENCHMARK_COLOR = "#6b7280"
 
     COPY = {
         "EN": {
-            "title": "Strategy Comparison",
-            "subtitle": "Compare heuristic, raw ML, and gatekept/regime-aware strategies using completed backtest runs.",
+            "title": "Strategy Run Comparison",
+            "subtitle": (
+                "Compare completed, registered strategy backtests. Factor tests, sleeve tests, "
+                "smoke runs, and unfinished ideas are excluded."
+            ),
             "manual": """
-Use this page as a reusable manager dashboard.
+This page compares developed strategy runs, not factors.
 
-1. Pick one representative run for each strategy profile: heuristic baseline, raw ML, and gatekept or regime-aware ML.
-2. Read the metric cards first. A better strategy should improve Sharpe and drawdown, not just annual return.
-3. Use the equity and drawdown charts to see path quality. Smooth survival beats one lucky spike.
-4. Check return correlation. Low correlation means the strategies may diversify each other; high correlation means they are probably the same risk in different clothes.
-5. Use the trade x-ray last to inspect which assets created or destroyed PnL.
+1. Select one completed strategy run as the baseline and one or more completed runs to compare.
+2. Metrics are recomputed over the exact dates shared by every selected run.
+3. A run may represent a different strategy or a frozen version of the same strategy.
+4. Read return, Sharpe, drawdown, turnover, and costs together. A higher return bought with much more risk or trading is not a clean improvement.
+5. Use the equity, drawdown, correlation, and trade views to inspect path and implementation differences.
 """,
-            "heuristic": "Heuristic / rules profile",
-            "raw_ml": "Raw ML profile",
-            "gate": "Gatekept / regime-aware profile",
-            "additional": "Additional comparison runs",
-            "metrics": "Profile Metrics",
+            "market": "Market",
+            "frequency": "Frequency",
+            "core_type": "Core type",
+            "all": "All",
+            "baseline": "Baseline strategy run",
+            "comparisons": "Comparison strategy runs",
+            "strategies": "Developed strategies",
+            "runs": "Completed runs",
+            "selected": "Selected runs",
+            "common_dates": "Common dates",
+            "metrics": "Strategy Metrics",
             "equity": "Cumulative Equity",
             "drawdown": "Drawdown",
             "correlation": "Return Correlation",
-            "improvement": "Improvement vs Heuristic Baseline",
+            "improvement": "Improvement vs Selected Baseline",
             "xray": "Trade X-Ray",
             "xray_select": "Inspect selected run",
             "asset_pnl": "Asset PnL Contribution",
             "holding": "Holding Period Distribution",
-            "no_returns": "No return series found for the selected profile.",
+            "no_returns": "No readable return series found for the selected strategy runs.",
             "no_trades": "No discrete trade ledger found for this run.",
-            "no_runs": "No completed backtest runs found. Run the evaluator first.",
+            "no_runs": "No completed developed-strategy runs found.",
+            "no_filtered_runs": "No developed-strategy runs match these filters.",
+            "total_return": "Total Return",
             "ann_return": "Ann. Return",
             "ann_vol": "Ann. Vol",
             "sharpe": "Sharpe",
             "max_dd": "Max DD",
             "calmar": "Calmar",
-            "turnover": "Avg Turnover",
-            "holdout_ic": "Holdout IC",
+            "turnover": "Ann. Turnover",
+            "cost": "Total Cost",
+            "hit_rate": "Hit Rate",
+            "observations": "Observations",
             "trades": "Trades",
         },
         "ZH": {
-            "title": "策略对比",
-            "subtitle": "用已完成的回测，手动对比启发式策略、纯 ML 策略、以及带状态/风控门控的 ML 策略。",
+            "title": "策略运行对比",
+            "subtitle": "仅比较已完成并登记的策略回测；不纳入因子测试、袖套测试、冒烟测试或未完成想法。",
             "manual": """
-这个页面现在是通用的经理汇报看板。
+本页比较的是已开发策略的回测运行，不是因子。
 
-1. 先为每类策略选择一个代表运行：启发式基线、纯 ML、以及带状态/门控的 ML。
-2. 先看顶部指标。更好的策略不应该只提高年化收益，还应该改善夏普和回撤。
-3. 再看净值和回撤曲线。稳定存活比单次暴涨更重要。
-4. 检查收益相关性。低相关说明策略可能互补；高相关说明它们可能只是同一种风险的不同包装。
-5. 最后用交易 X-Ray 查看哪些资产贡献或拖累了收益。
+1. 选择一个已完成策略运行作为基线，再选择一个或多个运行进行比较。
+2. 所有指标按所选运行共同拥有的日期重新计算，确保口径一致。
+3. 对比项可以是不同策略，也可以是同一策略的不同冻结版本。
+4. 收益、夏普、回撤、换手与成本必须一起看；用更多风险和交易换来的高收益不一定更好。
+5. 最后检查净值、回撤、相关性和交易明细，理解差异来自哪里。
 """,
-            "heuristic": "启发式 / 规则策略",
-            "raw_ml": "纯 ML 策略",
-            "gate": "门控 / 状态感知 ML 策略",
-            "additional": "额外对比运行",
+            "market": "市场",
+            "frequency": "频率",
+            "core_type": "核心类型",
+            "all": "全部",
+            "baseline": "基准策略运行",
+            "comparisons": "对比策略运行",
+            "strategies": "已开发策略",
+            "runs": "已完成运行",
+            "selected": "已选运行",
+            "common_dates": "共同日期",
             "metrics": "策略指标",
             "equity": "累计净值",
             "drawdown": "历史回撤",
             "correlation": "收益相关性",
-            "improvement": "相对启发式基线的改善",
+            "improvement": "相对所选基线的改善",
             "xray": "交易 X-Ray",
             "xray_select": "选择要检查的运行",
             "asset_pnl": "资产 PnL 贡献",
             "holding": "持仓时间分布",
-            "no_returns": "所选策略没有收益序列。",
+            "no_returns": "所选策略运行没有可读取的收益序列。",
             "no_trades": "该运行没有离散交易记录。",
-            "no_runs": "未找到已完成回测。请先运行 evaluator。",
+            "no_runs": "未找到已完成的正式策略回测。",
+            "no_filtered_runs": "没有正式策略运行符合当前筛选条件。",
+            "total_return": "累计收益",
             "ann_return": "年化收益",
             "ann_vol": "年化波动",
             "sharpe": "夏普",
             "max_dd": "最大回撤",
             "calmar": "卡玛",
-            "turnover": "平均换手",
-            "holdout_ic": "样本外 IC",
+            "turnover": "年化换手",
+            "cost": "累计成本",
+            "hit_rate": "正收益占比",
+            "observations": "观测数",
             "trades": "交易数",
         },
     }
@@ -111,12 +129,21 @@ Use this page as a reusable manager dashboard.
     def __init__(self, data_manager):
         self.dm = data_manager
 
-    def render(self, lang: str = "EN", theme_mode: str = "LIGHT"):
+    def render(
+        self,
+        lang: str = "EN",
+        theme_mode: str = "LIGHT",
+        *,
+        embedded: bool = False,
+    ):
         copy = self.COPY.get(lang, self.COPY["EN"])
         tpl = get_plotly_template(theme_mode)
-        runs_df = self._prepare_runs(self.dm.get_all_runs())
+        runs_df = self._prepare_runs(self.dm.get_completed_strategy_runs())
 
-        st.title(copy["title"])
+        if embedded:
+            st.subheader(copy["title"])
+        else:
+            st.title(copy["title"])
         st.caption(copy["subtitle"])
         with st.expander("How to use / 使用说明", expanded=False):
             st.markdown(copy["manual"])
@@ -125,61 +152,52 @@ Use this page as a reusable manager dashboard.
             st.warning(copy["no_runs"])
             return
 
+        runs_df = self._render_run_filters(runs_df, copy)
+        if runs_df.empty:
+            st.info(copy["no_filtered_runs"])
+            return
+
         label_map = self._build_label_map(runs_df)
-        labels = list(label_map.keys())
-
-        selector_cols = st.columns([0.31, 0.31, 0.31])
-        heuristic_label = self._select_profile(
-            selector_cols[0],
-            copy["heuristic"],
+        labels = list(label_map)
+        baseline_label = st.selectbox(
+            copy["baseline"],
             labels,
-            runs_df,
-            label_map,
-            key="exec_profile_heuristic",
-            patterns=("fac_039", "fac_040", "fac_041", "fac_042", "sma", "bollinger", "heuristic", "rule"),
+            index=0,
+            key="strategy_comparison_baseline",
         )
-        raw_ml_label = self._select_profile(
-            selector_cols[1],
-            copy["raw_ml"],
-            labels,
-            runs_df,
-            label_map,
-            key="exec_profile_raw_ml",
-            patterns=("fac_054", "xgboost", "raw ml", "machine learning", "ml alpha"),
+        comparison_options = [label for label in labels if label != baseline_label]
+        default_comparisons = comparison_options[:1]
+        comparison_labels = st.multiselect(
+            copy["comparisons"],
+            comparison_options,
+            default=default_comparisons,
+            key="strategy_comparison_runs",
         )
-        gate_label = self._select_profile(
-            selector_cols[2],
-            copy["gate"],
-            labels,
-            runs_df,
-            label_map,
-            key="exec_profile_gate",
-            patterns=("fac_056", "fac_057", "fac_043", "gmm", "hmm", "ensemble", "gate", "regime", "router"),
-        )
-
-        selected_primary = [heuristic_label, raw_ml_label, gate_label]
-        additional_labels = st.multiselect(
-            copy["additional"],
-            labels,
-            default=[],
-            key="exec_profile_additional",
-        )
-
+        selected_labels = [baseline_label, *comparison_labels]
         profiles = self._load_profiles(
             [
-                ("Heuristic", heuristic_label),
-                ("Raw ML", raw_ml_label),
-                ("Gatekept / Regime", gate_label),
-                *[("Additional", label) for label in additional_labels],
+                ("Baseline" if index == 0 else "Comparison", label)
+                for index, label in enumerate(selected_labels)
             ],
             label_map,
         )
-
-        profiles = self._dedupe_profiles(profiles)
+        profiles = self._align_profiles(self._dedupe_profiles(profiles))
         if not profiles:
             st.info(copy["no_returns"])
             return
 
+        metric_cols = st.columns(4)
+        metric_cols[0].metric(
+            copy["strategies"],
+            runs_df["strategy_id"].nunique(),
+        )
+        metric_cols[1].metric(copy["runs"], len(runs_df))
+        metric_cols[2].metric(copy["selected"], len(profiles))
+        metric_cols[3].metric(
+            copy["common_dates"],
+            min((len(profile.returns) for profile in profiles), default=0),
+        )
+        self._render_comparability_note(profiles)
         st.markdown("---")
         self._render_metric_cards(profiles, copy)
         st.markdown("---")
@@ -208,7 +226,17 @@ Use this page as a reusable manager dashboard.
         out = runs_df.copy()
         out["timestamp"] = pd.to_datetime(out.get("timestamp"), errors="coerce")
         out["factor_id"] = out.get("factor_id", "").astype(str)
+        out["strategy_id"] = out.get("strategy_id", "").fillna("").astype(str)
+        out["strategy_id"] = out["strategy_id"].mask(
+            out["strategy_id"].eq(""),
+            out["factor_id"],
+        )
         out["name"] = out.get("name", "").astype(str)
+        for column in ("market_vertical", "data_frequency", "strategy_core_type"):
+            if column not in out.columns:
+                out[column] = ""
+            out[column] = out[column].fillna("").astype(str)
+        out["strategy_core_type"] = out["strategy_core_type"].replace("", "Unrecorded")
         return out.sort_values("timestamp", ascending=False, na_position="last").reset_index(drop=True)
 
     @staticmethod
@@ -216,11 +244,27 @@ Use this page as a reusable manager dashboard.
         timestamp = pd.to_datetime(row.get("timestamp"), errors="coerce")
         date_label = timestamp.strftime("%Y-%m-%d") if pd.notna(timestamp) else "no-date"
         name = str(row.get("name", "Unknown"))
-        factor_id = str(row.get("factor_id", ""))
+        strategy_id = str(row.get("strategy_id", row.get("factor_id", "")))
         run_id = str(row.get("run_id", ""))
         sharpe = pd.to_numeric(row.get("sharpe_ratio"), errors="coerce")
-        ic = pd.to_numeric(row.get("holdout_ic"), errors="coerce")
-        return f"{date_label} | {name} | {factor_id} | Sharpe {sharpe:.2f} | IC {ic:.4f} | {run_id[:8]}"
+        sharpe_label = f"{sharpe:.2f}" if pd.notna(sharpe) else "N/A"
+        meaningful_name = (
+            name
+            if name
+            and name.lower() not in {"unknown", "nan", "none"}
+            and not name.lower().startswith("auto-gen")
+            and strategy_id.lower() not in name.lower()
+            else ""
+        )
+        identity = (
+            f"{strategy_id} | {meaningful_name}"
+            if meaningful_name
+            else strategy_id
+        )
+        return (
+            f"{date_label} | {identity} | "
+            f"Sharpe {sharpe_label} | {run_id[:8]}"
+        )
 
     def _build_label_map(self, runs_df: pd.DataFrame) -> dict[str, pd.Series]:
         label_map: dict[str, pd.Series] = {}
@@ -228,6 +272,42 @@ Use this page as a reusable manager dashboard.
             label = self._run_label(row)
             label_map[label] = row
         return label_map
+
+    @staticmethod
+    def _filter_options(series: pd.Series) -> list[str]:
+        values = sorted(
+            value
+            for value in series.fillna("").astype(str).unique().tolist()
+            if value and value.lower() not in {"nan", "none"}
+        )
+        return ["All", *values]
+
+    def _render_run_filters(self, runs_df: pd.DataFrame, copy: dict) -> pd.DataFrame:
+        cols = st.columns(3)
+        market = cols[0].selectbox(
+            copy["market"],
+            self._filter_options(runs_df["market_vertical"]),
+            key="strategy_comparison_market",
+        )
+        frequency = cols[1].selectbox(
+            copy["frequency"],
+            self._filter_options(runs_df["data_frequency"]),
+            key="strategy_comparison_frequency",
+        )
+        core_type = cols[2].selectbox(
+            copy["core_type"],
+            self._filter_options(runs_df["strategy_core_type"]),
+            key="strategy_comparison_core_type",
+        )
+        filtered = runs_df.copy()
+        for column, value in (
+            ("market_vertical", market),
+            ("data_frequency", frequency),
+            ("strategy_core_type", core_type),
+        ):
+            if value != "All":
+                filtered = filtered.loc[filtered[column].eq(value)]
+        return filtered.reset_index(drop=True)
 
     def _select_profile(
         self,
@@ -307,39 +387,121 @@ Use this page as a reusable manager dashboard.
 
     @staticmethod
     def _short_profile_name(row: pd.Series, group: str) -> str:
-        name = str(row.get("name", "Unknown"))
-        factor_id = str(row.get("factor_id", ""))
-        if factor_id and factor_id.lower() not in name.lower():
-            return f"{group}: {name} ({factor_id})"
-        return f"{group}: {name}"
+        strategy_id = str(row.get("strategy_id", row.get("factor_id", "Unknown")))
+        run_id = str(row.get("run_id", ""))
+        timestamp = pd.to_datetime(row.get("timestamp"), errors="coerce")
+        date_label = timestamp.strftime("%Y-%m-%d") if pd.notna(timestamp) else "no-date"
+        return f"{group}: {strategy_id} [{date_label}, {run_id[:8]}]"
 
     @staticmethod
     def _compute_metrics(returns: pd.DataFrame, row: pd.Series) -> dict:
-        ret = pd.to_numeric(returns.get("net_return", 0.0), errors="coerce").fillna(0.0)
+        def numeric_column(
+            primary: str,
+            *,
+            fallback: str | None = None,
+            default: float = 0.0,
+        ) -> pd.Series:
+            if primary in returns.columns:
+                values = returns[primary]
+            elif fallback and fallback in returns.columns:
+                values = returns[fallback]
+            else:
+                values = pd.Series(default, index=returns.index, dtype=float)
+            return pd.to_numeric(values, errors="coerce")
+
+        ret = numeric_column("net_return").fillna(0.0)
         eq = (1.0 + ret).cumprod()
         days = max(len(ret), 1)
+        total_return = float(eq.iloc[-1] - 1.0) if not eq.empty else np.nan
         ann_return = float(eq.iloc[-1] ** (252 / days) - 1.0) if not eq.empty else np.nan
         ann_vol = float(ret.std(ddof=1) * np.sqrt(252)) if len(ret) > 1 else 0.0
         sharpe = ann_return / ann_vol if ann_vol > 1e-12 else 0.0
         drawdown = eq / eq.cummax() - 1.0
         max_dd = float(drawdown.min()) if not drawdown.empty else np.nan
         calmar = ann_return / abs(max_dd) if pd.notna(max_dd) and abs(max_dd) > 1e-12 else 0.0
-        turnover = pd.to_numeric(
-            returns.get("daily_turnover", returns.get("turnover", 0.0)),
-            errors="coerce",
-        ).fillna(0.0)
-        holdout_ic = pd.to_numeric(row.get("holdout_ic"), errors="coerce")
+        turnover = numeric_column("daily_turnover", fallback="turnover").fillna(0.0)
+        total_cost = numeric_column("daily_total_cost").fillna(0.0)
+        daily_cost_bps = numeric_column("daily_cost_bps", default=np.nan)
+        if daily_cost_bps.notna().any():
+            total_cost_rate = float(daily_cost_bps.fillna(0.0).sum() / 10_000.0)
+        else:
+            initial_capital = numeric_column("initial_capital", default=np.nan)
+            capital = initial_capital.dropna()
+            total_cost_rate = (
+                float(total_cost.sum() / capital.iloc[0])
+                if not capital.empty and capital.iloc[0] > 0
+                else np.nan
+            )
         total_trades = pd.to_numeric(row.get("total_trades"), errors="coerce")
+        active_returns = ret.loc[ret.ne(0.0)]
+        hit_rate = float(active_returns.gt(0.0).mean()) if not active_returns.empty else np.nan
         return {
+            "total_return": total_return,
             "ann_return": ann_return,
             "ann_vol": ann_vol,
             "sharpe": float(sharpe),
             "max_dd": max_dd,
             "calmar": float(calmar),
-            "avg_turnover": float(turnover.mean()),
-            "holdout_ic": float(holdout_ic) if pd.notna(holdout_ic) else np.nan,
+            "ann_turnover": float(turnover.mean() * 252.0),
+            "total_cost": total_cost_rate,
+            "hit_rate": hit_rate,
+            "observations": int(len(ret)),
             "total_trades": int(total_trades) if pd.notna(total_trades) else 0,
         }
+
+    def _align_profiles(
+        self,
+        profiles: list[StrategyProfile],
+    ) -> list[StrategyProfile]:
+        if len(profiles) < 2:
+            return profiles
+        date_sets = []
+        normalized = []
+        for profile in profiles:
+            returns = profile.returns.copy()
+            returns["date"] = pd.to_datetime(returns["date"], errors="coerce")
+            returns = returns.dropna(subset=["date"]).sort_values("date")
+            normalized.append((profile, returns))
+            date_sets.append(set(returns["date"]))
+        common_dates = set.intersection(*date_sets) if date_sets else set()
+        if not common_dates:
+            return []
+        aligned = []
+        for profile, returns in normalized:
+            common = returns.loc[returns["date"].isin(common_dates)].copy()
+            aligned.append(
+                StrategyProfile(
+                    label=profile.label,
+                    group=profile.group,
+                    row=profile.row,
+                    returns=common,
+                    metrics=self._compute_metrics(common, profile.row),
+                )
+            )
+        return aligned
+
+    @staticmethod
+    def _render_comparability_note(profiles: list[StrategyProfile]):
+        if not profiles:
+            return
+        fields = {
+            "market": {str(profile.row.get("market_vertical", "")) for profile in profiles},
+            "frequency": {str(profile.row.get("data_frequency", "")) for profile in profiles},
+            "dataset": {str(profile.row.get("dataset_id", "")) for profile in profiles},
+        }
+        mismatches = [name for name, values in fields.items() if len(values - {"", "nan"}) > 1]
+        dates = pd.to_datetime(profiles[0].returns["date"], errors="coerce").dropna()
+        if mismatches:
+            st.warning(
+                "Selected runs differ in "
+                + ", ".join(mismatches)
+                + ". Curves share dates, but the economic comparison is not fully like-for-like."
+            )
+        if not dates.empty:
+            st.caption(
+                f"Metrics use {len(dates):,} common observations from "
+                f"{dates.min():%Y-%m-%d} to {dates.max():%Y-%m-%d}."
+            )
 
     def _profile_curve(self, profile: StrategyProfile) -> pd.DataFrame:
         df = profile.returns.copy()
@@ -374,12 +536,12 @@ Use this page as a reusable manager dashboard.
                 c1.metric(copy["ann_return"], self._pct(metrics["ann_return"]))
                 c2.metric(copy["sharpe"], self._num(metrics["sharpe"]))
                 c3.metric(copy["max_dd"], self._pct(metrics["max_dd"]))
-                c4.metric(copy["turnover"], self._pct(metrics["avg_turnover"]))
+                c4.metric(copy["turnover"], self._pct(metrics["ann_turnover"]))
 
     def _render_equity_chart(self, profiles: list[StrategyProfile], tpl: str, copy: dict):
         st.markdown(f"### {copy['equity']}")
         fig = go.Figure()
-        for profile in profiles:
+        for index, profile in enumerate(profiles):
             curve = self._profile_curve(profile)
             fig.add_trace(
                 go.Scatter(
@@ -387,7 +549,10 @@ Use this page as a reusable manager dashboard.
                     y=curve["equity"],
                     mode="lines",
                     name=profile.label,
-                    line=dict(color=self.COLORS.get(profile.group), width=2),
+                    line=dict(
+                        color=self.SERIES_COLORS[index % len(self.SERIES_COLORS)],
+                        width=2,
+                    ),
                 )
             )
         first_curve = self._profile_curve(profiles[0])
@@ -398,7 +563,7 @@ Use this page as a reusable manager dashboard.
                     y=first_curve["benchmark_equity"],
                     mode="lines",
                     name="Benchmark",
-                    line=dict(color=self.COLORS["Benchmark"], width=1.4, dash="dash"),
+                    line=dict(color=self.BENCHMARK_COLOR, width=1.4, dash="dash"),
                 )
             )
         fig.update_layout(
@@ -413,7 +578,7 @@ Use this page as a reusable manager dashboard.
     def _render_drawdown_chart(self, profiles: list[StrategyProfile], tpl: str, copy: dict):
         st.markdown(f"### {copy['drawdown']}")
         fig = go.Figure()
-        for profile in profiles:
+        for index, profile in enumerate(profiles):
             curve = self._profile_curve(profile)
             fig.add_trace(
                 go.Scatter(
@@ -421,7 +586,10 @@ Use this page as a reusable manager dashboard.
                     y=curve["drawdown"],
                     mode="lines",
                     name=profile.label,
-                    line=dict(color=self.COLORS.get(profile.group), width=2),
+                    line=dict(
+                        color=self.SERIES_COLORS[index % len(self.SERIES_COLORS)],
+                        width=2,
+                    ),
                 )
             )
         fig.update_layout(
@@ -438,33 +606,40 @@ Use this page as a reusable manager dashboard.
         rows = []
         for profile in profiles:
             row = {
-                "profile": profile.label,
-                "group": profile.group,
+                "strategy_run": profile.label,
+                "role": profile.group,
+                copy["total_return"]: profile.metrics["total_return"],
                 copy["ann_return"]: profile.metrics["ann_return"],
                 copy["ann_vol"]: profile.metrics["ann_vol"],
                 copy["sharpe"]: profile.metrics["sharpe"],
                 copy["max_dd"]: profile.metrics["max_dd"],
                 copy["calmar"]: profile.metrics["calmar"],
-                copy["turnover"]: profile.metrics["avg_turnover"],
-                copy["holdout_ic"]: profile.metrics["holdout_ic"],
+                copy["turnover"]: profile.metrics["ann_turnover"],
+                copy["cost"]: profile.metrics["total_cost"],
+                copy["hit_rate"]: profile.metrics["hit_rate"],
+                copy["observations"]: profile.metrics["observations"],
                 copy["trades"]: profile.metrics["total_trades"],
             }
             rows.append(row)
         df = pd.DataFrame(rows)
-        pct_cols = [copy["ann_return"], copy["ann_vol"], copy["max_dd"], copy["turnover"]]
+        pct_cols = [
+            copy["total_return"],
+            copy["ann_return"],
+            copy["ann_vol"],
+            copy["max_dd"],
+            copy["turnover"],
+            copy["cost"],
+            copy["hit_rate"],
+        ]
         fmt = {col: "{:.2%}" for col in pct_cols if col in df.columns}
-        fmt.update({copy["sharpe"]: "{:.2f}", copy["calmar"]: "{:.2f}", copy["holdout_ic"]: "{:.4f}"})
+        fmt.update({copy["sharpe"]: "{:.2f}", copy["calmar"]: "{:.2f}"})
         st.dataframe(df.style.format(fmt), width="stretch", hide_index=True)
 
     @staticmethod
     def _short_profile_labels(profiles: list[StrategyProfile]) -> dict[str, str]:
         label_by_profile = {}
-        group_names = {
-            "Gatekept / Regime": "Gate",
-            "Additional": "Add",
-        }
         for idx, profile in enumerate(profiles, start=1):
-            group = group_names.get(profile.group, profile.group or "Profile")
+            group = profile.group or "Strategy"
             label_by_profile[profile.label] = f"P{idx} {group}"
         return label_by_profile
 
@@ -518,7 +693,7 @@ Use this page as a reusable manager dashboard.
         st.plotly_chart(fig, width="stretch")
 
     def _render_improvement(self, profiles: list[StrategyProfile], copy: dict):
-        baseline = next((p for p in profiles if p.group == "Heuristic"), profiles[0])
+        baseline = next((p for p in profiles if p.group == "Baseline"), profiles[0])
         rows = []
         for profile in profiles:
             if profile is baseline:
@@ -529,7 +704,8 @@ Use this page as a reusable manager dashboard.
                     "delta_sharpe": profile.metrics["sharpe"] - baseline.metrics["sharpe"],
                     "delta_ann_return": profile.metrics["ann_return"] - baseline.metrics["ann_return"],
                     "drawdown_reduction": abs(baseline.metrics["max_dd"]) - abs(profile.metrics["max_dd"]),
-                    "turnover_delta": profile.metrics["avg_turnover"] - baseline.metrics["avg_turnover"],
+                    "turnover_delta": profile.metrics["ann_turnover"] - baseline.metrics["ann_turnover"],
+                    "cost_delta": profile.metrics["total_cost"] - baseline.metrics["total_cost"],
                 }
             )
         st.markdown(f"### {copy['improvement']}")
@@ -544,6 +720,7 @@ Use this page as a reusable manager dashboard.
                     "delta_ann_return": "{:.2%}",
                     "drawdown_reduction": "{:.2%}",
                     "turnover_delta": "{:.2%}",
+                    "cost_delta": "{:.2%}",
                 }
             ),
             width="stretch",
@@ -591,7 +768,7 @@ Use this page as a reusable manager dashboard.
                     x=hold_col,
                     nbins=60,
                     template=tpl,
-                    color_discrete_sequence=[self.COLORS.get(profile.group, "#9467bd")],
+                    color_discrete_sequence=[self.SERIES_COLORS[0]],
                 )
                 fig.update_layout(height=390, margin=dict(l=10, r=10, t=20, b=10), yaxis_title="Trades")
                 st.plotly_chart(fig, width="stretch")

@@ -154,7 +154,7 @@ class MassiveOptionsDataAdapter(OptionsDataAdapter):
         underlying: str,
         params: dict[str, Any],
         *,
-        max_pages: int = 4,
+        max_pages: int = 100,
         timeout: float = 15.0,
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -166,11 +166,55 @@ class MassiveOptionsDataAdapter(OptionsDataAdapter):
                 rows.extend(row for row in page_rows if isinstance(row, dict))
             next_url = payload.get("next_url")
             if not next_url:
-                break
+                return rows
             url = str(next_url)
             if "apiKey=" not in url and self.api_key:
                 separator = "&" if "?" in url else "?"
                 url = f"{url}{separator}{urllib.parse.urlencode({'apiKey': self.api_key})}"
+        raise DataAdapterError(
+            f"Massive option snapshot exceeded the {max_pages}-page safety cap"
+        )
+
+    def get_option_snapshot_rows(
+        self,
+        underlying: str,
+        *,
+        expiration: str | date | None = None,
+        min_strike: float | None = None,
+        max_strike: float | None = None,
+        max_pages_per_type: int = 100,
+        timeout: float = 15.0,
+    ) -> list[dict[str, Any]]:
+        """Return raw current-chain rows for immutable materialization."""
+
+        params: dict[str, Any] = {
+            "limit": 250,
+            "sort": "strike_price",
+            "order": "asc",
+        }
+        if expiration is not None:
+            params["expiration_date"] = (
+                expiration.isoformat()
+                if isinstance(expiration, date)
+                else str(expiration)
+            )
+        if min_strike is not None:
+            params["strike_price.gte"] = float(min_strike)
+        if max_strike is not None:
+            params["strike_price.lte"] = float(max_strike)
+
+        rows: list[dict[str, Any]] = []
+        for contract_type in ("call", "put"):
+            typed_params = dict(params)
+            typed_params["contract_type"] = contract_type
+            rows.extend(
+                self._snapshot_pages(
+                    underlying.upper(),
+                    typed_params,
+                    max_pages=max_pages_per_type,
+                    timeout=timeout,
+                )
+            )
         return rows
 
     @staticmethod
@@ -278,29 +322,26 @@ class MassiveOptionsDataAdapter(OptionsDataAdapter):
             },
         )
 
-    def get_option_chain(self, request: OptionChainRequest) -> Sequence[OptionQuote]:
-        underlying = request.underlying.symbol.upper()
-        params: dict[str, Any] = {
-            "limit": 250,
-            "sort": "strike_price",
-            "order": "asc",
-        }
-        if request.expiration is not None:
-            params["expiration_date"] = request.expiration.isoformat()
-        if request.min_strike is not None:
-            params["strike_price.gte"] = request.min_strike
-        if request.max_strike is not None:
-            params["strike_price.lte"] = request.max_strike
+    def option_quotes_from_snapshot_rows(
+        self,
+        underlying: Instrument,
+        rows: Sequence[dict[str, Any]],
+    ) -> list[OptionQuote]:
+        """Normalize previously fetched snapshot rows without another API call."""
 
-        rows: list[dict[str, Any]] = []
-        for contract_type in ("call", "put"):
-            typed_params = dict(params)
-            typed_params["contract_type"] = contract_type
-            rows.extend(self._snapshot_pages(underlying, typed_params))
-
-        quotes: list[OptionQuote] = []
+        quotes = []
         for row in rows:
-            quote = self._quote_from_snapshot(request.underlying, row)
+            quote = self._quote_from_snapshot(underlying, row)
             if quote is not None:
                 quotes.append(quote)
         return quotes
+
+    def get_option_chain(self, request: OptionChainRequest) -> Sequence[OptionQuote]:
+        underlying = request.underlying.symbol.upper()
+        rows = self.get_option_snapshot_rows(
+            underlying,
+            expiration=request.expiration,
+            min_strike=request.min_strike,
+            max_strike=request.max_strike,
+        )
+        return self.option_quotes_from_snapshot_rows(request.underlying, rows)

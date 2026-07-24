@@ -1,0 +1,67 @@
+schema_version: 1
+registry_id: oqp_phase9_optimization_objectives_v1
+as_of: 2026-07-22
+
+profiles:
+  phase9_factor_predictive_v1:
+    layer: factor
+    status: active
+    economic_question: Does the parameter choice improve predictive strength, coverage, and stability before portfolio construction?
+    objectives:
+      - {name: pearson_ic, metric: mean_pearson_ic, direction: maximize, prior_mean: 0.0, prior_std: 0.10, noise_floor: 0.005}
+      - {name: rank_ic, metric: mean_rank_ic, direction: maximize, prior_mean: 0.0, prior_std: 0.10, noise_floor: 0.005}
+      - {name: pearson_icir, metric: pearson_icir, direction: maximize, prior_mean: 0.0, prior_std: 1.0, noise_floor: 0.05}
+      - {name: rank_icir, metric: rank_icir, direction: maximize, prior_mean: 0.0, prior_std: 1.0, noise_floor: 0.05}
+      - {name: coverage, metric: mean_joint_coverage, direction: maximize, prior_mean: 0.50, prior_std: 0.25, noise_floor: 0.01}
+      - {name: stability, metric: stability_floor, direction: maximize, prior_mean: 0.0, prior_std: 0.10, noise_floor: 0.01}
+    selection_priority: [rank_ic, rank_icir, stability, coverage, pearson_ic, pearson_icir]
+    constraints:
+      - {name: minimum_signal_return_coverage, metric: posterior__mean_joint_coverage, operator: ">=", threshold: 0.50, hard: true}
+    upstream_requirements: []
+
+  phase9_sleeve_economics_v1:
+    layer: sleeve
+    status: active
+    economic_question: Does one fixed sleeve construction improve executable net economics while preserving acceptable upstream factor evidence?
+    objectives:
+      - {name: net_sharpe, metric: net_sharpe, direction: maximize, prior_mean: 0.0, prior_std: 1.0, noise_floor: 0.10}
+      - {name: turnover, metric: annualized_turnover, direction: minimize, prior_mean: 4.0, prior_std: 4.0, noise_floor: 0.25}
+      - {name: drawdown, metric: maximum_drawdown_loss, direction: minimize, prior_mean: 0.30, prior_std: 0.20, noise_floor: 0.02}
+      - {name: stability, metric: subperiod_min_net_sharpe, direction: maximize, prior_mean: 0.0, prior_std: 1.0, noise_floor: 0.10}
+    selection_priority: [net_sharpe, stability, drawdown, turnover]
+    constraints:
+      - {name: acceptable_factor_rank_ic, metric: mean__upstream_factor_mean_rank_ic, operator: ">", threshold: 0.0, hard: true}
+      - {name: acceptable_factor_rank_icir, metric: mean__upstream_factor_rank_icir, operator: ">", threshold: 0.0, hard: true}
+    upstream_requirements:
+      - {name: frozen_factor_evidence, accepted_prefixes: ["fac_"], minimum_count: 1}
+
+  phase9_router_incremental_v1:
+    layer: router
+    status: active
+    economic_question: Does routing improve net performance over the strongest standalone sleeve with causal relative-advantage evidence?
+    objectives:
+      - {name: incremental_value, metric: net_increment_vs_best_sleeve, direction: maximize, prior_mean: 0.0, prior_std: 0.10, noise_floor: 0.005}
+      - {name: routing_ic, metric: routing_ic, direction: maximize, prior_mean: 0.0, prior_std: 0.10, noise_floor: 0.005}
+      - {name: paired_hac, metric: paired_hac_t, direction: maximize, prior_mean: 0.0, prior_std: 2.0, noise_floor: 0.10}
+      - {name: switching_cost, metric: switching_cost_return, direction: minimize, prior_mean: 0.01, prior_std: 0.02, noise_floor: 0.001}
+      - {name: stability, metric: subperiod_min_net_increment, direction: maximize, prior_mean: 0.0, prior_std: 0.10, noise_floor: 0.005}
+    selection_priority: [incremental_value, paired_hac, stability, routing_ic, switching_cost]
+    constraints:
+      - {name: positive_increment_over_best_sleeve, metric: posterior__net_increment_vs_best_sleeve, operator: ">", threshold: 0.0, hard: true}
+      - {name: paired_hac_evidence, metric: posterior__paired_hac_t, operator: ">=", threshold: 1.645, hard: true}
+    upstream_requirements:
+      - {name: two_frozen_standalone_sleeves, accepted_prefixes: ["slv_"], minimum_count: 2}
+
+  phase9_allocator_risk_v1:
+    layer: allocator
+    status: active
+    economic_question: Does risk allocation improve the frozen alpha portfolio's net risk-adjusted return without worsening concentration or tail loss?
+    objectives:
+      - {name: net_sharpe, metric: net_sharpe, direction: maximize, prior_mean: 0.0, prior_std: 1.0, noise_floor: 0.10}
+      - {name: drawdown, metric: maximum_drawdown_loss, direction: minimize, prior_mean: 0.30, prior_std: 0.20, noise_floor: 0.02}
+      - {name: concentration, metric: concentration_hhi, direction: minimize, prior_mean: 0.10, prior_std: 0.10, noise_floor: 0.005}
+      - {name: tail_risk, metric: expected_shortfall_95_loss, direction: minimize, prior_mean: 0.05, prior_std: 0.05, noise_floor: 0.002}
+    selection_priority: [net_sharpe, tail_risk, drawdown, concentration]
+    constraints: []
+    upstream_requirements:
+      - {name: frozen_upstream_alpha, accepted_prefixes: ["fac_", "slv_", "rtr_"], minimum_count: 1}

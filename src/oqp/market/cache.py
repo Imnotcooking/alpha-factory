@@ -310,6 +310,70 @@ def refresh_yahoo_market_cache(
     return pd.DataFrame(rows, columns=["Symbol", "Status", "Rows", "Detail"])
 
 
+def fetch_fmp_history(
+    symbol: str,
+    period: str,
+    api_key: str,
+    *,
+    adapter_factory: Callable[[str], Any] | None = None,
+) -> pd.DataFrame:
+    """Fetch full daily OHLCV history from FMP's stable EOD endpoint."""
+
+    if not api_key:
+        raise ValueError("Missing FMP API key.")
+    if adapter_factory is None:
+        from oqp.data import FMPDataAdapter
+
+        adapter_factory = FMPDataAdapter
+
+    params: dict[str, Any] = {"symbol": normalize_symbol(symbol)}
+    lookback_days = _period_lookback_days(period)
+    if lookback_days is not None:
+        params["from"] = (datetime.now(timezone.utc).date() - timedelta(days=lookback_days)).isoformat()
+    payload = adapter_factory(api_key).get_json(
+        "historical-price-eod/full",
+        stable=True,
+        params=params,
+    )
+    if isinstance(payload, dict):
+        payload = payload.get("historical") or payload.get("data") or []
+    if not isinstance(payload, list):
+        return empty_history_frame()
+    return pd.DataFrame(row for row in payload if isinstance(row, dict))
+
+
+def refresh_fmp_market_cache(
+    symbols: Iterable[str],
+    *,
+    api_key: str,
+    path: str | Path = DEFAULT_MARKET_CACHE_PATH,
+    period: str = "2y",
+    provider: Callable[[str, str, str], pd.DataFrame] | None = None,
+) -> pd.DataFrame:
+    """Fetch FMP EOD histories and persist them under the ``fmp`` source."""
+
+    requested = [symbol for symbol in (normalize_symbol(item) for item in symbols) if symbol]
+    requested = list(dict.fromkeys(requested))
+    fetcher = provider or (lambda symbol, selected_period, key: fetch_fmp_history(symbol, selected_period, key))
+    rows = []
+    for symbol in requested:
+        try:
+            history = fetcher(symbol, period, api_key)
+            written = write_market_history(symbol, history, path=path, source="fmp")
+        except Exception as exc:  # pragma: no cover - defensive vendor boundary.
+            rows.append({"Symbol": symbol, "Status": "error", "Rows": 0, "Detail": str(exc)})
+            continue
+        rows.append(
+            {
+                "Symbol": symbol,
+                "Status": "ok" if written else "empty",
+                "Rows": written,
+                "Detail": "" if written else "FMP returned no usable close history",
+            }
+        )
+    return pd.DataFrame(rows, columns=["Symbol", "Status", "Rows", "Detail"])
+
+
 def fetch_yahoo_history(symbol: str, period: str) -> pd.DataFrame:
     """Fetch OHLCV history from yfinance."""
 
@@ -317,6 +381,20 @@ def fetch_yahoo_history(symbol: str, period: str) -> pd.DataFrame:
 
     history = yf.Ticker(symbol).history(period=period)
     return history if isinstance(history, pd.DataFrame) else pd.DataFrame()
+
+
+def _period_lookback_days(period: str) -> int | None:
+    normalized = str(period or "").strip().lower()
+    if normalized in {"max", "all"}:
+        return None
+    units = {"d": 1, "wk": 7, "mo": 31, "y": 366}
+    for suffix, multiplier in units.items():
+        if normalized.endswith(suffix):
+            try:
+                return max(1, int(normalized[: -len(suffix)]) * multiplier)
+            except ValueError:
+                return 730
+    return 730
 
 
 def normalize_history_frame(history: pd.DataFrame) -> pd.DataFrame:

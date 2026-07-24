@@ -7,6 +7,7 @@ from itertools import count
 from re import sub
 from typing import Any
 
+import pandas as pd
 import streamlit as st
 
 from oqp.ui.translations import normalize_language, ops_text
@@ -114,6 +115,8 @@ def render_dark_table(
     *,
     empty_message: str = "No rows available.",
     max_height_px: int | None = None,
+    min_width_px: int | None = None,
+    nowrap: bool = False,
 ) -> None:
     """Render a compact dark table for bento-style dashboard summaries."""
 
@@ -125,7 +128,10 @@ def render_dark_table(
         return
 
     columns = list(frame.columns)
-    header = "".join(f"<th>{escape(str(column))}</th>" for column in columns)
+    cell_style = "white-space: nowrap;" if nowrap else ""
+    header = "".join(
+        f'<th style="{cell_style}">{escape(str(column))}</th>' for column in columns
+    )
     rows = []
     chip_columns = {"priority", "state", "status", "mode", "gate", "fit", "conviction"}
     for _, row in frame.iterrows():
@@ -141,7 +147,9 @@ def render_dark_table(
                 )
             else:
                 cell_class = "oqp-long-cell" if len(text) > 72 else ""
-                cells.append(f'<td class="{cell_class}">{escape(text)}</td>')
+                cells.append(
+                    f'<td class="{cell_class}" style="{cell_style}">{escape(text)}</td>'
+                )
         rows.append(f"<tr>{''.join(cells)}</tr>")
 
     height_style = (
@@ -149,10 +157,15 @@ def render_dark_table(
         if max_height_px
         else ""
     )
+    table_style = (
+        f"min-width: {int(min_width_px)}px; table-layout: auto;"
+        if min_width_px
+        else ""
+    )
     st.markdown(
         f"""
         <div class="oqp-dark-table-wrap" style="{height_style}">
-            <table class="oqp-dark-table">
+            <table class="oqp-dark-table" style="{table_style}">
                 <thead><tr>{header}</tr></thead>
                 <tbody>{''.join(rows)}</tbody>
             </table>
@@ -259,6 +272,11 @@ def style_dark_plotly(
             "bordercolor": "rgba(89,111,139,0.10)",
             "font": {"color": "#DDE7F3"},
         },
+        "hoverlabel": {
+            "bgcolor": "#F8FAFC",
+            "bordercolor": "#CBD5E1",
+            "font": {"color": "#0F172A", "family": "Inter, sans-serif"},
+        },
     }
     if _ensure_plotly_template():
         layout["template"] = "oqp_dark"
@@ -348,6 +366,8 @@ def render_dark_bar_chart(
     height: int = 320,
     barmode: str = "group",
     yaxis_title: str | None = None,
+    positive_color: str | None = None,
+    negative_color: str | None = None,
 ) -> None:
     """Render a dark Plotly bar chart from a dataframe-like object."""
 
@@ -361,11 +381,16 @@ def render_dark_bar_chart(
     x_values, x_title = _chart_x(frame)
     fig = go.Figure()
     for column in frame.columns:
+        marker_color = None
+        if positive_color and negative_color:
+            values = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+            marker_color = [negative_color if value < 0 else positive_color for value in values]
         fig.add_trace(
             go.Bar(
                 x=x_values,
                 y=frame[column],
                 name=str(column).replace("_", " ").title(),
+                marker_color=marker_color,
             )
         )
     fig.update_traces(marker_line_width=0, opacity=0.9)
@@ -530,6 +555,27 @@ def apply_ops_theme() -> None:
             html, body, [class*="st-"] {
                 font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
                 letter-spacing: 0 !important;
+            }
+
+            /* Streamlit renders UI icons as Material Symbols ligatures. The
+               broad app font rule above must not turn those ligatures into
+               visible text such as "keyboard_double_arrow_left". */
+            [data-testid="stIconMaterial"],
+            .material-symbols-rounded,
+            .material-symbols-outlined {
+                font-family: "Material Symbols Rounded", "Material Symbols Outlined" !important;
+                font-weight: normal !important;
+                font-style: normal !important;
+                font-size: 1.25rem !important;
+                line-height: 1 !important;
+                letter-spacing: normal !important;
+                text-transform: none !important;
+                white-space: nowrap !important;
+                word-wrap: normal !important;
+                direction: ltr !important;
+                font-feature-settings: "liga" !important;
+                -webkit-font-feature-settings: "liga" !important;
+                -webkit-font-smoothing: antialiased !important;
             }
 
             .stApp {
@@ -736,10 +782,24 @@ def apply_ops_theme() -> None:
 
             [data-testid="stMetricLabel"] {
                 color: var(--oqp-subtle) !important;
-                font-size: 0.76rem !important;
+                font-size: 0.70rem !important;
                 font-weight: 700 !important;
                 text-transform: uppercase;
                 letter-spacing: 0.06em !important;
+                min-height: 1.85rem !important;
+                align-items: flex-start !important;
+                overflow: visible !important;
+            }
+
+            [data-testid="stMetricLabel"] p,
+            [data-testid="stMetricLabel"] span {
+                font-size: inherit !important;
+                line-height: 1.18 !important;
+                white-space: normal !important;
+                overflow: visible !important;
+                text-overflow: clip !important;
+                word-break: normal !important;
+                overflow-wrap: normal !important;
             }
 
             [data-testid="stMetricValue"],
@@ -801,6 +861,48 @@ def apply_ops_theme() -> None:
             div[data-testid="stAlert"] p,
             div[data-testid="stAlert"] div {
                 color: #DDE7F3 !important;
+            }
+
+            /* Streamlit help popovers use a light surface, so they need an
+               explicit dark foreground instead of inheriting app text. */
+            [role="tooltip"],
+            [role="tooltip"] *,
+            [data-baseweb="tooltip"],
+            [data-baseweb="tooltip"] *,
+            [data-baseweb="popover"] [role="tooltip"],
+            [data-baseweb="popover"] [role="tooltip"] * {
+                color: #111827 !important;
+                opacity: 1 !important;
+            }
+
+            [data-testid="stExpander"] details {
+                border: 1px solid rgba(89, 111, 139, 0.10) !important;
+                border-radius: 8px !important;
+                background: rgba(10, 15, 23, 0.58) !important;
+                overflow: hidden !important;
+            }
+
+            [data-testid="stExpander"] summary {
+                min-height: 3rem !important;
+                padding: 0.72rem 0.9rem !important;
+                color: #E5E7EB !important;
+                background: rgba(15, 23, 42, 0.82) !important;
+            }
+
+            [data-testid="stExpander"] summary:hover {
+                color: #F8FAFC !important;
+                background: rgba(24, 36, 54, 0.88) !important;
+            }
+
+            [data-testid="stExpander"] summary p {
+                margin: 0 !important;
+                color: inherit !important;
+                font-weight: 650 !important;
+            }
+
+            [data-testid="stExpanderDetails"] {
+                padding: 0.7rem 0.9rem 0.9rem !important;
+                background: transparent !important;
             }
 
             .stTabs [data-baseweb="tab-list"] {

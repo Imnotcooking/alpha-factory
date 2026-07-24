@@ -669,7 +669,7 @@ def server_ibkr_readiness_items(
                 "Broker Heartbeat",
                 "Server IBKR readiness",
                 "warn",
-                f"Missing {path}. Run scripts/sync_server_runtime.sh to refresh server readiness.",
+                f"Missing {path}. Run scripts/platform/sync_server_runtime.sh to refresh server readiness.",
             )
         ]
 
