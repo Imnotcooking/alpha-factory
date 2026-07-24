@@ -403,7 +403,6 @@ def _render_study_definition_builder(
     copy: dict[str, str],
 ) -> dict[str, Any] | None:
     st.markdown(f"#### {copy['definition']}")
-    st.caption(copy["definition_help"])
 
     components = load_component_options(purpose_id)
     if not components:
@@ -431,15 +430,6 @@ def _render_study_definition_builder(
         return None
     schema_rows = pd.DataFrame(parameter_schema_rows(schema))
     tunable_count = len(schema.tunable_names)
-    detail = st.columns([0.24, 0.24, 0.52])
-    detail[0].caption(copy["component_status"])
-    detail[0].markdown(f"**{component.research_status or 'registered'}**")
-    detail[1].caption(copy["tunable_parameters"])
-    detail[1].markdown(f"**{tunable_count}**")
-    detail[2].caption(copy["source"])
-    detail[2].code(component.source_path, language=None)
-    st.caption(f"{copy['schema_fingerprint']}: `{schema.fingerprint}`")
-    st.dataframe(schema_rows, use_container_width=True, hide_index=True)
     if tunable_count == 0:
         st.warning(copy["no_schema"])
         return None
@@ -633,6 +623,18 @@ def _render_study_definition_builder(
             use_container_width=True,
         )
 
+    with st.expander(copy["schema"]):
+        detail = st.columns([0.24, 0.24, 0.52])
+        detail[0].caption(copy["component_status"])
+        detail[0].markdown(f"**{component.research_status or 'registered'}**")
+        detail[1].caption(copy["tunable_parameters"])
+        detail[1].markdown(f"**{tunable_count}**")
+        detail[2].caption(copy["source"])
+        detail[2].code(component.source_path, language=None)
+        st.caption(f"{copy['schema_fingerprint']}: `{schema.fingerprint}`")
+        st.dataframe(schema_rows, use_container_width=True, hide_index=True)
+    st.caption(copy["definition_help"])
+
     if not submitted:
         return None
     try:
@@ -712,7 +714,6 @@ def render_optimization_workspace_panel(
 
     st.markdown(f"### {copy['title']}")
     st.caption(copy["subtitle"])
-    st.info(copy["boundary"])
 
     purpose_ids = list(registry.purposes)
     purpose_labels = {
@@ -732,6 +733,17 @@ def render_optimization_workspace_panel(
         else None
     )
 
+    updated_snapshot = _render_study_definition_builder(
+        selected_id,
+        purpose,
+        artifact_root,
+        copy,
+    )
+    if updated_snapshot is not None:
+        snapshot = updated_snapshot
+    _render_ledger(snapshot, copy)
+
+    st.divider()
     summary = st.columns([0.18, 0.25, 0.22, 0.20, 0.15])
     values = [
         (copy["layer"], purpose.layer.title()),
@@ -769,18 +781,10 @@ def render_optimization_workspace_panel(
         hide_index=True,
     )
     _render_profile(snapshot, purpose.objective_profile_id, copy)
-    updated_snapshot = _render_study_definition_builder(
-        selected_id,
-        purpose,
-        artifact_root,
-        copy,
-    )
-    if updated_snapshot is not None:
-        snapshot = updated_snapshot
 
     st.markdown(f"#### {copy['workflow']}")
     st.code(copy["workflow_value"], language=None)
-    _render_ledger(snapshot, copy)
+    st.info(copy["boundary"])
 
     with st.expander(copy["all_jobs"]):
         inventory = pd.DataFrame(registry.purpose_inventory())
