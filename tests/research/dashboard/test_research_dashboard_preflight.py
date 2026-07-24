@@ -66,8 +66,10 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
             REPO_ROOT / "runtime" / "artifacts" / "research",
         )
         self.assertEqual(Path(config.LOGS_DIR), Path(config.RESEARCH_ARTIFACT_ROOT))
-        self.assertTrue(Path(config.DB_PATH).parent.exists())
-        self.assertTrue((REPO_ROOT / "runtime" / "logs").exists())
+        self.assertEqual(
+            Path(config.DB_PATH),
+            REPO_ROOT / "runtime" / "db" / "research" / "research_memory.db",
+        )
 
     def test_runtime_estimator_summarizes_asset_routes(self) -> None:
         estimator = _load_module(RESEARCH_APP / "runtime_estimator.py", "_research_runtime_estimator")
