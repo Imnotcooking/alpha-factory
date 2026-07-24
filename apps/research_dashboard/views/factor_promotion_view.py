@@ -494,6 +494,7 @@ class FactorPromotionView:
             FactorLibraryView(self.base_dir).render(
                 lang=lang,
                 theme_mode=theme_mode,
+                review_factor_ids=board["factor_id"].dropna().astype(str),
                 drilldown_renderer=lambda: self._render_drilldown(
                     filtered,
                     detail,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import pandas as pd
@@ -20,6 +20,12 @@ COPY = {
         "title": "Factor Library",
         "subtitle": "Live factor inventory and factor-level research evidence.",
         "active_factors": "Normalized factors",
+        "review_only": "Outside normalized library",
+        "review_only_help": (
+            "Factor IDs visible on the Review Board but absent from the normalized "
+            "Factor Library manifest. These are historical, legacy, or database-only "
+            "records rather than active normalized library factors."
+        ),
         "families": "Factor families",
         "cohorts": "Comparison cohorts",
         "archived": "Archived duplicates",
@@ -88,6 +94,11 @@ COPY = {
         "title": "因子库",
         "subtitle": "动态展示因子库存与单因子研究证据。",
         "active_factors": "标准化在库因子",
+        "review_only": "未纳入标准库",
+        "review_only_help": (
+            "已出现在审查看板、但不在标准化因子库清单中的因子 ID。它们属于历史、遗留或"
+            "仅存在于数据库的记录，不属于当前标准化在库因子。"
+        ),
         "families": "因子类别",
         "cohorts": "统一比较组别",
         "archived": "去重归档",
@@ -324,6 +335,7 @@ class FactorLibraryView:
         lang: str = "EN",
         theme_mode: str = "LIGHT",
         drilldown_renderer: Callable[[], None] | None = None,
+        review_factor_ids: Iterable[str] | None = None,
     ) -> None:
         copy = COPY.get(lang, COPY["EN"])
         snapshot = load_factor_library_snapshot(str(self.base_dir))
@@ -333,7 +345,11 @@ class FactorLibraryView:
             st.info(copy["no_artifacts"])
             return
 
-        self._render_summary(snapshot, copy)
+        self._render_summary(
+            snapshot,
+            copy,
+            review_factor_ids=review_factor_ids,
+        )
         tab_labels = [copy["inventory_tab"]]
         if drilldown_renderer is not None:
             tab_labels.append(copy["drilldown_tab"])
@@ -376,28 +392,63 @@ class FactorLibraryView:
                 drilldown_renderer()
 
     @staticmethod
-    def _render_summary(snapshot: FactorLibrarySnapshot, copy: dict[str, Any]) -> None:
-        cards = st.columns(6)
+    def _render_summary(
+        snapshot: FactorLibrarySnapshot,
+        copy: dict[str, Any],
+        *,
+        review_factor_ids: Iterable[str] | None = None,
+    ) -> None:
+        cards = st.columns(7)
         cards[0].metric(copy["active_factors"], f"{len(snapshot.manifest):,}")
-        cards[1].metric(copy["families"], f"{snapshot.manifest['factor_family'].nunique():,}")
-        cards[2].metric(copy["cohorts"], f"{snapshot.manifest['deduplication_cohort'].nunique():,}")
-        cards[3].metric(copy["archived"], f"{len(snapshot.archived_ids):,}")
+        review_only = FactorLibraryView._review_only_factor_count(
+            snapshot.manifest,
+            review_factor_ids,
+        )
+        cards[1].metric(
+            copy["review_only"],
+            "N/A" if review_only is None else f"{review_only:,}",
+            help=copy["review_only_help"],
+        )
+        cards[2].metric(
+            copy["families"],
+            f"{snapshot.manifest['factor_family'].nunique():,}",
+        )
+        cards[3].metric(
+            copy["cohorts"],
+            f"{snapshot.manifest['deduplication_cohort'].nunique():,}",
+        )
+        cards[4].metric(copy["archived"], f"{len(snapshot.archived_ids):,}")
         embedded = FactorLibraryView._boundary_violation_count(
             snapshot.manifest
         )
-        cards[4].metric(copy["violations"], f"{int(embedded):,}")
+        cards[5].metric(copy["violations"], f"{int(embedded):,}")
         average_ic, tested_count = FactorLibraryView._average_tested_ic(snapshot)
-        cards[5].metric(
+        cards[6].metric(
             copy["average_ic"],
             "N/A" if pd.isna(average_ic) else f"{average_ic:.2%}",
             help=copy["ic_help"],
         )
-        cards[5].caption(
+        cards[6].caption(
             copy["ic_coverage"].format(
                 tested=tested_count,
                 total=len(snapshot.manifest),
             )
         )
+
+    @staticmethod
+    def _review_only_factor_count(
+        manifest: pd.DataFrame,
+        review_factor_ids: Iterable[str] | None,
+    ) -> int | None:
+        if review_factor_ids is None:
+            return None
+        library_ids = set(manifest.get("factor_id", pd.Series(dtype=str)).astype(str))
+        review_ids = {
+            str(factor_id).strip()
+            for factor_id in review_factor_ids
+            if str(factor_id).strip()
+        }
+        return len(review_ids - library_ids)
 
     @staticmethod
     def _boundary_violation_count(manifest: pd.DataFrame) -> int:
