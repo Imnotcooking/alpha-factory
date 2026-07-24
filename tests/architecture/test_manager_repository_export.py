@@ -45,6 +45,10 @@ def test_manager_export_preserves_git_and_copies_private_research(
         "FACTOR_ID = 'fac_001'\n"
     )
     (source / "departments/middle_office/private.py").write_text("SECRET = 1\n")
+    (source / "src/oqp/__init__.py").write_text("")
+    (source / "src/oqp/research_runtime.py").write_text(
+        "RUNTIME_CONTRACT = True\n"
+    )
     (source / "src/oqp/portfolio/__init__.py").write_text("")
     (source / "src/oqp/portfolio/allocation/convex.py").write_text(
         "ALLOCATOR = 'convex'\n"
@@ -69,6 +73,7 @@ def test_manager_export_preserves_git_and_copies_private_research(
     assert (
         destination / "src/oqp/portfolio/allocation/convex.py"
     ).is_file()
+    assert (destination / "src/oqp/research_runtime.py").is_file()
     assert not (destination / "departments/middle_office").exists()
     assert not (destination / "runtime").exists()
     assert (destination / "MANAGER_REPOSITORY_BOUNDARY.md").is_file()

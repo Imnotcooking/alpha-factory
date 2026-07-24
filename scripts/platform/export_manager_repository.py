@@ -21,6 +21,8 @@ ROOT_FILES = (
     "pyproject.toml",
     "requirements.txt",
     "scripts/platform/export_manager_repository.py",
+    "src/oqp/__init__.py",
+    "src/oqp/research_runtime.py",
 )
 
 INCLUDED_TREES = (
