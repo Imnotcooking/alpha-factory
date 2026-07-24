@@ -164,11 +164,13 @@ tests/research/test_cross_sectional_sleeve_specs.py
 tests/research/test_daily_cn_futures_factor_dedup.py
 tests/research/test_daily_factor_screening.py
 tests/research/test_daily_reversal_candidate_audit.py
+tests/research/test_extracted_sleeve_execution.py
 tests/research/test_factor_component_boundaries.py
 tests/research/test_factor_definitions.py
 tests/research/test_factor_governance.py
 tests/research/test_factor_identity_resolution.py
 tests/research/test_factor_parameter_schema.py
+tests/research/test_factor_sleeve_runner.py
 tests/research/test_intraday_cn_futures_factor_dedup.py
 tests/research/test_optimization_study_builder.py
 tests/research/test_persistent_sleeve_construction.py
@@ -181,6 +183,7 @@ tests/research/test_state_space_opportunity.py
 tests/research/test_strategy_backtest_horizon.py
 tests/research/test_strategy_builder.py
 tests/research/test_strategy_risk_overlays.py
+tests/research/test_strategy_routing.py
 tests/architecture/test_regime_model_boundaries.py
 
 # 5. PyTorch Model Checkpoints (Only upload the final, compressed .zip or .pt)

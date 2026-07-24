@@ -120,6 +120,18 @@ PRIVATE_RULES = (
     Rule("tests/research/private_factors/**", "private factor test"),
     Rule("tests/research/archive/**", "private archived-factor replay test"),
     Rule("tests/research/workflows/**", "private workflow test"),
+    Rule(
+        "tests/research/test_extracted_sleeve_execution.py",
+        "private sleeve-component integration test",
+    ),
+    Rule(
+        "tests/research/test_factor_sleeve_runner.py",
+        "private factor-and-sleeve integration test",
+    ),
+    Rule(
+        "tests/research/test_strategy_routing.py",
+        "private router-component integration test",
+    ),
     Rule("tests/test_*factor*.py", "misplaced test for a private factor implementation"),
     Rule("alpha_research_lab/**/*candidate*", "research candidate artifact"),
     Rule("alpha_research_lab/**/*trial*", "research trial artifact"),

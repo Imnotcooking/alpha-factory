@@ -23,6 +23,8 @@ def test_manager_boundary_includes_research_and_excludes_operations() -> None:
     assert not is_exportable(Path("apps/ops_dashboard/Homepage.py"))
     assert not is_exportable(Path("runtime/db/research.db"))
     assert not is_exportable(Path("data/vendor/contracts.parquet"))
+    assert not is_exportable(Path("paper/output/report.blg"))
+    assert not is_exportable(Path("paper/output/report.synctex.gz"))
     assert not is_exportable(Path(".env"))
 
 
@@ -34,6 +36,7 @@ def test_manager_export_preserves_git_and_copies_private_research(
     (source / "apps/research_dashboard").mkdir(parents=True)
     (source / "departments/research/factors").mkdir(parents=True)
     (source / "departments/middle_office").mkdir(parents=True)
+    (source / "src/oqp/portfolio/allocation").mkdir(parents=True)
     (source / "runtime").mkdir()
     (source / "pyproject.toml").write_text("[project]\nname='test'\n")
     (source / "README.md").write_text("source\n")
@@ -42,6 +45,10 @@ def test_manager_export_preserves_git_and_copies_private_research(
         "FACTOR_ID = 'fac_001'\n"
     )
     (source / "departments/middle_office/private.py").write_text("SECRET = 1\n")
+    (source / "src/oqp/portfolio/__init__.py").write_text("")
+    (source / "src/oqp/portfolio/allocation/convex.py").write_text(
+        "ALLOCATOR = 'convex'\n"
+    )
     (source / "runtime/local.db").write_text("runtime\n")
 
     (destination / ".git").mkdir(parents=True)
@@ -58,6 +65,9 @@ def test_manager_export_preserves_git_and_copies_private_research(
     assert not (destination / "old.txt").exists()
     assert (
         destination / "departments/research/factors/fac_001.py"
+    ).is_file()
+    assert (
+        destination / "src/oqp/portfolio/allocation/convex.py"
     ).is_file()
     assert not (destination / "departments/middle_office").exists()
     assert not (destination / "runtime").exists()

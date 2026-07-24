@@ -17,12 +17,6 @@ from oqp.execution.artifacts import (
     trade_proposal_to_dict,
     write_trade_proposal_artifact,
 )
-from oqp.execution.guardrails import (
-    GuardrailCheck,
-    GuardrailReport,
-    GuardrailSeverity,
-    evaluate_trade_proposal,
-)
 from oqp.execution.models import OrderIntent, ProposalStatus, TradeProposal
 from oqp.execution.transaction_costs import (
     CostUseCase,
@@ -55,8 +49,18 @@ _OPTIONS_BRIDGE_EXPORTS = {
     "write_option_trade_proposal_from_candidate",
 }
 
+_GUARDRAIL_EXPORTS = {
+    "GuardrailCheck",
+    "GuardrailReport",
+    "GuardrailSeverity",
+    "evaluate_trade_proposal",
+}
+
 
 def __getattr__(name: str) -> Any:
+    if name in _GUARDRAIL_EXPORTS:
+        module = import_module("oqp.execution.guardrails")
+        return getattr(module, name)
     if name in _RESEARCH_BRIDGE_EXPORTS:
         module = import_module("oqp.execution.research_bridge")
         return getattr(module, name)

@@ -20,6 +20,7 @@ ROOT_FILES = (
     "README.md",
     "pyproject.toml",
     "requirements.txt",
+    "scripts/platform/export_manager_repository.py",
 )
 
 INCLUDED_TREES = (
@@ -44,6 +45,8 @@ INCLUDED_TREES = (
     "src/oqp/native",
     "src/oqp/optimization",
     "src/oqp/options",
+    "src/oqp/portfolio/__init__.py",
+    "src/oqp/portfolio/allocation",
     "src/oqp/research",
     "src/oqp/risk",
     "src/oqp/ui",
@@ -69,7 +72,6 @@ EXCLUDED_PREFIXES = (
     "src/oqp/journal",
     "src/oqp/ops",
     "src/oqp/paper_trading",
-    "src/oqp/portfolio",
     "src/oqp/qmt_connector",
     "scripts/ops",
     "scripts/trading",
@@ -101,6 +103,8 @@ EXCLUDED_NAMES = {
 }
 
 EXCLUDED_SUFFIXES = {
+    ".aux",
+    ".blg",
     ".cert",
     ".crt",
     ".csv",
@@ -109,6 +113,8 @@ EXCLUDED_SUFFIXES = {
     ".dylib",
     ".h5",
     ".hdf5",
+    ".fdb_latexmk",
+    ".fls",
     ".joblib",
     ".key",
     ".onnx",
@@ -122,6 +128,7 @@ EXCLUDED_SUFFIXES = {
     ".pyc",
     ".sqlite",
     ".sqlite3",
+    ".synctex.gz",
 }
 
 MANAGER_GITIGNORE = """\
@@ -132,6 +139,11 @@ MANAGER_GITIGNORE = """\
 venv/
 __pycache__/
 *.py[cod]
+*.aux
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -185,6 +197,11 @@ MANAGER_DOCKERIGNORE = """\
 .ipynb_checkpoints/
 __pycache__/
 *.py[cod]
+*.aux
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
 .env
 .env.*
 !.env.example
@@ -261,7 +278,7 @@ def is_exportable(relative_path: Path) -> bool:
         return False
     if relative_path.name.startswith(".env") and relative_path.name != ".env.example":
         return False
-    if relative_path.suffix.lower() in EXCLUDED_SUFFIXES:
+    if normalized.lower().endswith(tuple(EXCLUDED_SUFFIXES)):
         return False
     return True
 
