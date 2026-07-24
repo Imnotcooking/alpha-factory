@@ -216,7 +216,7 @@ def _render_gates(gates: pd.DataFrame) -> None:
     )
     st.dataframe(
         display.style.format({"Observed": "{:.3f}", "Threshold": "{:.3f}"}, na_rep=""),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 
@@ -250,7 +250,7 @@ def _render_split(split: pd.DataFrame) -> None:
              "Slippage": "{:.2%}", "Active-day hit": "{:.1%}", "Position hit": "{:.1%}",
              "Active days": "{:,.0f}", "Net mean ex shocks": "{:.2%}"}, na_rep=""
         ),
-        width="stretch", hide_index=True,
+        use_container_width=True, hide_index=True,
     )
 
 
@@ -268,7 +268,7 @@ def _render_contributions(
         figure.add_trace(go.Bar(x=years["year"], y=-years["cost_return"], name="Cost", marker_color="#d97706"))
         figure.add_trace(go.Bar(x=years["year"], y=years["net_contribution"], name="Net", marker_color="#b91c1c"))
         figure.update_layout(template=template, barmode="group", height=340, margin={"l": 10, "r": 10, "t": 15, "b": 20}, yaxis={"tickformat": ".1%"}, legend={"orientation": "h", "y": 1.1})
-        st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
     with right:
         st.markdown(f"**{copy['product_contribution']}**")
         full = products.loc[products["research_split"].eq("full")].copy()
@@ -277,7 +277,7 @@ def _render_contributions(
         figure = go.Figure(go.Bar(x=full["net_contribution"], y=full["ticker"], orientation="h", marker_color=colors))
         figure.add_vline(x=0, line_width=1, line_color="#94a3b8")
         figure.update_layout(template=template, height=340, margin={"l": 10, "r": 10, "t": 15, "b": 20}, xaxis={"tickformat": ".1%"})
-        st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
 
 
 def _render_event_study(study: pd.DataFrame, copy: dict, template: str) -> None:
@@ -287,7 +287,7 @@ def _render_event_study(study: pd.DataFrame, copy: dict, template: str) -> None:
     figure.add_vline(x=0, line_width=1, line_color="#111827")
     figure.add_hline(y=0, line_width=1, line_color="#94a3b8")
     figure.update_layout(template=template, title=copy["event_path"], height=360, margin={"l": 20, "r": 20, "t": 55, "b": 20}, yaxis={"tickformat": ".2%"}, xaxis={"dtick": 1}, legend={"orientation": "h", "y": 1.12})
-    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
 
 
 def _render_event_windows(windows: pd.DataFrame) -> None:
@@ -297,7 +297,7 @@ def _render_event_windows(windows: pd.DataFrame) -> None:
     )
     st.dataframe(
         display.style.format({"Days": "{:,.0f}", "Net mean": "{:.2%}", "Net Sharpe": "{:.2f}", "Hit rate": "{:.1%}", "Cost": "{:.2%}", "Turnover (x)": "{:.1f}"}, na_rep=""),
-        width="stretch", hide_index=True,
+        use_container_width=True, hide_index=True,
     )
 
 

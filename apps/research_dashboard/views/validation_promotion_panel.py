@@ -131,7 +131,7 @@ def render_validation_promotion_panel(
         st.success(copy["empty"])
     else:
         st.markdown(f"#### {copy['ledger']}")
-        st.dataframe(ledger, width="stretch", hide_index=True)
+        st.dataframe(ledger, use_container_width=True, hide_index=True)
 
     st.markdown(f"#### {copy['policy']}")
     policy = snapshot["policy"]
@@ -140,7 +140,7 @@ def render_validation_promotion_panel(
     ]
     st.dataframe(
         visible[["parameter", "value", "profile_id"]],
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     return True

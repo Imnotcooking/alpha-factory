@@ -804,7 +804,7 @@ class RouterLibraryView:
         )
         st.dataframe(
             display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             height=340,
         )
@@ -865,7 +865,7 @@ class RouterLibraryView:
         )
         st.dataframe(
             display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             height=340,
         )
@@ -968,7 +968,7 @@ class RouterLibraryView:
                 for key, value in row["contract"].items()
             ]
         )
-        st.dataframe(contract, width="stretch", hide_index=True)
+        st.dataframe(contract, use_container_width=True, hide_index=True)
         st.caption(f"{copy['source']}: {row['source_path']}")
 
     @staticmethod
@@ -1086,7 +1086,7 @@ class RouterLibraryView:
                 "frequency": copy["frequency"],
             }
         )
-        st.dataframe(display, width="stretch", hide_index=True, height=340)
+        st.dataframe(display, use_container_width=True, hide_index=True, height=340)
 
     @classmethod
     def _render_drilldown(
@@ -1132,7 +1132,7 @@ class RouterLibraryView:
                 for key, value in row["contract"].items()
             ]
         )
-        st.dataframe(contract, width="stretch", hide_index=True)
+        st.dataframe(contract, use_container_width=True, hide_index=True)
 
         st.markdown(f"#### {copy['parameters']}")
         parameter_rows = []
@@ -1152,7 +1152,7 @@ class RouterLibraryView:
         if parameter_rows:
             st.dataframe(
                 pd.DataFrame(parameter_rows),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
         st.caption(f"{copy['source']}: {row['source_path']}")
@@ -1238,7 +1238,7 @@ class RouterLibraryView:
                 "frequency": copy["frequency"],
             }
         )
-        st.dataframe(display, width="stretch", hide_index=True, height=300)
+        st.dataframe(display, use_container_width=True, hide_index=True, height=300)
 
     @classmethod
     def _render_overlay_drilldown(
@@ -1279,7 +1279,7 @@ class RouterLibraryView:
                 for key, value in row["contract"].items()
             ]
         )
-        st.dataframe(contract, width="stretch", hide_index=True)
+        st.dataframe(contract, use_container_width=True, hide_index=True)
         st.markdown(f"#### {copy['parameters']}")
         parameters = pd.DataFrame(
             [
@@ -1288,7 +1288,7 @@ class RouterLibraryView:
             ]
         )
         if not parameters.empty:
-            st.dataframe(parameters, width="stretch", hide_index=True)
+            st.dataframe(parameters, use_container_width=True, hide_index=True)
         st.caption(f"{copy['source']}: {row['source']}")
 
 

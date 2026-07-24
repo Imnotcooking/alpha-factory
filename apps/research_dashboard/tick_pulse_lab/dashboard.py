@@ -752,7 +752,7 @@ def _render_event_example_card(
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     summary = pd.DataFrame(
         [
@@ -774,7 +774,7 @@ def _render_event_example_card(
             {t["concept_col"]: t["outcome_label"], t["example_col"]: outcome_label},
         ]
     )
-    st.dataframe(summary, width="stretch", hide_index=True)
+    st.dataframe(summary, use_container_width=True, hide_index=True)
 
     st.markdown(f"**{t['base_checks_title']}**")
     for idx, (label, passed) in enumerate(
@@ -1144,7 +1144,7 @@ class TickPulseLabPage:
         button_disabled = events <= 0
         if st.button(
             t["evidence_ticket_button"],
-            width="stretch",
+            use_container_width=True,
             key=f"tick_evidence_ticket_{payload['ticket_id']}",
             disabled=button_disabled,
         ):
@@ -1356,7 +1356,11 @@ class TickPulseLabPage:
                 f"backend={metadata.get('backend', 'sqlite_cache')}"
             )
 
-        if st.button(t["cross_asset_run"], width="stretch", key="tick_cross_asset_run"):
+        if st.button(
+            t["cross_asset_run"],
+            use_container_width=True,
+            key="tick_cross_asset_run",
+        ):
             progress = st.progress(0, text=f"0% - {t['cross_asset_loading']}")
 
             def compute_cross_asset() -> pd.DataFrame:
@@ -1471,7 +1475,7 @@ class TickPulseLabPage:
         )
         st.dataframe(
             styled_display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -1777,7 +1781,7 @@ class TickPulseLabPage:
                 )
             st.dataframe(
                 format_research_sweep_display(sweep_raw, t),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
             st.divider()

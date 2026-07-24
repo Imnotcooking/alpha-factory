@@ -531,7 +531,10 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
 
         self.assertIn("def _render_page_header", health_view)
         self.assertIn('st.columns([0.76, 0.24], vertical_alignment="center")', health_view)
-        self.assertIn('st.button(copy["refresh"], width="stretch")', health_view)
+        self.assertIn(
+            'st.button(copy["refresh"], use_container_width=True)',
+            health_view,
+        )
         self.assertNotIn('with st.expander("How to use / 使用说明"', health_view)
         self.assertNotIn('cols[4].metric(copy["latest_run"]', health_view)
         self.assertIn("def _render_latest_run", health_view)
@@ -572,10 +575,10 @@ class ResearchDashboardPreflightTests(unittest.TestCase):
         self.assertIn("assumptions_data_health", assumptions_view)
         self.assertIn('"fill_policy"', assumptions_view)
 
-    def test_research_dashboard_uses_current_streamlit_width_api(self) -> None:
+    def test_research_dashboard_uses_supported_streamlit_width_api(self) -> None:
         for path in RESEARCH_APP.rglob("*.py"):
             with self.subTest(path=path.relative_to(RESEARCH_APP)):
-                self.assertNotIn("use_container_width", path.read_text())
+                self.assertNotIn('width="stretch"', path.read_text())
 
     def test_remaining_research_page_dependencies_import(self) -> None:
         app_path = str(RESEARCH_APP)

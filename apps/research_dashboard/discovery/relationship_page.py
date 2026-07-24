@@ -280,12 +280,12 @@ with tabs[0]:
 
         left, right = st.columns([1.2, 0.8])
         with left:
-            st.plotly_chart(charts.opportunity_scatter(filtered, template), width="stretch")
+            st.plotly_chart(charts.opportunity_scatter(filtered, template), use_container_width=True)
         with right:
-            st.plotly_chart(charts.top_dislocation_bar(filtered, template), width="stretch")
-        st.plotly_chart(charts.sector_heatmap(filtered, template), width="stretch")
+            st.plotly_chart(charts.top_dislocation_bar(filtered, template), use_container_width=True)
+        st.plotly_chart(charts.sector_heatmap(filtered, template), use_container_width=True)
         render_explainer(t["metric_help_title"], t["metric_help"])
-        st.dataframe(candidate_display_table(filtered, limit=80, lang=lang), width="stretch", hide_index=True)
+        st.dataframe(candidate_display_table(filtered, limit=80, lang=lang), use_container_width=True, hide_index=True)
 
 with tabs[1]:
     render_explainer(t["workspace_help_title"], t["workspace_help"], expanded=True)
@@ -340,14 +340,14 @@ with tabs[1]:
             metric_cols[2].metric(t["beta_change"], fmt_num(summary.get("beta_change"), 3))
             metric_cols[3].metric(t["extreme_rate"], f"{fmt_num(100 * summary.get('extreme_z_rate', 0.0), 1)}%")
             c1, c2 = st.columns(2)
-            c1.plotly_chart(charts.dkf_beta(pair, template), width="stretch")
-            c2.plotly_chart(charts.dkf_residual(pair, template), width="stretch")
+            c1.plotly_chart(charts.dkf_beta(pair, template), use_container_width=True)
+            c2.plotly_chart(charts.dkf_residual(pair, template), use_container_width=True)
             c3, c4 = st.columns(2)
-            c3.plotly_chart(charts.dkf_uncertainty(pair, template), width="stretch")
-            c4.plotly_chart(charts.residual_distribution(pair, template), width="stretch")
+            c3.plotly_chart(charts.dkf_uncertainty(pair, template), use_container_width=True)
+            c4.plotly_chart(charts.residual_distribution(pair, template), use_container_width=True)
             with st.expander(t["recent_relationship_rows"], expanded=False):
                 cols = ["date", "y_return", "x_return", "dynamic_alpha", "dynamic_beta", "residual_z", "state_uncertainty", "beta_l1_change"]
-                st.dataframe(pair[[col for col in cols if col in pair.columns]].tail(250), width="stretch", hide_index=True)
+                st.dataframe(pair[[col for col in cols if col in pair.columns]].tail(250), use_container_width=True, hide_index=True)
         except Exception as exc:
             st.error(f"{t['run_error']}: {exc}")
 
@@ -362,9 +362,9 @@ with tabs[1]:
             metric_cols[2].metric(t["half_life"], fmt_num(spread_summary.get("half_life"), 1))
             metric_cols[3].metric(t["rows"], fmt_int(spread_summary.get("rows")))
             c1, c2 = st.columns(2)
-            c1.plotly_chart(charts.price_legs(spread, template), width="stretch")
-            c2.plotly_chart(charts.spread_zscore(spread, template), width="stretch")
-            st.plotly_chart(charts.spread_level(spread, template), width="stretch")
+            c1.plotly_chart(charts.price_legs(spread, template), use_container_width=True)
+            c2.plotly_chart(charts.spread_zscore(spread, template), use_container_width=True)
+            st.plotly_chart(charts.spread_level(spread, template), use_container_width=True)
 
             with st.expander(t["backtest_preview"], expanded=False):
                 st.markdown(f"**{t['backtest_help_title']}**")
@@ -384,10 +384,10 @@ with tabs[1]:
                 preview_cols[1].metric(t["win_rate"], "N/A" if pd.isna(preview_summary.get("win_rate")) else f"{100 * preview_summary.get('win_rate'):.1f}%")
                 preview_cols[2].metric(t["net_pnl"], fmt_num(preview_summary.get("net_pnl"), 4))
                 preview_cols[3].metric(t["max_dd"], fmt_num(preview_summary.get("max_drawdown"), 4))
-                st.plotly_chart(charts.backtest_equity(curve, template), width="stretch")
-                st.plotly_chart(charts.backtest_drawdown(curve, template), width="stretch")
+                st.plotly_chart(charts.backtest_equity(curve, template), use_container_width=True)
+                st.plotly_chart(charts.backtest_drawdown(curve, template), use_container_width=True)
                 st.markdown(f"##### {t['trades']}")
-                st.dataframe(preview["trades"], width="stretch", hide_index=True)
+                st.dataframe(preview["trades"], use_container_width=True, hide_index=True)
         except Exception as exc:
             st.error(f"{t['run_error']}: {exc}")
 
@@ -408,26 +408,26 @@ with tabs[2]:
         if calendar.empty:
             st.info(t["calendar_empty"])
             base_counts = metadata.groupby("base_symbol", as_index=False).agg(assets=("ticker", "nunique"))
-            st.dataframe(base_counts.sort_values("assets", ascending=False).head(30), width="stretch", hide_index=True)
+            st.dataframe(base_counts.sort_values("assets", ascending=False).head(30), use_container_width=True, hide_index=True)
         else:
-            st.plotly_chart(charts.top_dislocation_bar(calendar, template), width="stretch")
-            st.dataframe(candidate_display_table(calendar, limit=80, lang=lang), width="stretch", hide_index=True)
+            st.plotly_chart(charts.top_dislocation_bar(calendar, template), use_container_width=True)
+            st.dataframe(candidate_display_table(calendar, limit=80, lang=lang), use_container_width=True, hide_index=True)
     elif map_view == "cross_product":
         render_explainer(t["cross_help_title"], t["cross_help"], expanded=False)
         cross = candidates[candidates["arbitrage_type"] == ARBITRAGE_CROSS_PRODUCT].copy()
         if cross.empty:
             st.info(t["cross_empty"])
         else:
-            st.plotly_chart(charts.sector_heatmap(cross, template), width="stretch")
-            st.dataframe(candidate_display_table(cross, limit=100, lang=lang), width="stretch", hide_index=True)
+            st.plotly_chart(charts.sector_heatmap(cross, template), use_container_width=True)
+            st.dataframe(candidate_display_table(cross, limit=100, lang=lang), use_container_width=True, hide_index=True)
     else:
         render_explainer(t["stat_help_title"], t["stat_help"], expanded=False)
         stat = candidates[candidates["arbitrage_type"] == ARBITRAGE_STATISTICAL].copy()
         if stat.empty:
             st.info(t["stat_empty"])
         else:
-            st.plotly_chart(charts.opportunity_scatter(stat, template), width="stretch")
-            st.dataframe(candidate_display_table(stat, limit=100, lang=lang), width="stretch", hide_index=True)
+            st.plotly_chart(charts.opportunity_scatter(stat, template), use_container_width=True)
+            st.dataframe(candidate_display_table(stat, limit=100, lang=lang), use_container_width=True, hide_index=True)
 
 with tabs[3]:
     render_explainer(t["audit_help_title"], t["audit_help"], expanded=True)
@@ -443,6 +443,6 @@ with tabs[3]:
     )
     st.caption(t["date_range"].format(file=source_path.name, start=summary.get("date_min"), end=summary.get("date_max")))
     st.markdown(f"#### {t['schema']}")
-    st.dataframe(audit["schema"], width="stretch", hide_index=True)
+    st.dataframe(audit["schema"], use_container_width=True, hide_index=True)
     st.markdown(f"#### {t['asset_coverage']}")
-    st.dataframe(audit["assets"].sort_values(["eligible", "observations"], ascending=[False, False]), width="stretch", hide_index=True)
+    st.dataframe(audit["assets"].sort_values(["eligible", "observations"], ascending=[False, False]), use_container_width=True, hide_index=True)

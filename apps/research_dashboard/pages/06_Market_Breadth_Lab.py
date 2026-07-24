@@ -362,7 +362,7 @@ def _render_overview(
             t.get("method_col", "Method"): t.get("realized_vol_method", "Rolling realized volatility"),
         },
     ]
-    st.dataframe(pd.DataFrame(lens_rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(lens_rows), use_container_width=True, hide_index=True)
 
     percentile_parts: list[pd.DataFrame] = []
     series_specs = [
@@ -395,7 +395,7 @@ def _render_overview(
             },
         )
         fig.update_layout(height=390, margin=dict(l=10, r=10, t=25, b=10), yaxis_tickformat=".0%")
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_directional(structure: dict) -> None:
@@ -447,7 +447,7 @@ def _render_directional(structure: dict) -> None:
         yaxis_range=[-1, 1],
         yaxis_title=t.get("directional_axis", "Advance / decline breadth"),
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     if not sectors.empty:
         sectors["month"] = pd.to_datetime(sectors["date"]).dt.to_period("M").astype(str)
@@ -467,7 +467,7 @@ def _render_directional(structure: dict) -> None:
         fig_heat.update_layout(height=max(360, min(680, 90 + 30 * len(heat))), margin=dict(l=10, r=10, t=30, b=10))
         fig_heat.update_coloraxes(colorbar_tickformat=".0%")
         st.markdown(f"#### {t.get('industry_directional', 'Directional Breadth by Industry')}")
-        st.plotly_chart(fig_heat, width="stretch")
+        st.plotly_chart(fig_heat, use_container_width=True)
 
 
 def _render_volatility(structure: dict) -> None:
@@ -502,7 +502,7 @@ def _render_volatility(structure: dict) -> None:
             )
         )
         fig_asset.update_layout(height=610, margin=dict(l=10, r=10, t=35, b=10), xaxis_tickformat=".0%", title=t.get("asset_volatility", "Highest-Volatility Assets"))
-        st.plotly_chart(fig_asset, width="stretch")
+        st.plotly_chart(fig_asset, use_container_width=True)
     with chart_right:
         sector_plot = by_sector.sort_values("median_vol").tail(25)
         fig_sector_vol = px.bar(
@@ -517,7 +517,7 @@ def _render_volatility(structure: dict) -> None:
             labels={"median_vol": t.get("median_vol", "Median volatility"), "sector": t.get("industry_col", "Industry"), "high_vol_share": t.get("high_vol_share", "High-vol share")},
         )
         fig_sector_vol.update_layout(height=610, margin=dict(l=10, r=10, t=35, b=10), xaxis_tickformat=".0%", title=t.get("industry_volatility", "Volatility by Industry"))
-        st.plotly_chart(fig_sector_vol, width="stretch")
+        st.plotly_chart(fig_sector_vol, use_container_width=True)
 
     if not timeline.empty and not by_sector.empty:
         top_sectors = by_sector.head(8)["sector"].tolist()
@@ -532,7 +532,7 @@ def _render_volatility(structure: dict) -> None:
         )
         fig_timeline.update_layout(height=420, margin=dict(l=10, r=10, t=25, b=10), yaxis_tickformat=".0%")
         st.markdown(f"#### {t.get('industry_volatility_history', 'Industry Volatility Through Time')}")
-        st.plotly_chart(fig_timeline, width="stretch")
+        st.plotly_chart(fig_timeline, use_container_width=True)
 
 
 def _render_concentration(structure: dict) -> None:
@@ -566,7 +566,7 @@ def _render_concentration(structure: dict) -> None:
     plot["metric"] = plot["metric"].map(metric_labels)
     fig = px.line(plot, x="date", y="value", color="metric", template=template, labels={"date": t.get("date_col", "Date"), "value": t.get("effective_count", "Effective count"), "metric": t.get("metric_col", "Metric")})
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=25, b=10))
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     detail_left, detail_right = st.columns([0.48, 0.52])
     with detail_left:
@@ -575,12 +575,12 @@ def _render_concentration(structure: dict) -> None:
             latest_sector = sector_weights[sector_weights["date"].eq(latest_date)].sort_values("weight")
             fig_sector = px.bar(latest_sector, x="weight", y="sector", orientation="h", template=template, hover_data={"assets": True}, labels={"weight": t.get("weight_col", "Weight"), "sector": t.get("industry_col", "Industry")})
             fig_sector.update_layout(height=max(360, min(620, 100 + 30 * len(latest_sector))), margin=dict(l=10, r=10, t=35, b=10), xaxis_tickformat=".0%", title=t.get("industry_weight", "Latest Industry Weight"))
-            st.plotly_chart(fig_sector, width="stretch")
+            st.plotly_chart(fig_sector, use_container_width=True)
     with detail_right:
         if not latest_assets.empty:
             display = latest_assets.head(20).rename(columns={"ticker": t.get("asset_col", "Asset"), "name": t.get("name_col", "Name"), "sector": t.get("industry_col", "Industry"), "weight": t.get("weight_col", "Weight")})
             st.markdown(f"#### {t.get('largest_assets', 'Largest Weighted Assets')}")
-            st.dataframe(display[[t.get("asset_col", "Asset"), t.get("name_col", "Name"), t.get("industry_col", "Industry"), t.get("weight_col", "Weight")]].style.format({t.get("weight_col", "Weight"): "{:.1%}"}), width="stretch", hide_index=True)
+            st.dataframe(display[[t.get("asset_col", "Asset"), t.get("name_col", "Name"), t.get("industry_col", "Industry"), t.get("weight_col", "Weight")]].style.format({t.get("weight_col", "Weight"): "{:.1%}"}), use_container_width=True, hide_index=True)
 
 
 def _render_research_windows(structure: dict, rolling_risk: pd.DataFrame) -> None:
@@ -624,7 +624,7 @@ def _render_research_windows(structure: dict, rolling_risk: pd.DataFrame) -> Non
             use_col: t.get("research_use", "Research Use"),
         }
     )
-    st.dataframe(display, width="stretch", hide_index=True)
+    st.dataframe(display, use_container_width=True, hide_index=True)
 
 
 st.title(t["title"])
@@ -827,7 +827,7 @@ with risk_tab:
         yaxis_tickformat=".0%",
         yaxis_title="Variance",
     )
-    st.plotly_chart(fig_spectrum, width="stretch")
+    st.plotly_chart(fig_spectrum, use_container_width=True)
 
     if not component_labels.empty:
         st.markdown(f"#### {t['component_interpreter']}")
@@ -893,7 +893,7 @@ with risk_tab:
                     t.get("label_confidence", "Label confidence"): "{:.0%}",
                 }
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
         st.caption(t.get("confidence_note", "Label confidence is heuristic, not a statistical confidence interval."))
@@ -937,7 +937,7 @@ with risk_tab:
             yaxis_tickformat=".0%",
             yaxis_range=[0, 1],
         )
-        st.plotly_chart(fig_stability, width="stretch")
+        st.plotly_chart(fig_stability, use_container_width=True)
 
         summary = (
             component_stability.groupby("component", as_index=False)
@@ -980,7 +980,7 @@ with risk_tab:
                     t.get("avg_label_confidence", "Avg Label Confidence"): "{:.0%}",
                 }
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
     elif int(result.get("component_stability_skipped_windows", 0)) > 0:
@@ -1032,7 +1032,7 @@ with risk_tab:
                 template=template,
             )
         fig_sector.update_layout(height=520, margin=dict(l=10, r=10, t=20, b=10))
-        st.plotly_chart(fig_sector, width="stretch")
+        st.plotly_chart(fig_sector, use_container_width=True)
 
     st.markdown(f"#### {t['top_loadings']}: {selected_component}")
     top_loadings = asset_loadings[asset_loadings["component"] == selected_component].copy()
@@ -1050,7 +1050,7 @@ with risk_tab:
                 "explained_variance_ratio",
             ]
         ].style.format({"explained_variance_ratio": "{:.1%}"}),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 
@@ -1078,7 +1078,7 @@ with risk_tab:
             margin=dict(l=10, r=10, t=20, b=10),
             yaxis_title="Effective dimensions",
         )
-        st.plotly_chart(fig_roll, width="stretch")
+        st.plotly_chart(fig_roll, use_container_width=True)
 
         fig_haircut = px.area(
             rolling,
@@ -1092,7 +1092,7 @@ with risk_tab:
             yaxis_tickformat=".0%",
             yaxis_title=t["haircut"],
         )
-        st.plotly_chart(fig_haircut, width="stretch")
+        st.plotly_chart(fig_haircut, use_container_width=True)
 
         if not regime_periods.empty:
             st.markdown(f"#### {t.get('regime_periods', 'Breadth Regime Periods')}")
@@ -1167,6 +1167,6 @@ with risk_tab:
                         t.get("avg_haircut", "Avg Haircut"): "{:.1%}",
                     }
                 ),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )

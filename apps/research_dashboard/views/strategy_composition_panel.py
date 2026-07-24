@@ -660,7 +660,7 @@ def render_strategy_composition_panel(
 
     if config is None:
         st.caption(error or copy["invalid"])
-        st.button(copy["run"], disabled=True, width="stretch")
+        st.button(copy["run"], disabled=True, use_container_width=True)
         return False
 
     config_path = (
@@ -693,7 +693,11 @@ def render_strategy_composition_panel(
     st.code(command_text, language="bash")
 
     runnable = execution_ready
-    if st.button(copy["run"], disabled=not runnable, width="stretch"):
+    if st.button(
+        copy["run"],
+        disabled=not runnable,
+        use_container_width=True,
+    ):
         environment = os.environ.copy()
         environment["PYTHONPATH"] = "src:."
         process_command = [

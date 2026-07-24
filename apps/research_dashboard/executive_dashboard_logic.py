@@ -573,7 +573,7 @@ This page compares developed strategy runs, not factors.
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             yaxis_title="Equity",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     def _render_drawdown_chart(self, profiles: list[StrategyProfile], tpl: str, copy: dict):
         st.markdown(f"### {copy['drawdown']}")
@@ -599,7 +599,7 @@ This page compares developed strategy runs, not factors.
             yaxis_tickformat=".0%",
             yaxis_title="Drawdown",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     def _render_metric_table(self, profiles: list[StrategyProfile], copy: dict):
         st.markdown(f"### {copy['metrics']}")
@@ -633,7 +633,7 @@ This page compares developed strategy runs, not factors.
         ]
         fmt = {col: "{:.2%}" for col in pct_cols if col in df.columns}
         fmt.update({copy["sharpe"]: "{:.2f}", copy["calmar"]: "{:.2f}"})
-        st.dataframe(df.style.format(fmt), width="stretch", hide_index=True)
+        st.dataframe(df.style.format(fmt), use_container_width=True, hide_index=True)
 
     @staticmethod
     def _short_profile_labels(profiles: list[StrategyProfile]) -> dict[str, str]:
@@ -690,7 +690,7 @@ This page compares developed strategy runs, not factors.
         )
         fig.update_xaxes(showgrid=False, zeroline=False)
         fig.update_yaxes(showgrid=False, zeroline=False)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     def _render_improvement(self, profiles: list[StrategyProfile], copy: dict):
         baseline = next((p for p in profiles if p.group == "Baseline"), profiles[0])
@@ -723,7 +723,7 @@ This page compares developed strategy runs, not factors.
                     "cost_delta": "{:.2%}",
                 }
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -755,7 +755,7 @@ This page compares developed strategy runs, not factors.
                     template=tpl,
                 )
                 fig.update_layout(height=390, margin=dict(l=10, r=10, t=20, b=10), coloraxis_showscale=False)
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
         with right:
             st.markdown(f"#### {copy['holding']}")
@@ -771,7 +771,7 @@ This page compares developed strategy runs, not factors.
                     color_discrete_sequence=[self.SERIES_COLORS[0]],
                 )
                 fig.update_layout(height=390, margin=dict(l=10, r=10, t=20, b=10), yaxis_title="Trades")
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
     @staticmethod
     def _pct(value) -> str:

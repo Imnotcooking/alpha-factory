@@ -265,7 +265,7 @@ if st.session_state.selected_run is not None and str(st.session_state.selected_r
 # Build the Sidebar Buttons
 for _, row in ledger_runs_df.iterrows():
     label = format_run_ledger_label(row)
-    if st.sidebar.button(label, key=row['run_id'], width="stretch"):
+    if st.sidebar.button(label, key=row['run_id'], use_container_width=True):
         st.session_state.selected_run = row['run_id']
 
 # ==========================================
@@ -279,7 +279,7 @@ with st.expander("Asset Taxonomy / 资产分类", expanded=False):
     )
     st.dataframe(
         dashboard_taxonomy_frame(language=st.session_state.lang.lower()),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         height=230,
     )
@@ -301,7 +301,7 @@ if not runtime_df.empty:
             "Heuristic wall-clock ranges based on latest ledger row counts and asset route. "
             "The C++ execution pass is usually fast; factor computation often dominates."
         )
-        st.dataframe(runtime_df, width="stretch", hide_index=True, height=220)
+        st.dataframe(runtime_df, use_container_width=True, hide_index=True, height=220)
 
 st.markdown("---")
 

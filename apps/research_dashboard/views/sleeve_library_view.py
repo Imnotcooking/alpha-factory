@@ -699,7 +699,7 @@ class SleeveLibraryView:
         )
         st.dataframe(
             display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             height=300,
         )
@@ -756,7 +756,7 @@ class SleeveLibraryView:
                 for key, value in row["contract"].items()
             ]
         )
-        st.dataframe(contract, width="stretch", hide_index=True)
+        st.dataframe(contract, use_container_width=True, hide_index=True)
         st.markdown(f"#### {copy['fingerprints']}")
         st.caption(
             f"{copy['definition_fingerprint']}: "
@@ -851,7 +851,7 @@ class SleeveLibraryView:
         )
         st.dataframe(
             display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             column_config={
                 copy["validation_sharpe"]: st.column_config.NumberColumn(format="%.2f"),
@@ -960,7 +960,7 @@ class SleeveLibraryView:
         ]
         st.dataframe(
             display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             column_config={
                 **{

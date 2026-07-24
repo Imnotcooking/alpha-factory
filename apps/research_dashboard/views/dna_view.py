@@ -456,7 +456,7 @@ class DNAView:
             ),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     @staticmethod
     def _exposure_leverage_frame(returns: pd.DataFrame) -> pd.DataFrame:
@@ -621,7 +621,7 @@ class DNAView:
                     yaxis_title="",
                     legend_title_text="",
                 )
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
         with top_right:
             st.markdown(f"#### {copy['pnl_dist']}")
@@ -659,7 +659,7 @@ class DNAView:
                     yaxis_title=copy["dist_y"],
                     showlegend=False,
                 )
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
         with bottom_left:
             st.markdown(f"#### {copy['holding_pain']}")
@@ -736,7 +736,7 @@ class DNAView:
                         legend_title_text=copy["hover_side"],
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     )
-                    st.plotly_chart(fig, width="stretch")
+                    st.plotly_chart(fig, use_container_width=True)
 
         with bottom_right:
             st.markdown(f"#### {copy['edge_stability']}")
@@ -815,7 +815,7 @@ class DNAView:
                 )
                 fig.update_xaxes(tickangle=-45)
                 fig.update_yaxes(autorange="reversed")
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
     def _render_breadth_regime_performance(
         self,
@@ -908,7 +908,7 @@ class DNAView:
             yaxis_title=copy["breadth_avg_trade"],
             showlegend=False,
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
         sample_share_label = copy["breadth_sample_share"]
         display = performance[
@@ -953,7 +953,7 @@ class DNAView:
                     sample_share_label: "{:.1%}",
                 }
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -1474,14 +1474,14 @@ class DNAView:
                 yaxis=dict(title="Equity"),
                 yaxis2=dict(title="Drawdown", overlaying="y", side="right", tickformat=".0%"),
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         with right:
             st.markdown(f"#### {copy['daily_return_dist']}")
             fig = px.histogram(df, x="net_return_pct", nbins=60, template=template)
             fig.add_vline(x=0, line_dash="dash", line_color="gray")
             fig.update_layout(height=420, margin=dict(l=10, r=10, t=20, b=10), xaxis_title="Daily Net Return (%)")
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         st.markdown(f"#### {copy['turnover_return']}")
         fig = px.scatter(
@@ -1494,7 +1494,7 @@ class DNAView:
         )
         fig.add_hline(y=0, line_dash="dash", line_color="gray")
         fig.update_layout(height=360, margin=dict(l=10, r=10, t=20, b=10), yaxis_title="Daily Net Return (%)")
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     @staticmethod
     def _pct(value) -> str:

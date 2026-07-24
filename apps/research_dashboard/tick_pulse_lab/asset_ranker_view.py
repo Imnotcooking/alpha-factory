@@ -280,7 +280,7 @@ def render_asset_download_ranker(
         xaxis_title=t["asset_sort_options"]["recent_ann_vol"],
         yaxis_title="",
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     display_cols = [
         "download_priority_rank",
@@ -314,7 +314,7 @@ def render_asset_download_ranker(
                 "coverage": "{:.0%}",
             }
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     if os.environ.get("OQP_MANAGER_DEMO") == "1":
@@ -325,7 +325,7 @@ def render_asset_download_ranker(
             data=filtered.to_csv(index=False).encode("utf-8-sig"),
             file_name=f"pattern_lab_{selected_lens}_rank.csv",
             mime="text/csv",
-            width="stretch",
+            use_container_width=True,
         )
 
 
@@ -360,7 +360,7 @@ def _render_tick_lens(*, project_root: str, t: dict) -> None:
     st.info(t["tick_lens_route"])
     st.dataframe(
         pd.DataFrame(rows).style.format({t["tick_size_mb"]: "{:.1f}"}),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 

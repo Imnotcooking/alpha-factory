@@ -198,7 +198,7 @@ def render_predictive_evidence_panel(
             },
             na_rep="",
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 
@@ -222,7 +222,7 @@ def render_predictive_evidence_panel(
                 },
                 na_rep="",
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
     with product_tab:
@@ -273,7 +273,7 @@ def _render_time_profile(period_ic: pd.DataFrame, copy: dict, template: str) -> 
         hovermode="x unified",
         legend={"orientation": "h", "y": 1.08, "x": 0},
     )
-    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
 
 
 def _render_product_profile(product_ic: pd.DataFrame, copy: dict, template: str) -> None:
@@ -292,7 +292,7 @@ def _render_product_profile(product_ic: pd.DataFrame, copy: dict, template: str)
         yaxis={"title": "Products"},
         bargap=0.08,
     )
-    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
     columns = [
         "product",
         "oriented_pearson_ic",
@@ -324,7 +324,7 @@ def _render_product_profile(product_ic: pd.DataFrame, copy: dict, template: str)
             },
             na_rep="",
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         height=420,
     )
@@ -370,7 +370,7 @@ def _render_coverage(
             },
             na_rep="",
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     st.markdown(f"**{copy['concentration']}**")
@@ -389,7 +389,7 @@ def _render_coverage(
             },
             na_rep="",
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         height=420,
     )

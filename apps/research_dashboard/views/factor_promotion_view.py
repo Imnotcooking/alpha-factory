@@ -450,7 +450,7 @@ class FactorPromotionView:
             st.caption(copy["subtitle"])
         with refresh_col:
             st.write("")
-            if st.button(copy["refresh"], width="stretch"):
+            if st.button(copy["refresh"], use_container_width=True):
                 st.cache_data.clear()
                 st.rerun()
 
@@ -573,7 +573,7 @@ class FactorPromotionView:
         )
         chart_cols = st.columns(2)
         with chart_cols[0]:
-            st.plotly_chart(funnel, width="stretch")
+            st.plotly_chart(funnel, use_container_width=True)
         with chart_cols[1]:
             snapshot = load_factor_library_snapshot(str(self.base_dir))
             FactorLibraryView._render_component_mix(
@@ -655,7 +655,7 @@ class FactorPromotionView:
             },
             na_rep="",
         ).apply(self._style_stage, subset=[copy["stage"]])
-        st.dataframe(styled, width="stretch", hide_index=True, height=520)
+        st.dataframe(styled, use_container_width=True, hide_index=True, height=520)
 
     def _render_recent_candidate_exports(self, board: pd.DataFrame, copy: dict) -> None:
         st.markdown(f"### {copy['recent_exports_title']}")
@@ -664,7 +664,7 @@ class FactorPromotionView:
         if exports.empty:
             st.info(copy["recent_exports_empty"])
         else:
-            st.dataframe(exports, width="stretch", hide_index=True)
+            st.dataframe(exports, use_container_width=True, hide_index=True)
 
         if issues:
             with st.expander(copy["exported_issues"], expanded=False):
@@ -677,7 +677,7 @@ class FactorPromotionView:
                         for issue in issues
                     ]
                 )
-                st.dataframe(issue_df, width="stretch", hide_index=True)
+                st.dataframe(issue_df, use_container_width=True, hide_index=True)
 
     def _render_drilldown(
         self,
@@ -840,7 +840,7 @@ class FactorPromotionView:
             else "background-color: #fee2e2; color: #991b1b",
             subset=["Status"],
         )
-        st.dataframe(styled, width="stretch", hide_index=True)
+        st.dataframe(styled, use_container_width=True, hide_index=True)
 
     def _render_artifacts(self, evidence: FactorEvidence, copy: dict) -> None:
         st.markdown(f"#### {copy['artifact_title']}")
@@ -860,7 +860,7 @@ class FactorPromotionView:
         ]
         artifact_df = pd.DataFrame(artifacts, columns=["artifact", "value"])
         artifact_df["value"] = artifact_df["value"].astype(str)
-        st.dataframe(artifact_df, width="stretch", hide_index=True)
+        st.dataframe(artifact_df, use_container_width=True, hide_index=True)
 
         if not evidence.tick_ml_rows.empty:
             with st.expander("Tick ML studies / Tick ML 研究", expanded=False):
@@ -877,7 +877,7 @@ class FactorPromotionView:
                 for col in cols:
                     if col not in tick_df.columns:
                         tick_df[col] = np.nan
-                st.dataframe(tick_df[cols], width="stretch", hide_index=True)
+                st.dataframe(tick_df[cols], use_container_width=True, hide_index=True)
 
     def _render_candidate_readback(
         self,
@@ -889,7 +889,7 @@ class FactorPromotionView:
         if exports.empty:
             st.info(copy["exported_empty"])
         else:
-            st.dataframe(exports, width="stretch", hide_index=True)
+            st.dataframe(exports, use_container_width=True, hide_index=True)
 
         if issues:
             with st.expander(copy["exported_issues"], expanded=False):
@@ -902,7 +902,7 @@ class FactorPromotionView:
                         for issue in issues
                     ]
                 )
-                st.dataframe(issue_df, width="stretch", hide_index=True)
+                st.dataframe(issue_df, use_container_width=True, hide_index=True)
 
     def _render_candidate_export(
         self,
@@ -962,7 +962,7 @@ class FactorPromotionView:
         export_clicked = st.button(
             copy["export_update_button"] if selected_run_exported else copy["export_button"],
             key=f"candidate-export-button-{evidence.evidence_key}",
-            width="stretch",
+            use_container_width=True,
         )
 
         if selected_status == "paper_candidate" and row.get("stage") != "Paper-Trading Candidate":
@@ -1159,7 +1159,7 @@ class FactorPromotionView:
         )
         fig.add_hline(y=0, line_dash="dash", line_color="gray")
         fig.update_layout(template=tpl, height=310, margin=dict(l=10, r=10, t=20, b=20), yaxis_title=metric)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
         st.caption(copy["runs_desc"])
         history = runs.copy().sort_values("timestamp", ascending=False)
@@ -1225,7 +1225,7 @@ class FactorPromotionView:
 
         st.dataframe(
             display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             column_config=column_config,
         )
@@ -1275,7 +1275,7 @@ class FactorPromotionView:
                     ] = st.column_config.TextColumn(width="large")
                 st.dataframe(
                     provenance_display,
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                     column_config=provenance_column_config,
                 )

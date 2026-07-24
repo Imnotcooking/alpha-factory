@@ -216,7 +216,7 @@ def _render_interval_chart(
         xaxis={"title": None},
         showlegend=False,
     )
-    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
 
 
 def _render_metrics_table(sample: pd.DataFrame, condition_id: str) -> None:
@@ -284,7 +284,7 @@ def _render_metrics_table(sample: pd.DataFrame, condition_id: str) -> None:
             },
             na_rep="",
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 

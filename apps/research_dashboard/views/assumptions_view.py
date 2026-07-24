@@ -80,7 +80,7 @@ class AssumptionsView:
                     st.markdown(f"#### {copy.get('assumptions_available', 'Available manifests')}")
                     st.dataframe(
                         index.loc[:, ["run_id", "factor_id", "asset_class", "execution_mode", "modified_at"]],
-                        width="stretch",
+                        use_container_width=True,
                         hide_index=True,
                         height=260,
                     )
@@ -465,7 +465,7 @@ class AssumptionsView:
                 ),
             },
         ]
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
         if not status["frozen_with_run"]:
             st.warning(
@@ -572,7 +572,7 @@ class AssumptionsView:
                 "Value": status["absolute_floor"],
             },
         ]
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         if status["economic_question"]:
             st.caption(status["economic_question"])
 
@@ -602,7 +602,7 @@ class AssumptionsView:
             st.markdown("**Hard gates**")
             st.dataframe(
                 pd.DataFrame(status["gates"]),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
         if status["profile_fingerprint"]:
@@ -741,7 +741,7 @@ class AssumptionsView:
         if frame.empty:
             st.info(copy.get("assumptions_no_values", "No recorded values."))
         else:
-            st.dataframe(frame, width="stretch", hide_index=True)
+            st.dataframe(frame, use_container_width=True, hide_index=True)
 
     def _render_costs_and_slippage(self, title: str, payload: Any, copy: dict[str, Any]) -> None:
         st.markdown(f"#### {title}")
@@ -756,7 +756,7 @@ class AssumptionsView:
         if frame.empty:
             st.info(copy.get("assumptions_no_values", "No recorded values."))
         else:
-            st.dataframe(frame, width="stretch", hide_index=True)
+            st.dataframe(frame, use_container_width=True, hide_index=True)
 
     def _render_data_health_assumptions(self, manifest: dict[str, Any], copy: dict[str, Any]) -> None:
         st.markdown(f"#### {copy.get('assumptions_data_health', 'Data Health')}")
@@ -835,7 +835,7 @@ class AssumptionsView:
             display[expired_col] = pd.to_numeric(display[expired_col], errors="coerce").map(
                 lambda value: "" if pd.isna(value) else f"{int(value):,}"
             )
-        st.dataframe(display, width="stretch", hide_index=True, height=180)
+        st.dataframe(display, use_container_width=True, hide_index=True, height=180)
 
     def _key_value_frame(self, payload: Any) -> pd.DataFrame:
         if not isinstance(payload, dict) or not payload:

@@ -362,7 +362,7 @@ def _render_clock_edge(
         xaxis_title=t["clock_hour"],
         yaxis_title=t["clock_session"],
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     table = summary.copy()
     table["session"] = table["session_key"].map(
@@ -406,7 +406,7 @@ def _render_clock_edge(
                 t["clock_net_move"]: "{:+.2f}",
             }
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 
@@ -1400,7 +1400,7 @@ def _render_behavior_preview(
                         t["behavior_directional_move"]: "{:+.2f}",
                     }
                 ),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
 
@@ -1451,7 +1451,7 @@ def _render_behavior_preview(
                 t["behavior_directional_move"]: "{:+.2f}",
             }
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     return (
@@ -1814,7 +1814,7 @@ def _render_cross_asset(
     else:
         result = None
 
-    if st.button(t["cross_asset_run"], width="stretch"):
+    if st.button(t["cross_asset_run"], use_container_width=True):
         progress = st.progress(0, text=f"0% - {t['cross_asset_loading']}")
 
         def compute() -> pd.DataFrame:
@@ -1933,7 +1933,7 @@ def _render_cross_asset(
             xaxis_title=t["axis_pulses_per_hour"],
             yaxis_title="",
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
     display_result = _format_cross_asset_summary(result, t)
     st.dataframe(
         display_result.style.format(
@@ -1948,7 +1948,7 @@ def _render_cross_asset(
                 t["rows"]: "{:.0f}",
             }
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     with st.expander(t["cross_asset_columns_help_title"], expanded=False):
@@ -1985,7 +1985,7 @@ def _render_cross_asset_zone_summary(files: list[dict], window_seconds: float, t
         )
 
     if st.button(
-        t["cross_zone_run"], width="stretch", key="pulse_cross_zone_run"
+        t["cross_zone_run"], use_container_width=True, key="pulse_cross_zone_run"
     ):
         progress = st.progress(0, text=f"0% - {t['cross_zone_loading']}")
 
@@ -2045,7 +2045,7 @@ def _render_cross_asset_zone_summary(files: list[dict], window_seconds: float, t
     display = _format_cross_zone_summary(result, t)
     st.dataframe(
         _style_cross_zone_summary(display, t),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     st.caption(t["zone_note"])
@@ -2179,10 +2179,10 @@ def main():
             }
         )
         st.markdown(f"#### {lab_t['schema']}")
-        st.dataframe(schema_df, width="stretch", hide_index=True)
+        st.dataframe(schema_df, use_container_width=True, hide_index=True)
         _render_raw_row_viewer(raw_scope, selected_symbol, lab_t)
         _render_contract_health(summary, tpl, lab_t)
-        st.dataframe(summary, width="stretch", hide_index=True)
+        st.dataframe(summary, use_container_width=True, hide_index=True)
         return
 
     pulse_controls = st.columns(3)
@@ -2294,7 +2294,7 @@ def main():
     st.caption(t["distribution_help"])
     st.plotly_chart(
         _severity_ladder_figure(frame, selected_source_index, tpl, t),
-        width="stretch",
+        use_container_width=True,
     )
     zone_summary = _zone_summary(frame, t)
     if not zone_summary.empty:
@@ -2306,7 +2306,7 @@ def main():
                     t["zone_max"]: "{:.2f}",
                 }
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
         st.caption(t["zone_note"])
@@ -2330,7 +2330,7 @@ def main():
                     t["range"]: "{:.2f}",
                 }
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
         with st.expander(t["event_columns_help_title"], expanded=False):
@@ -2356,7 +2356,7 @@ def main():
             st.markdown(t["inspector_help"])
         st.plotly_chart(
             _event_inspector(frame, event, float(window_seconds), tpl, t),
-            width="stretch",
+            use_container_width=True,
         )
         behavior_recommendation = _render_behavior_preview(frame, events, event, t)
         _render_seed_promotion(

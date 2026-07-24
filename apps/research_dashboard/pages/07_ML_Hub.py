@@ -450,7 +450,7 @@ with tabs[0]:
                 template=template,
             )
             fig_family.update_layout(height=380, margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig_family, width="stretch")
+            st.plotly_chart(fig_family, use_container_width=True)
     with right:
         st.markdown(f"### {t['summary_title']}")
         show_cols = [
@@ -465,7 +465,7 @@ with tabs[0]:
         ]
         st.dataframe(
             _format_percent_cols(summary[show_cols]),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -584,7 +584,7 @@ with tabs[2]:
         ]
         st.dataframe(
             _format_percent_cols(evidence_inventory[evidence_inventory_cols]),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -611,7 +611,7 @@ with tabs[2]:
             margin=dict(l=10, r=10, t=20, b=10),
             legend_title_text=None,
         )
-        st.plotly_chart(fig_ic, width="stretch")
+        st.plotly_chart(fig_ic, use_container_width=True)
 
         with st.expander(t["implementation_friction_title"], expanded=False):
             st.caption(t["implementation_friction_caption"])
@@ -642,7 +642,7 @@ with tabs[2]:
                     margin=dict(l=10, r=10, t=20, b=10),
                     legend_title_text=None,
                 )
-                st.plotly_chart(fig_turnover, width="stretch")
+                st.plotly_chart(fig_turnover, use_container_width=True)
 
         st.markdown(f"### {t['stability_title']}")
         st.caption(t["stability_caption"])
@@ -691,7 +691,7 @@ with tabs[2]:
                     margin=dict(l=10, r=10, t=20, b=10),
                     legend_title_text=None,
                 )
-                st.plotly_chart(fig_daily, width="stretch")
+                st.plotly_chart(fig_daily, use_container_width=True)
 
         st.markdown(f"### {t['distinctiveness_title']}")
         st.caption(t["distinctiveness_caption"])
@@ -716,7 +716,7 @@ with tabs[2]:
                 height=max(360, min(680, 38 * len(visible_features) + 140)),
                 margin=dict(l=10, r=10, t=30, b=10),
             )
-            st.plotly_chart(fig_corr, width="stretch")
+            st.plotly_chart(fig_corr, use_container_width=True)
 
         cluster_cols = [
             "cluster_id",
@@ -734,7 +734,7 @@ with tabs[2]:
         ]
         st.dataframe(
             _format_percent_cols(visible_clusters[cluster_cols]),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -748,7 +748,7 @@ with tabs[2]:
             else:
                 st.dataframe(
                     _format_percent_cols(visible_pairs.head(50)),
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                 )
 
@@ -785,7 +785,7 @@ with tabs[2]:
             st.write("")
             run_mda = st.button(
                 t["mda_run"],
-                width="stretch",
+                use_container_width=True,
                 disabled=evidence_summary.empty,
             )
 
@@ -855,7 +855,7 @@ with tabs[2]:
                 )
                 fig_mda.add_vline(x=0, line_dash="dash", line_color="gray")
                 fig_mda.update_layout(height=520, margin=dict(l=10, r=10, t=20, b=10))
-                st.plotly_chart(fig_mda, width="stretch")
+                st.plotly_chart(fig_mda, use_container_width=True)
 
             with right:
                 st.markdown(f"#### {t['mda_gain_scatter']}")
@@ -879,7 +879,7 @@ with tabs[2]:
                     fig_gain.update_layout(
                         height=520, margin=dict(l=10, r=10, t=20, b=10)
                     )
-                    st.plotly_chart(fig_gain, width="stretch")
+                    st.plotly_chart(fig_gain, use_container_width=True)
 
             st.markdown(f"#### {t['mda_table']}")
             show_mda_cols = [
@@ -902,13 +902,13 @@ with tabs[2]:
                         [col for col in show_mda_cols if col in mda_summary.columns]
                     ]
                 ),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
 
         if not mda_fold_scores.empty:
             with st.expander(t["mda_fold_scores"], expanded=False):
-                st.dataframe(mda_fold_scores, width="stretch", hide_index=True)
+                st.dataframe(mda_fold_scores, use_container_width=True, hide_index=True)
 
 with tabs[0]:
     st.markdown(f"### {t['missing_bar']}")
@@ -926,7 +926,7 @@ with tabs[0]:
         margin=dict(l=10, r=10, t=20, b=10),
         xaxis_tickformat=".0%",
     )
-    st.plotly_chart(fig_missing, width="stretch")
+    st.plotly_chart(fig_missing, use_container_width=True)
 
     miss_cols = [
         "feature",
@@ -943,7 +943,7 @@ with tabs[0]:
         _format_percent_cols(
             summary[miss_cols].sort_values("missing_pct", ascending=False)
         ),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 
@@ -957,7 +957,7 @@ with tabs[1]:
     runtime_header[0].markdown(f"#### {t['runtime_readiness']}")
     if runtime_header[1].button(
         t["check_runtimes"],
-        width="stretch",
+        use_container_width=True,
         key="ml_hub_check_runtimes",
     ):
         with st.spinner(t["runtime_checking"]):
@@ -974,7 +974,7 @@ with tabs[1]:
         )
         st.dataframe(
             runtime_frame[["model", "status", "detail"]],
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
     else:
@@ -1028,7 +1028,7 @@ with tabs[1]:
             ]
         st.dataframe(
             filtered_experiments.style.format({"oos_rank_ic": "{:.4f}"}, na_rep="N/A"),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -1217,12 +1217,12 @@ with tabs[3]:
                     height=520,
                     margin=dict(l=10, r=10, t=20, b=10),
                 )
-                st.plotly_chart(fig_importance, width="stretch")
+                st.plotly_chart(fig_importance, use_container_width=True)
                 st.dataframe(
                     importance_values[
                         ["feature", importance_col, "absolute_importance"]
                     ].head(50),
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True,
                 )
     elif selected_explain_experiment:
@@ -1261,7 +1261,7 @@ with tabs[0]:
                 margin=dict(l=10, r=10, t=20, b=10),
                 yaxis_tickformat=".0%",
             )
-            st.plotly_chart(fig_pca, width="stretch")
+            st.plotly_chart(fig_pca, use_container_width=True)
 
         with right:
             st.markdown(f"### {t['pca_loadings']}")
@@ -1283,7 +1283,7 @@ with tabs[0]:
                 template=template,
             )
             fig_load.update_layout(height=420, margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig_load, width="stretch")
+            st.plotly_chart(fig_load, use_container_width=True)
 
         st.dataframe(
             pca_variance.style.format(
@@ -1292,7 +1292,7 @@ with tabs[0]:
                     "cumulative_variance": "{:.2%}",
                 }
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -1322,9 +1322,9 @@ with tabs[1]:
     with control_row[4]:
         latent_epochs = st.slider(t["epochs"], 1, 50, 8, 1)
     with control_row[5]:
-        train_clicked = st.button(t["train_latent"], width="stretch")
+        train_clicked = st.button(t["train_latent"], use_container_width=True)
     with control_row[6]:
-        load_clicked = st.button(t["load_latent"], width="stretch")
+        load_clicked = st.button(t["load_latent"], use_container_width=True)
 
     latent_result = None
     if train_clicked:
@@ -1397,7 +1397,7 @@ with tabs[1]:
             fig_usage.update_layout(
                 height=320, yaxis_tickformat=".0%", margin=dict(l=10, r=10, t=20, b=10)
             )
-            st.plotly_chart(fig_usage, width="stretch")
+            st.plotly_chart(fig_usage, use_container_width=True)
 
         if not loss_df.empty and {"epoch", "loss"}.issubset(loss_df.columns):
             st.markdown(f"#### {t['loss_title']}")
@@ -1423,7 +1423,7 @@ with tabs[1]:
                 template=template,
             )
             fig_loss.update_layout(height=320, margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig_loss, width="stretch")
+            st.plotly_chart(fig_loss, use_container_width=True)
 
         feature_cols = [
             feature
@@ -1454,7 +1454,7 @@ with tabs[1]:
                 fig_profile.update_layout(
                     template=template, height=420, margin=dict(l=10, r=10, t=20, b=10)
                 )
-                st.plotly_chart(fig_profile, width="stretch")
+                st.plotly_chart(fig_profile, use_container_width=True)
 
         gmm_path = os.path.join(
             ALPHA_RUNTIME_DATA_ROOT, "regime", "GMM_Rolling_Probabilities.parquet"
@@ -1480,7 +1480,7 @@ with tabs[1]:
             fig_gmm.update_layout(
                 template=template, height=420, margin=dict(l=10, r=10, t=20, b=10)
             )
-            st.plotly_chart(fig_gmm, width="stretch")
+            st.plotly_chart(fig_gmm, use_container_width=True)
 
         st.markdown(f"#### {t['latent_table']}")
         show_latent_cols = [
@@ -1501,7 +1501,7 @@ with tabs[1]:
         ]
         st.dataframe(
             latent_df[show_latent_cols].head(500),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -1570,7 +1570,7 @@ with tabs[4]:
                 {"oos_rank_ic": "{:.4f}"},
                 na_rep="N/A",
             ),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 

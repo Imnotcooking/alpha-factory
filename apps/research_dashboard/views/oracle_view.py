@@ -217,14 +217,14 @@ class OracleView:
                 margin=dict(l=10, r=10, t=30, b=10),
                 title=title,
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         with c2:
             report_df = result.report.copy()
             numeric_cols = report_df.select_dtypes(include="number").columns
             report_df[numeric_cols] = report_df[numeric_cols].round(3)
             st.markdown(f"#### {t.get('oracle_classification_report', 'Classification Report')}")
-            st.dataframe(report_df, width="stretch")
+            st.dataframe(report_df, use_container_width=True)
 
     @staticmethod
     def _render_probability_diagnostics(eval_df: pd.DataFrame, theme_mode: str, t: dict):
@@ -248,7 +248,7 @@ class OracleView:
                 margin=dict(l=10, r=10, t=40, b=10),
                 showlegend=False,
             )
-            st.plotly_chart(fig_box, width="stretch")
+            st.plotly_chart(fig_box, use_container_width=True)
 
         with c2:
             state_counts = (
@@ -269,7 +269,7 @@ class OracleView:
                 height=360,
                 margin=dict(l=10, r=10, t=40, b=10),
             )
-            st.plotly_chart(fig_bar, width="stretch")
+            st.plotly_chart(fig_bar, use_container_width=True)
 
     @staticmethod
     def _render_asset_drilldown(eval_df: pd.DataFrame, theme_mode: str, t: dict):
@@ -393,4 +393,4 @@ class OracleView:
             ),
         )
         fig.update_yaxes(title_text="Close")
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)

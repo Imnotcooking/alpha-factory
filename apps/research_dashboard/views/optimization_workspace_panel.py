@@ -354,7 +354,7 @@ def _render_profile(
         ["priority", "objective", "metric", "direction"],
     ].sort_values("priority")
     st.caption(copy["objectives"])
-    st.dataframe(objective_rows, width="stretch", hide_index=True)
+    st.dataframe(objective_rows, use_container_width=True, hide_index=True)
 
     detail_tabs = st.tabs([copy["constraints"], copy["upstream"]])
     with detail_tabs[0]:
@@ -364,7 +364,7 @@ def _render_profile(
         if gate_rows.empty:
             st.caption(copy["not_applicable"])
         else:
-            st.dataframe(gate_rows, width="stretch", hide_index=True)
+            st.dataframe(gate_rows, use_container_width=True, hide_index=True)
     with detail_tabs[1]:
         upstream_rows = upstream.loc[
             upstream["profile_id"].eq(profile_id)
@@ -372,7 +372,7 @@ def _render_profile(
         if upstream_rows.empty:
             st.caption(copy["not_applicable"])
         else:
-            st.dataframe(upstream_rows, width="stretch", hide_index=True)
+            st.dataframe(upstream_rows, use_container_width=True, hide_index=True)
 
 
 def _render_ledger(snapshot: dict[str, Any], copy: dict[str, str]) -> None:
@@ -393,7 +393,7 @@ def _render_ledger(snapshot: dict[str, Any], copy: dict[str, str]) -> None:
     if not isinstance(studies, pd.DataFrame) or studies.empty:
         st.caption(copy["no_studies"])
     else:
-        st.dataframe(studies, width="stretch", hide_index=True)
+        st.dataframe(studies, use_container_width=True, hide_index=True)
 
 
 def _render_study_definition_builder(
@@ -439,7 +439,7 @@ def _render_study_definition_builder(
     detail[2].caption(copy["source"])
     detail[2].code(component.source_path, language=None)
     st.caption(f"{copy['schema_fingerprint']}: `{schema.fingerprint}`")
-    st.dataframe(schema_rows, width="stretch", hide_index=True)
+    st.dataframe(schema_rows, use_container_width=True, hide_index=True)
     if tunable_count == 0:
         st.warning(copy["no_schema"])
         return None
@@ -630,7 +630,7 @@ def _render_study_definition_builder(
             )
         submitted = st.form_submit_button(
             copy["generate"],
-            width="stretch",
+            use_container_width=True,
         )
 
     if not submitted:
@@ -765,7 +765,7 @@ def render_optimization_workspace_panel(
     st.markdown(f"#### {copy['method_fit']}")
     st.dataframe(
         _method_rows(registry, purpose, copy),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
     _render_profile(snapshot, purpose.objective_profile_id, copy)
@@ -784,7 +784,7 @@ def render_optimization_workspace_panel(
 
     with st.expander(copy["all_jobs"]):
         inventory = pd.DataFrame(registry.purpose_inventory())
-        st.dataframe(inventory, width="stretch", hide_index=True)
+        st.dataframe(inventory, use_container_width=True, hide_index=True)
 
 
 __all__ = ["load_optimization_workspace", "render_optimization_workspace_panel"]

@@ -655,7 +655,7 @@ class FactorLibraryView:
                 "reference_license": copy["reference_license"],
             }
         )
-        st.dataframe(display, width="stretch", hide_index=True, height=320)
+        st.dataframe(display, use_container_width=True, hide_index=True, height=320)
 
     @staticmethod
     def _render_family_mix(manifest: pd.DataFrame, theme_mode: str, copy: dict[str, Any]) -> None:
@@ -688,7 +688,7 @@ class FactorLibraryView:
         )
         st.plotly_chart(
             fig,
-            width="stretch",
+            use_container_width=True,
             config={"displayModeBar": False},
         )
 
@@ -746,7 +746,7 @@ class FactorLibraryView:
         )
         st.plotly_chart(
             fig,
-            width="stretch",
+            use_container_width=True,
             config={"displayModeBar": False},
         )
 
@@ -862,7 +862,7 @@ class FactorLibraryView:
         fig.update_layout(height=350, showlegend=False, margin=dict(l=10, r=10, t=50, b=20))
         fig.update_xaxes(title=copy["count"])
         fig.update_yaxes(title=None)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 __all__ = [
     "FactorLibrarySnapshot",

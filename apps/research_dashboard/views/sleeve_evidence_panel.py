@@ -220,7 +220,7 @@ def _render_path(daily: pd.DataFrame, copy: dict, template: str) -> None:
         hovermode="x unified",
         legend={"orientation": "h", "y": 1.12, "x": 0},
     )
-    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
 
 
 def _render_split(split: pd.DataFrame) -> None:
@@ -250,7 +250,7 @@ def _render_split(split: pd.DataFrame) -> None:
              "Turnover (x)": "{:.1f}", "Mean gross": "{:.1%}"},
             na_rep="",
         ),
-        width="stretch", hide_index=True,
+        use_container_width=True, hide_index=True,
     )
 
 
@@ -267,7 +267,7 @@ def _render_yearly(yearly: pd.DataFrame, template: str) -> None:
         margin={"l": 20, "r": 20, "t": 20, "b": 20}, yaxis={"tickformat": ".0%"},
         legend={"orientation": "h", "y": 1.1, "x": 0},
     )
-    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
 
 
 def _render_member_chart(frame: pd.DataFrame, member_col: str, template: str) -> None:
@@ -287,7 +287,7 @@ def _render_member_chart(frame: pd.DataFrame, member_col: str, template: str) ->
         template=template, height=max(300, 26 * len(ordered)),
         margin={"l": 10, "r": 10, "t": 10, "b": 20}, xaxis={"tickformat": ".1%"},
     )
-    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
 
 
 def _contribution_extremes(frame: pd.DataFrame, count: int) -> pd.DataFrame:
@@ -324,7 +324,7 @@ def _render_config(config: dict[str, Any], lang: str) -> None:
          "Value" if lang == "EN" else "取值": value}
         for key, value in config.items() if key in labels
     ]
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     if config.get("sector_cap_reason"):
         st.caption(str(config["sector_cap_reason"]))
 
